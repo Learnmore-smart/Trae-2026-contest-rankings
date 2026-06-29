@@ -1,0 +1,43 @@
+{
+  "name": "trae-2026-contest-rankings",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "start": "next start",
+    "build": "next build",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/trae.extractors.test.ts tests/trae.matcher.test.ts tests/trae.judge.test.ts",
+    "trae:scrape:signup": "node --experimental-strip-types scripts/trae.ts scrape signup",
+    "trae:scrape:preliminary": "node --experimental-strip-types scripts/trae.ts scrape preliminary",
+    "trae:scrape:all": "node --experimental-strip-types scripts/trae.ts scrape all",
+    "trae:match": "node --experimental-strip-types scripts/trae.ts match",
+    "trae:judge": "node --experimental-strip-types scripts/trae.ts judge",
+    "trae:judge:changed": "node --experimental-strip-types scripts/trae.ts judge changed",
+    "trae:run-all": "node --experimental-strip-types scripts/trae.ts run-all"
+  },
+  "dependencies": {
+    "@next/env": "^15.3.4",
+    "cheerio": "^1.1.0",
+    "clsx": "^2.1.1",
+    "firebase-admin": "^13.4.0",
+    "lucide-react": "^0.468.0",
+    "next": "^15.3.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.1",
+    "@tailwindcss/postcss": "^4.1.10",
+    "@types/node": "^22.15.32",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "eslint": "^9.29.0",
+    "eslint-config-next": "^15.3.4",
+    "tailwindcss": "^4.1.10",
+    "typescript": "^5.8.3"
+  }
+}
