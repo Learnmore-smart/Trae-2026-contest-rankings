@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractBearerToken, isValidAdminToken } from "@/lib/trae/auth";
+import { writeBoardSnapshot } from "@/lib/trae/api";
 import { runTraeMatching } from "@/lib/trae/matcher";
 
 export const runtime = "nodejs";
@@ -10,7 +11,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    return NextResponse.json({ ok: true, result: await runTraeMatching() });
+    const result = await runTraeMatching();
+    await writeBoardSnapshot().catch((error) => console.error("[trae] writeBoardSnapshot failed:", error));
+    return NextResponse.json({ ok: true, result });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Match failed." },

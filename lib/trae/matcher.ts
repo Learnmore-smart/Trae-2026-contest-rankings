@@ -1,5 +1,9 @@
-import type { MatchMethod, MismatchRisk, TraeMatch, TraeTopic } from "./types.ts";
-import { getFirestoreDb, TRAE_COLLECTIONS, nowIso } from "./firestore.ts";
+import type { MatchMethod, MismatchRisk, TraeTopic } from "./types.ts";
+import { getDataConnectDb } from "./dataconnect.ts";
+import { getTopicsBySourceType, upsertMatch } from "@trae-contest/dataconnect-generated";
+import { getTraeConfig } from "./config.ts";
+import { fetchTopic, upsertTopic } from "./scraper.ts";
+import { findSignupRefsByUsername, normalizeUsername, resolveAuthorUsername } from "./signup-finder.ts";
 import { finishRun, startRun } from "./runs.ts";
 
 export interface MatchScore {
@@ -127,6 +131,46 @@ export function scoreTopicMatch(preliminary: TraeTopic, signup: TraeTopic): Matc
   };
 }
 
+/**
+ * Score a preliminary↔signup pair whose authorship is already confirmed to be the
+ * same person (matched via the forum's author index). Match *existence* no longer
+ * depends on title similarity — only the direction-consistency read does. A
+ * confirmed author whose Demo drifted far from their 报名 idea still matches, but
+ * surfaces as elevated mismatch risk, which is the signal we actually want.
+ */
+export function scoreConfirmedAuthorMatch(preliminary: TraeTopic, signup: TraeTopic): MatchScore {
+  const titleSimilarity = diceSimilarity(preliminary.title, signup.title);
+  const contentSimilarity = diceSimilarity(
+    preliminary.contentText.slice(0, 1200),
+    signup.contentText.slice(0, 1200)
+  );
+  const sameTrack = Boolean(preliminary.track && signup.track && preliminary.track === signup.track);
+
+  // Identity is already confirmed, so direction reads purely off creative
+  // continuity (title/content/track). Weights are higher than the fuzzy scorer's
+  // because there's no same-author bonus folded in here — a real idea→Demo
+  // continuation should still clear the low-risk band.
+  const directionConsistencyScore = clamp(
+    Math.round((titleSimilarity * 8 + contentSimilarity * 5 + (sameTrack ? 1 : 0)) * 10) / 10,
+    0,
+    10
+  );
+  // The small title/content bonus on confidence only breaks ties when an author
+  // posted more than one signup topic.
+  const matchConfidence = Math.round(clamp(88 + titleSimilarity * 8 + contentSimilarity * 4, 0, 100));
+
+  return {
+    signupTopicId: signup.id,
+    signupAuthorName: signup.authorName,
+    matchMethod: "same_author",
+    matchConfidence,
+    titleSimilarity: Math.round(titleSimilarity * 100),
+    directionConsistencyScore,
+    directionConsistencyComment: directionComment(directionConsistencyScore, preliminary, signup),
+    mismatchRisk: mismatchRiskFor(directionConsistencyScore, matchConfidence)
+  };
+}
+
 function noMatch(): MatchScore {
   return {
     signupTopicId: null,
@@ -140,64 +184,197 @@ function noMatch(): MatchScore {
   };
 }
 
-export async function runTraeMatching(): Promise<{ matchedCount: number; failedCount: number }> {
+const matchMethodMap = {
+  same_author: "SAME_AUTHOR",
+  title_similarity: "TITLE_SIMILARITY",
+  manual: "MANUAL",
+  none: "NONE"
+} as const;
+
+const mismatchRiskMap = {
+  none: "NONE",
+  low: "LOW",
+  medium: "MEDIUM",
+  high: "HIGH",
+  unknown: "UNKNOWN"
+} as const;
+
+/**
+ * A forum-sourced signup is authoritative by construction: both the `@username`
+ * search and the user-activity fallback are keyed to that exact user. When the
+ * fetched post still carries its username (JSON path) we re-check it; the
+ * HTML-fallback path has no username, so we trust the author-scoped source.
+ */
+function confirmsIdentity(signup: TraeTopic, username: string): boolean {
+  if (!signup.authorUsername) return true;
+  return normalizeUsername(signup.authorUsername) === normalizeUsername(username);
+}
+
+/**
+ * Ask the forum for a user's signup topics, fetch each candidate's full content,
+ * confirm identity, and cache it back to the DB so it shows in stats and the next
+ * run's cheap in-pool path. Caps candidates so one prolific author can't stall a run.
+ */
+async function fetchConfirmedSignups(username: string): Promise<TraeTopic[]> {
+  const refs = await findSignupRefsByUsername(username);
+  const confirmed: TraeTopic[] = [];
+  for (const ref of refs.slice(0, 3)) {
+    try {
+      const topic = await fetchTopic("signup", ref);
+      if (!confirmsIdentity(topic, username)) continue;
+      await upsertTopic(topic);
+      confirmed.push(topic);
+    } catch {
+      // Skip this candidate; another may still confirm.
+    }
+  }
+  return confirmed;
+}
+
+/** Run an async worker over items with a bounded number in flight, preserving order. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const runnerCount = Math.min(Math.max(1, limit), items.length || 1);
+  const runners = Array.from({ length: runnerCount }, async () => {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) break;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
+export async function runTraeMatching(): Promise<{
+  matchedCount: number;
+  failedCount: number;
+  forumMatchedCount: number;
+  forumLookups: number;
+}> {
   const run = await startRun("match", null);
-  const db = getFirestoreDb();
-  let matchedCount = 0;
-  let failedCount = 0;
+  const dc = getDataConnectDb();
+  const config = getTraeConfig();
+  const forumCap = config.maxForumLookupsPerRun; // <= 0 ⇒ unlimited
+  let forumLookups = 0;
 
   try {
-    const [preliminarySnapshot, signupSnapshot] = await Promise.all([
-      db.collection(TRAE_COLLECTIONS.topics).where("sourceType", "==", "preliminary").get(),
-      db.collection(TRAE_COLLECTIONS.topics).where("sourceType", "==", "signup").get()
+    const [preliminaryRes, signupRes] = await Promise.all([
+      getTopicsBySourceType(dc as any, { sourceType: "PRELIMINARY" } as any),
+      getTopicsBySourceType(dc as any, { sourceType: "SIGNUP" } as any)
     ]);
-    const preliminaries = preliminarySnapshot.docs.map((doc) => doc.data() as TraeTopic);
-    const signups = signupSnapshot.docs.map((doc) => doc.data() as TraeTopic);
+    const preliminaries = (preliminaryRes.data.topics ?? []) as unknown as TraeTopic[];
+    const signups = (signupRes.data.topics ?? []) as unknown as TraeTopic[];
 
-    for (const preliminary of preliminaries) {
-      try {
-        let best = noMatch();
-        for (const signup of signups) {
-          const score = scoreTopicMatch(preliminary, signup);
-          if (score.matchConfidence > best.matchConfidence) best = score;
+    // Growing pool: forum-discovered signups join it so later preliminaries by the
+    // same author match via the cheap in-memory path instead of re-hitting the forum.
+    const signupPool = [...signups];
+    const signupPoolIds = new Set(signupPool.map((signup) => signup.id));
+    const forumSourcedIds = new Set<string>();
+    // One in-flight lookup per username — every preliminary by that author awaits
+    // the same promise, so duplicate authors never trigger duplicate forum calls.
+    const lookupByUsername = new Map<string, Promise<TraeTopic[]>>();
+
+    const bestInPool = (preliminary: TraeTopic): MatchScore => {
+      let best = noMatch();
+      for (const signup of signupPool) {
+        const score = scoreTopicMatch(preliminary, signup);
+        if (score.matchConfidence > best.matchConfidence) best = score;
+      }
+      return best.matchConfidence >= 35 ? best : noMatch();
+    };
+
+    const lookupSignups = (username: string): Promise<TraeTopic[]> => {
+      const key = normalizeUsername(username);
+      const existing = lookupByUsername.get(key);
+      if (existing) return existing;
+      forumLookups += 1;
+      const pending = fetchConfirmedSignups(username).then((confirmed) => {
+        for (const signup of confirmed) {
+          forumSourcedIds.add(signup.id);
+          if (!signupPoolIds.has(signup.id)) {
+            signupPool.push(signup);
+            signupPoolIds.add(signup.id);
+          }
         }
-        if (best.matchConfidence < 35) best = noMatch();
-        const now = nowIso();
-        const doc: TraeMatch = {
+        return confirmed;
+      });
+      lookupByUsername.set(key, pending);
+      return pending;
+    };
+
+    const outcomes = await mapWithConcurrency(preliminaries, config.forumLookupConcurrency, async (preliminary) => {
+      try {
+        let best = bestInPool(preliminary);
+        const hasConfidentAuthorMatch =
+          Boolean(best.signupTopicId) && best.matchMethod === "same_author" && best.matchConfidence >= 60;
+
+        // Reach for the forum only when the cheap in-pool path didn't confidently
+        // find this author's signup. The cap (if any) gates *new* authors; an
+        // already in-flight/cached lookup is free to reuse.
+        if (!hasConfidentAuthorMatch) {
+          const username = await resolveAuthorUsername(preliminary);
+          if (username) {
+            const key = normalizeUsername(username);
+            const capReached = forumCap > 0 && forumLookups >= forumCap;
+            if (lookupByUsername.has(key) || !capReached) {
+              const confirmed = await lookupSignups(username);
+              for (const signup of confirmed) {
+                const score = scoreConfirmedAuthorMatch(preliminary, signup);
+                if (score.matchConfidence > best.matchConfidence) best = score;
+              }
+            }
+          }
+        }
+
+        await upsertMatch(dc as any, {
           id: preliminary.id,
           preliminaryTopicId: preliminary.id,
           signupTopicId: best.signupTopicId,
           preliminaryAuthorName: preliminary.authorName,
           signupAuthorName: best.signupAuthorName,
-          matchMethod: best.matchMethod,
+          matchMethod: matchMethodMap[best.matchMethod],
           matchConfidence: best.matchConfidence,
-          titleSimilarity: best.titleSimilarity,
-          directionConsistencyScore: best.directionConsistencyScore,
-          directionConsistencyComment: best.directionConsistencyComment,
-          mismatchRisk: best.mismatchRisk,
-          createdAt: now,
-          updatedAt: now
-        };
-        await db.collection(TRAE_COLLECTIONS.matches).doc(preliminary.id).set(doc, { merge: true });
-        if (doc.signupTopicId) matchedCount += 1;
+          titleSimilarity: best.titleSimilarity ?? null,
+          directionConsistencyScore: best.directionConsistencyScore ?? null,
+          directionConsistencyComment: best.directionConsistencyComment ?? null,
+          mismatchRisk: mismatchRiskMap[best.mismatchRisk]
+        } as any);
+
+        const matched = Boolean(best.signupTopicId);
+        const forumMatched = matched && forumSourcedIds.has(best.signupTopicId as string);
+        return { matched, forumMatched, failed: false };
       } catch {
-        failedCount += 1;
+        return { matched: false, forumMatched: false, failed: true };
       }
-    }
+    });
+
+    const matchedCount = outcomes.filter((outcome) => outcome.matched).length;
+    const forumMatchedCount = outcomes.filter((outcome) => outcome.forumMatched).length;
+    const failedCount = outcomes.filter((outcome) => outcome.failed).length;
 
     await finishRun(run.id, {
       status: failedCount > 0 ? "partial" : "success",
       matchedCount,
       failedCount,
-      logs: [`Matched ${matchedCount} preliminary topics; ${failedCount} failures.`]
+      logs: [
+        `Matched ${matchedCount}/${preliminaries.length} preliminary topics (${forumMatchedCount} via forum author search); ${failedCount} failures.`,
+        `Forum author lookups: ${forumLookups} unique${forumCap > 0 ? ` (cap ${forumCap})` : " (unlimited)"}; concurrency ${config.forumLookupConcurrency}, min ${config.forumMinRequestMs}ms/req.`
+      ]
     });
-    return { matchedCount, failedCount };
+    return { matchedCount, failedCount, forumMatchedCount, forumLookups };
   } catch (error) {
     await finishRun(run.id, {
       status: "error",
       error: error instanceof Error ? error.message : String(error),
-      matchedCount,
-      failedCount
+      matchedCount: 0,
+      failedCount: 0
     });
     throw error;
   }

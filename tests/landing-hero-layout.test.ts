@@ -1,0 +1,97 @@
+import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import test from "node:test";
+
+const component = readFileSync(join(process.cwd(), "app/trae-contest-2026/contest-client.tsx"), "utf8");
+const css = readFileSync(join(process.cwd(), "app/globals.css"), "utf8");
+const themePath = join(process.cwd(), "app/theme.css");
+const theme = existsSync(themePath) ? readFileSync(themePath, "utf8") : "";
+
+test("landing hero exposes the command-center layout hooks", () => {
+  assert.match(component, /className="[^"]*\btech-shell\b[^"]*"/);
+  assert.match(component, /className="landing-hero-copy"/);
+  assert.match(component, /className="landing-hero-title/);
+  assert.match(component, /className="landing-hero-side"/);
+  assert.match(component, /className="hero-command-deck"/);
+  assert.match(component, /className="hero-signal-strip"/);
+  assert.match(component, /className="telemetry-grid"/);
+  assert.match(component, /className="hero-actions"/);
+  assert.doesNotMatch(component, /className="purpose-progress"/);
+  assert.match(component, /className="ranking-command-shell"/);
+});
+
+test("landing hero CSS renders a command deck with a right-side control rail", () => {
+  assert.match(css, /\.landing-hero\s*{[\s\S]*?align-items:\s*start;/);
+  assert.match(css, /\.hero-command-deck\s*{[\s\S]*?display:\s*grid;/);
+  assert.match(css, /\.hero-signal-strip\s*{[\s\S]*?grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/);
+  assert.match(css, /\.landing-hero-side\s*{[\s\S]*?grid-column:\s*2;/);
+  assert.match(css, /\.landing-hero-side\s*{[\s\S]*?align-self:\s*start;/);
+  assert.match(css, /\.telemetry-grid\s*{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/);
+  assert.match(css, /\.hero-actions\s*{[\s\S]*?justify-content:\s*flex-start;/);
+});
+
+test("tech shell keeps a single-column mobile fallback", () => {
+  assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.landing-hero-side\s*{[\s\S]*?grid-column:\s*1;/);
+  assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.hero-signal-strip\s*{[\s\S]*?grid-template-columns:\s*1fr;/);
+  assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.telemetry-grid\s*{[\s\S]*?grid-template-columns:\s*1fr;/);
+});
+
+test("mobile nav and hero rules prevent horizontal overflow", () => {
+  assert.match(component, /className="nav-metrics__detail/);
+  assert.match(css, /html,\s*body\s*{[\s\S]*?overflow-x:\s*hidden;/);
+  assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.site-nav\s*{[\s\S]*?max-width:\s*100vw;[\s\S]*?overflow-x:\s*hidden;/);
+  assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.brand-code\s*{[\s\S]*?display:\s*none;/);
+  assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.nav-metrics__detail\s*{[\s\S]*?display:\s*none;/);
+  assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.landing-hero-title\s*{[\s\S]*?font-size:\s*clamp\(/);
+  assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.landing-hero-title\s*{[\s\S]*?overflow-wrap:\s*anywhere;/);
+  assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.hero-actions \.control-button\s*{[\s\S]*?width:\s*100%;/);
+});
+
+test("contest theme is split into a light-mode theme file", () => {
+  assert.ok(existsSync(themePath), "app/theme.css should exist");
+  assert.match(css, /@import "\.\/theme\.css";/);
+  assert.match(theme, /color-scheme:\s*light;/);
+  assert.match(theme, /--page-bg:/);
+  assert.match(theme, /--ink:/);
+});
+
+test("ranking list uses row layout hooks and circular score rings", () => {
+  assert.match(component, /function ScoreRing/);
+  assert.match(component, /className="score-ring/);
+  assert.match(component, /--score-percent/);
+  assert.match(component, /"ranking-list"/);
+  assert.match(component, /className=\{`rank-row/);
+  assert.match(component, /className="ranking-inline-meta"/);
+
+  assert.match(css, /\.ranking-list\s*{[\s\S]*?display:\s*grid;/);
+  assert.match(css, /\.rank-row\s*{[\s\S]*?grid-template-columns:/);
+  assert.match(css, /\.score-ring__track\s*{[\s\S]*?conic-gradient\(/);
+  assert.doesNotMatch(component, /className="ranking-result-strip"/);
+});
+
+test("ranking controls stay compact and cards open details directly", () => {
+  assert.match(component, /function NavMenu/);
+  assert.match(component, /ariaLabel=\{t\.chooseLanguage\}/);
+  assert.match(component, /ariaLabel=\{t\.chooseTheme\}/);
+  assert.match(component, /className="ranking-filters surface-panel"[\s\S]*<ViewToggle value=\{viewMode\} onChange=\{setViewMode\}/);
+  assert.match(component, /const openDetail = \(\) => router\.push\(detailHref\);/);
+  assert.match(component, /onClick=\{openDetail\}/);
+  assert.match(component, /role="link"/);
+  assert.match(component, /tabIndex=\{0\}/);
+  assert.match(component, /event\.key === "Enter"/);
+
+  assert.match(css, /\.main-tabs\s*{[\s\S]*?border-top-left-radius:\s*0;/);
+  assert.match(css, /\.ranking-filters\s*{[\s\S]*?display:\s*flex;/);
+  assert.match(css, /\.ranking-filters\s*{[\s\S]*?flex-wrap:\s*wrap;/);
+  assert.match(css, /\.rank-row\s*{[\s\S]*?box-shadow:\s*none;/);
+  assert.match(css, /\.rank-row:hover\s*{[\s\S]*?border-color:/);
+  assert.doesNotMatch(css, /\.rank-row:hover\s*{[\s\S]*?transform:/);
+  assert.match(theme, /--shadow-card:\s*none;/);
+
+  // Assert details page theming and dropdowns
+  const detailComponent = readFileSync(join(process.cwd(), "app/trae-contest-2026/project/project-detail-client.tsx"), "utf8");
+  assert.match(detailComponent, /className="[^"]*\btech-shell\b[^"]*"/);
+  assert.match(detailComponent, /useContestTheme\(\)/);
+  assert.match(detailComponent, /<NavMenu/);
+});

@@ -9,5 +9,5 @@ ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
-EXPOSE 3000
+EXPOSE 5000
 CMD ["npm", "run", "start"]

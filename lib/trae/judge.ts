@@ -1,17 +1,26 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import { getModelSequence, getTraeConfig } from "./config.ts";
-import { getFirestoreDb, nowIso, TRAE_COLLECTIONS } from "./firestore.ts";
+import { createHash } from "node:crypto";
+import { getTraeConfig } from "./config.ts";
+import { getDataConnectDb, nowIso } from "./dataconnect.ts";
+import { callLLMWithFallback, LLMFallbackError } from "./llm.ts";
 import { finishRun, startRun } from "./runs.ts";
+import {
+  getBoardData,
+  upsertEvaluation,
+  updateTopicEvaluationState,
+  upsertModelTokenUsage,
+  type UpsertEvaluationVariables
+} from "@trae-contest/dataconnect-generated";
 import {
   evaluationOutputSchema,
   type EvaluationOutput,
   type TraeEvaluation,
+  type TraeLLMCallLog,
   type TraeMatch,
   type TraeTopic
 } from "./types.ts";
 
 export const PROMPT_VERSION = "trae-contest-2026-v1";
-let openRouterRequestsThisProcess = 0;
 
 export function parseEvaluationJson(raw: string): EvaluationOutput {
   const candidate = extractJsonCandidate(raw);
@@ -125,85 +134,140 @@ ${topic.contentText.slice(0, 12000)}
 }`;
 }
 
-async function callOpenRouter(model: string, prompt: string, attempt: number): Promise<string> {
-  const config = getTraeConfig();
-  if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is not configured.");
-  if (config.openRouterDailyCap > 0 && openRouterRequestsThisProcess >= config.openRouterDailyCap) {
-    throw new Error("TRAE_OPENROUTER_DAILY_CAP reached for this process.");
-  }
+const JUDGE_SYSTEM_PROMPT = "You return strict JSON only. Do not include Markdown fences or comments.";
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60_000);
-  try {
-    openRouterRequestsThisProcess += 1;
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${config.openRouterApiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": config.openRouterSiteUrl,
-        "X-Title": config.openRouterAppName
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: "system",
-            content: "You return strict JSON only. Do not include Markdown fences or comments."
-          },
-          { role: "user", content: prompt }
-        ],
-        temperature: 0.2,
-        response_format: { type: "json_object" }
-      })
-    });
-
-    const text = await response.text();
-    if (!response.ok) {
-      if ([429, 500, 502, 503, 504].includes(response.status)) {
-        await sleep(Math.min(30_000, 1000 * 2 ** attempt));
-      }
-      throw new Error(`OpenRouter ${response.status}: ${text.slice(0, 500)}`);
-    }
-
-    const json = JSON.parse(text) as { choices?: Array<{ message?: { content?: string } }> };
-    const content = json.choices?.[0]?.message?.content;
-    if (!content) throw new Error("OpenRouter response did not include message content.");
-    return content;
-  } finally {
-    clearTimeout(timeout);
-  }
+/** Tokens from the call that actually succeeded (errorReason === null), or the last attempt. */
+function tokensFromLogs(callLogs: TraeLLMCallLog[]): { inputTokens: number; outputTokens: number } {
+  const winner = [...callLogs].reverse().find((log) => log.errorReason === null) ?? callLogs.at(-1);
+  return {
+    inputTokens: winner?.inputTokens ?? 0,
+    outputTokens: winner?.outputTokens ?? 0
+  };
 }
 
-async function judgeOneTopic(topic: TraeTopic, match: TraeMatch | null): Promise<TraeEvaluation> {
+export async function judgeOneTopic(topic: TraeTopic, match: TraeMatch | null): Promise<TraeEvaluation> {
   const config = getTraeConfig();
   const prompt = buildJudgePrompt(topic, match);
-  let lastError: string | null = null;
+  const result = await callLLMWithFallback({
+    config,
+    messages: [
+      { role: "system", content: JUDGE_SYSTEM_PROMPT },
+      { role: "user", content: prompt }
+    ],
+    validateContent: parseEvaluationJson
+  });
+  const createdAt = nowIso();
+  const { inputTokens, outputTokens } = tokensFromLogs(result.callLogs);
+  return {
+    id: `${topic.id}_${Date.now()}`,
+    topicId: topic.id,
+    sourceType: "preliminary",
+    provider: result.provider,
+    model: result.model,
+    promptVersion: PROMPT_VERSION,
+    ...result.parsed,
+    promptText: prompt,
+    systemPrompt: JUDGE_SYSTEM_PROMPT,
+    inputTokens,
+    outputTokens,
+    rawModelResponse: result.content,
+    llmCallLogs: result.callLogs,
+    error: null,
+    createdAt
+  };
+}
 
-  for (const [index, model] of getModelSequence(config).entries()) {
-    try {
-      const rawModelResponse = await callOpenRouter(model, prompt, index);
-      const parsed = parseEvaluationJson(rawModelResponse);
-      const createdAt = nowIso();
-      return {
-        id: `${topic.id}_${Date.now()}`,
-        topicId: topic.id,
-        sourceType: "preliminary",
-        model,
-        promptVersion: PROMPT_VERSION,
-        ...parsed,
-        rawModelResponse,
-        error: null,
-        createdAt
-      };
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-      await sleep(Math.min(20_000, 800 * 2 ** index));
+const providerMap = {
+  nvidia: "NVIDIA",
+  openrouter: "OPENROUTER"
+} as const;
+
+const providerRevMap = {
+  "NVIDIA": "nvidia",
+  "OPENROUTER": "openrouter"
+} as const;
+
+const competitionLevelMap = {
+  "极具竞争力": "HIGHLY_COMPETITIVE",
+  "有竞争力": "COMPETITIVE",
+  "竞争力一般": "AVERAGE",
+  "较弱": "WEAK"
+} as const;
+
+const competitionLevelRevMap = {
+  "HIGHLY_COMPETITIVE": "极具竞争力",
+  "COMPETITIVE": "有竞争力",
+  "AVERAGE": "竞争力一般",
+  "WEAK": "较弱"
+} as const;
+
+function toUpsertEvaluationVariables(evaluation: TraeEvaluation): UpsertEvaluationVariables {
+  return {
+    id: evaluation.id,
+    topicId: evaluation.topicId,
+    sourceType: evaluation.sourceType,
+    provider: evaluation.provider ? (providerMap[evaluation.provider] as UpsertEvaluationVariables["provider"]) : null,
+    model: evaluation.model,
+    promptVersion: evaluation.promptVersion,
+    totalScore: evaluation.totalScore,
+    innovationScore: evaluation.innovationScore,
+    practicalityScore: evaluation.practicalityScore,
+    completionScore: evaluation.completionScore,
+    designScore: evaluation.designScore,
+    complianceRiskScore: evaluation.complianceRiskScore,
+    directionConsistencyScore: evaluation.directionConsistencyScore ?? null,
+    confidenceScore: evaluation.confidenceScore,
+    competitionLevel: competitionLevelMap[evaluation.competitionLevel] as UpsertEvaluationVariables["competitionLevel"],
+    summary: evaluation.summary,
+    strengths: evaluation.strengths ?? [],
+    weaknesses: evaluation.weaknesses ?? [],
+    suggestions: evaluation.suggestions ?? [],
+    complianceRisks: evaluation.complianceRisks ?? [],
+    dimensionComments: evaluation.dimensionComments ?? null,
+    matchComment: evaluation.matchComment ?? null,
+    promptText: null,
+    systemPrompt: null,
+    inputTokens: evaluation.inputTokens ?? null,
+    outputTokens: evaluation.outputTokens ?? null,
+    rawModelResponse: evaluation.rawModelResponse,
+    llmCallLogs: evaluation.llmCallLogs ?? [],
+    error: evaluation.error ?? null
+  };
+}
+
+async function recordTokenUsage(callLogs: TraeLLMCallLog[]): Promise<void> {
+  const dc = getDataConnectDb();
+  const totals = new Map<string, { provider: TraeLLMCallLog["provider"]; model: string; input: number; output: number }>();
+  for (const log of callLogs) {
+    const input = log.inputTokens ?? 0;
+    const output = log.outputTokens ?? 0;
+    if (input <= 0 && output <= 0) continue;
+    const key = `${log.provider}:${log.model}`;
+    const existing = totals.get(key);
+    if (existing) {
+      existing.input += input;
+      existing.output += output;
+    } else {
+      totals.set(key, {
+        provider: log.provider,
+        model: log.model,
+        input,
+        output
+      });
     }
   }
 
-  throw new Error(lastError ?? "All OpenRouter models failed.");
+  if (!totals.size) return;
+  for (const [key, usage] of totals) {
+    const id = `usage_${Date.now()}_${createHash("sha256").update(key).digest("hex").slice(0, 10)}`;
+    await upsertModelTokenUsage(dc as any, {
+      id,
+      provider: providerMap[usage.provider],
+      model: usage.model,
+      input: usage.input,
+      output: usage.output
+    } as any);
+  }
 }
 
 export interface JudgeOptions {
@@ -216,64 +280,107 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
   const max = options.max ?? config.maxJudgePerRun;
   const mode = options.mode ?? "unjudged";
   const run = await startRun("judge", "preliminary");
-  const db = getFirestoreDb();
+  const dc = getDataConnectDb();
   let evaluatedCount = 0;
   let failedCount = 0;
 
   try {
-    const [topicSnapshot, evaluationSnapshot, matchSnapshot] = await Promise.all([
-      db.collection(TRAE_COLLECTIONS.topics).where("sourceType", "==", "preliminary").get(),
-      db.collection(TRAE_COLLECTIONS.evaluations).where("sourceType", "==", "preliminary").get(),
-      db.collection(TRAE_COLLECTIONS.matches).get()
-    ]);
+    const boardRes = await getBoardData(dc as any);
+    const rawTopics = boardRes.data.topics ?? [];
 
-    const latestEvaluations = new Map<string, TraeEvaluation>();
-    for (const doc of evaluationSnapshot.docs) {
-      const evaluation = doc.data() as TraeEvaluation;
-      const existing = latestEvaluations.get(evaluation.topicId);
-      if (!existing || evaluation.createdAt > existing.createdAt) latestEvaluations.set(evaluation.topicId, evaluation);
-    }
-    const matches = new Map(matchSnapshot.docs.map((doc) => [doc.id, doc.data() as TraeMatch]));
+    const mapped = rawTopics.map((t) => {
+      const latestEval = t.evaluations_on_topic?.[0];
+      const match = t.match_on_preliminaryTopic;
 
-    const topics = topicSnapshot.docs
-      .map((doc) => doc.data() as TraeTopic)
-      .filter((topic) => {
-        const latest = latestEvaluations.get(topic.id);
-        if (mode === "low-confidence") return Boolean(latest && latest.confidenceScore < 55);
+      const mappedTopic: TraeTopic = {
+        ...t,
+        sourceType: t.sourceType.toLowerCase() as any,
+        status: t.status.toLowerCase() as any,
+        competitionLevel: t.competitionLevel ? competitionLevelRevMap[t.competitionLevel] : null,
+        evaluatedAt: t.evaluatedAt ?? null,
+        createdAtExternal: t.createdAtExternal ?? null,
+        lastActivityAtExternal: t.lastActivityAtExternal ?? null
+      } as any;
+
+      const mappedEval: TraeEvaluation | undefined = latestEval ? {
+        ...latestEval,
+        provider: latestEval.provider ? providerRevMap[latestEval.provider] : null,
+        competitionLevel: competitionLevelRevMap[latestEval.competitionLevel]
+      } as any : undefined;
+
+      const mappedMatch: TraeMatch | null = match ? {
+        ...match,
+        matchMethod: match.matchMethod.toLowerCase() as any,
+        mismatchRisk: match.mismatchRisk.toLowerCase() as any
+      } as any : null;
+
+      return {
+        topic: mappedTopic,
+        latestEvaluation: mappedEval,
+        match: mappedMatch
+      };
+    });
+
+    const topics = mapped
+      .filter(({ topic, latestEvaluation }) => {
+        if (mode === "low-confidence") return Boolean(latestEvaluation && latestEvaluation.confidenceScore < 55);
         if (mode === "changed") return topic.status === "needs_judging" || topic.status === "judge_error";
-        return topic.status === "needs_judging" || topic.status === "judge_error" || !latest;
+        return topic.status === "needs_judging" || topic.status === "judge_error" || !latestEvaluation;
       })
       .slice(0, max);
 
-    for (const topic of topics) {
-      const delayMs = Math.ceil(60_000 / Math.max(1, config.openRouterRpm));
+    for (const topicObj of topics) {
+      const delayMs = Math.ceil(60_000 / Math.max(1, config.aiRpmLimit));
       if (evaluatedCount + failedCount > 0) await sleep(delayMs);
       try {
-        const evaluation = await judgeOneTopic(topic, matches.get(topic.id) ?? null);
-        await db.collection(TRAE_COLLECTIONS.evaluations).doc(evaluation.id).set(evaluation);
-        await db.collection(TRAE_COLLECTIONS.topics).doc(topic.id).set(
-          {
-            status: "judged",
-            updatedAt: nowIso()
-          },
-          { merge: true }
-        );
+        const evaluation = await judgeOneTopic(topicObj.topic, topicObj.match);
+        await recordTokenUsage(evaluation.llmCallLogs ?? []);
+
+        await upsertEvaluation(dc as any, toUpsertEvaluationVariables(evaluation));
+
+        await updateTopicEvaluationState(dc as any, {
+          id: topicObj.topic.id,
+          status: "JUDGED",
+          totalScore: evaluation.totalScore,
+          innovationScore: evaluation.innovationScore,
+          practicalityScore: evaluation.practicalityScore,
+          completionScore: evaluation.completionScore,
+          designScore: evaluation.designScore,
+          complianceRiskScore: evaluation.complianceRiskScore,
+          directionConsistencyScore: evaluation.directionConsistencyScore ?? null,
+          confidenceScore: evaluation.confidenceScore,
+          competitionLevel: competitionLevelMap[evaluation.competitionLevel]
+        } as any);
+
         evaluatedCount += 1;
       } catch (error) {
         failedCount += 1;
-        await db.collection(TRAE_COLLECTIONS.topics).doc(topic.id).set(
-          {
-            status: "judge_error",
-            updatedAt: nowIso()
-          },
-          { merge: true }
-        );
         const errorText = error instanceof Error ? error.message : String(error);
+        const llmCallLogs = error instanceof LLMFallbackError ? error.callLogs : [];
+        const lastCallLog = llmCallLogs.at(-1);
+        const failedPrompt = buildJudgePrompt(topicObj.topic, topicObj.match);
+        const failedTokens = tokensFromLogs(llmCallLogs);
+
+        await updateTopicEvaluationState(dc as any, {
+          id: topicObj.topic.id,
+          status: "JUDGE_ERROR",
+          totalScore: -1,
+          innovationScore: -1,
+          practicalityScore: -1,
+          completionScore: -1,
+          designScore: -1,
+          complianceRiskScore: -1,
+          directionConsistencyScore: null,
+          confidenceScore: -1,
+          competitionLevel: null
+        } as any);
+
         const failedEvaluation: TraeEvaluation = {
-          id: `${topic.id}_${Date.now()}_error`,
-          topicId: topic.id,
+          id: `${topicObj.topic.id}_${Date.now()}_error`,
+          topicId: topicObj.topic.id,
           sourceType: "preliminary",
-          model: getModelSequence(config)[0] ?? "unknown",
+          provider: lastCallLog?.provider ?? null,
+          model: lastCallLog?.model ?? "unknown",
           promptVersion: PROMPT_VERSION,
           totalScore: 0,
           innovationScore: 0,
@@ -296,11 +403,36 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
             design: "未评分"
           },
           matchComment: null,
-          rawModelResponse: "",
+          promptText: failedPrompt,
+          systemPrompt: JUDGE_SYSTEM_PROMPT,
+          inputTokens: failedTokens.inputTokens,
+          outputTokens: failedTokens.outputTokens,
+          rawModelResponse: lastCallLog?.rawResponse ?? "",
+          llmCallLogs,
           error: errorText,
           createdAt: nowIso()
         };
-        await db.collection(TRAE_COLLECTIONS.evaluations).doc(failedEvaluation.id).set(failedEvaluation);
+
+        await recordTokenUsage(llmCallLogs);
+
+        const failedEvaluationInput = toUpsertEvaluationVariables(failedEvaluation);
+        await upsertEvaluation(dc as any, {
+          ...failedEvaluationInput,
+          provider: failedEvaluation.provider ? providerMap[failedEvaluation.provider] : null,
+          competitionLevel: competitionLevelMap[failedEvaluation.competitionLevel],
+          strengths: [],
+          weaknesses: ["模型调用或 JSON 校验失败"],
+          suggestions: ["稍后重试评分"],
+          complianceRisks: [],
+          llmCallLogs,
+          dimensionComments: failedEvaluation.dimensionComments,
+          promptText: failedPrompt,
+          systemPrompt: JUDGE_SYSTEM_PROMPT,
+          inputTokens: failedTokens.inputTokens,
+          outputTokens: failedTokens.outputTokens,
+          matchComment: null,
+          error: errorText
+        } as any);
       }
     }
 

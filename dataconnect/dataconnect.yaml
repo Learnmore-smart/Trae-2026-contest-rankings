@@ -1,0 +1,16 @@
+# Firebase SQL Connect service configuration.
+# Values discovered via the Data Connect API (firebasedataconnect.googleapis.com).
+
+specVersion: "v1alpha"
+serviceId: "trae-contest-ranking-2026-service"
+location: "asia-east1"
+
+schema:
+  source: "./schema"
+  datasource:
+    postgresql:
+      database: "trae-contest-ranking-2026-database"
+      cloudSql:
+        instanceId: "trae-contest-ranking-2026-instance"
+
+connectorDirs: ["./connector"]

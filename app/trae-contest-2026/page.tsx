@@ -5,5 +5,5 @@ export const metadata = {
 };
 
 export default function TraeContestPage() {
-  return <ContestClient />;
+  return <ContestClient activeTab="landing" />;
 }

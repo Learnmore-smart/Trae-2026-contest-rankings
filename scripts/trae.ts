@@ -1,8 +1,10 @@
-import { loadEnvConfig } from "@next/env";
+import nextEnv from "@next/env";
 import { judgeChangedTraeTopics } from "../lib/trae/judge.ts";
 import { runTraeMatching } from "../lib/trae/matcher.ts";
 import { scrapeAllTraeSources, scrapeTraeSource } from "../lib/trae/scraper.ts";
 import type { TraeSourceType } from "../lib/trae/types.ts";
+
+const { loadEnvConfig } = nextEnv;
 
 loadEnvConfig(process.cwd());
 

@@ -12,7 +12,13 @@ const compat = new FlatCompat({
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
-    ignores: [".next/**", "node_modules/**", "coverage/**", "next-env.d.ts"]
+    ignores: [".next/**", "node_modules/**", "coverage/**", "next-env.d.ts", "lib/dataconnect-generated/**"]
+  },
+  {
+    files: ["lib/trae/api.ts", "lib/trae/judge.ts", "lib/trae/matcher.ts", "lib/trae/runs.ts", "lib/trae/scraper.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off"
+    }
   }
 ];
 

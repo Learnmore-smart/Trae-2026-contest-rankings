@@ -1,0 +1,33 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5000,
+      "autoPort": false
+    },
+    {
+      "name": "preview-5055",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "dev", "-p", "5055"],
+      "port": 5055,
+      "autoPort": false
+    },
+    {
+      "name": "preview-5060",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "dev", "-p", "5060"],
+      "port": 5060,
+      "autoPort": false
+    },
+    {
+      "name": "preview-5070",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "dev", "-p", "5070"],
+      "port": 5070,
+      "autoPort": false
+    }
+  ]
+}

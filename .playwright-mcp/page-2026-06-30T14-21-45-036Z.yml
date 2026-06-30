@@ -1,0 +1,140 @@
+- main [ref=e2]:
+  - navigation [ref=e3]:
+    - generic [ref=e4]:
+      - tablist "Main sections" [ref=e5]:
+        - tab "首页" [ref=e6] [cursor=pointer]
+        - tab "榜单" [selected] [ref=e7] [cursor=pointer]
+      - generic [ref=e8]:
+        - generic [ref=e10]: TRAE 创造力大赛
+        - generic [ref=e11]: SYS/26
+    - generic [ref=e12]:
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - text: 词元 0
+          - generic [ref=e15]: · 输入 0 / 输出 0
+        - generic [ref=e16]: "在线: 0"
+      - generic [ref=e17]:
+        - button "切换语言" [ref=e18] [cursor=pointer]:
+          - img [ref=e20]
+          - generic [ref=e23]: 中文
+          - img [ref=e24]
+        - menu:
+          - menuitemradio "中文" [checked]:
+            - generic: 中文
+            - img
+          - menuitemradio "English":
+            - generic: English
+      - generic [ref=e26]:
+        - button "切换主题" [ref=e27] [cursor=pointer]:
+          - img [ref=e29]
+          - img [ref=e35]
+        - menu:
+          - menuitemradio "浅色" [checked]:
+            - generic:
+              - generic:
+                - img
+              - text: 浅色
+            - img
+          - menuitemradio "深色":
+            - generic:
+              - generic:
+                - img
+              - text: 深色
+          - menuitemradio "跟随系统":
+            - generic:
+              - generic:
+                - img
+              - text: 跟随系统
+  - generic [ref=e38]:
+    - generic [ref=e39]:
+      - generic [ref=e40]:
+        - paragraph [ref=e41]: 榜单
+        - heading "已评分 0/0" [level=1] [ref=e42]
+        - paragraph [ref=e43]: "最后更新: 暂无"
+      - tablist "Contest phase" [ref=e44]:
+        - tab "初赛 进行中" [selected] [ref=e45] [cursor=pointer]:
+          - generic [ref=e46]: 初赛
+          - generic [ref=e47]: 进行中
+        - tab "复赛 7 月 15 日开启 · 0 天" [ref=e48] [cursor=pointer]:
+          - generic [ref=e49]: 复赛
+          - generic [ref=e50]: 7 月 15 日开启 · 0 天
+        - tab "总决赛 赛制待定" [ref=e51] [cursor=pointer]:
+          - generic [ref=e52]: 总决赛
+          - generic [ref=e53]: 赛制待定
+      - button "开始评分" [ref=e55] [cursor=pointer]:
+        - img [ref=e56]
+        - text: 开始评分
+    - generic [ref=e61]: 免责声明：本站评分由 AI 根据 TRAE 中文社区公开帖子内容生成，仅供学习、观摩和参考，不代表 TRAE 官方结果，也不冒充官方评分或预测最终名次。
+    - generic [ref=e62]:
+      - generic [ref=e63]:
+        - img [ref=e64]
+        - textbox [ref=e67]:
+          - /placeholder: 搜索作品 / 作者 / 赛道 / 标签
+      - generic [ref=e68]:
+        - button "赛道 全部赛道" [ref=e69] [cursor=pointer]:
+          - generic [ref=e70]:
+            - img [ref=e72]
+            - generic [ref=e75]:
+              - generic [ref=e76]: 赛道
+              - generic [ref=e77]: 全部赛道
+          - img [ref=e78]
+        - listbox:
+          - button "全部赛道":
+            - generic: 全部赛道
+            - img
+          - button "效率工具":
+            - generic: 效率工具
+          - button "创意娱乐":
+            - generic: 创意娱乐
+          - button "教育学习":
+            - generic: 教育学习
+          - button "生活服务":
+            - generic: 生活服务
+          - button "开发者工具":
+            - generic: 开发者工具
+          - button "硬件交互":
+            - generic: 硬件交互
+          - button "AI 应用":
+            - generic: AI 应用
+          - button "游戏":
+            - generic: 游戏
+          - button "公益":
+            - generic: 公益
+          - button "商业":
+            - generic: 商业
+      - generic [ref=e80]:
+        - button "排序 综合分" [ref=e81] [cursor=pointer]:
+          - generic [ref=e82]:
+            - img [ref=e84]
+            - generic [ref=e86]:
+              - generic [ref=e87]: 排序
+              - generic [ref=e88]: 综合分
+          - img [ref=e89]
+        - listbox:
+          - button "综合分":
+            - generic: 综合分
+            - img
+          - button "创新性":
+            - generic: 创新性
+          - button "实用性":
+            - generic: 实用性
+          - button "完成度":
+            - generic: 完成度
+          - button "设计体验":
+            - generic: 设计体验
+          - button "置信度":
+            - generic: 置信度
+          - button "浏览量":
+            - generic: 浏览量
+          - button "回复数":
+            - generic: 回复数
+          - button "更新时间":
+            - generic: 更新时间
+      - group "列表视图 / 网格视图" [ref=e91]:
+        - button "列表视图" [pressed] [ref=e92] [cursor=pointer]:
+          - img [ref=e93]
+        - button "网格视图" [ref=e95] [cursor=pointer]:
+          - img [ref=e96]
+    - generic [ref=e102]:
+      - generic [ref=e103]: 0 个作品
+      - generic [ref=e104]: 已评分 0/0

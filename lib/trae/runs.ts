@@ -1,14 +1,40 @@
-import { getFirestoreDb, nowIso, TRAE_COLLECTIONS } from "./firestore.ts";
+import { getDataConnectDb, nowIso } from "./dataconnect.ts";
+import { upsertRun, finishRun as finishRunMutation } from "@trae-contest/dataconnect-generated";
 import type { TraeRun, TraeRunStatus, TraeRunType, TraeSourceType } from "./types.ts";
 
+const runTypeMap = {
+  scrape: "SCRAPE",
+  judge: "JUDGE",
+  match: "MATCH"
+} as const;
+
+const sourceTypeMap = {
+  signup: "SIGNUP",
+  preliminary: "PRELIMINARY"
+} as const;
+
+const runStatusMap = {
+  running: "RUNNING",
+  success: "SUCCESS",
+  partial: "PARTIAL",
+  error: "ERROR"
+} as const;
+
 export async function startRun(type: TraeRunType, sourceType: TraeSourceType | null): Promise<TraeRun> {
-  const db = getFirestoreDb();
+  const dc = getDataConnectDb();
   const id = `${type}_${sourceType ?? "all"}_${Date.now()}`;
-  const run: TraeRun = {
+  const startedAt = nowIso();
+  await upsertRun(dc as any, {
+    id,
+    type: runTypeMap[type],
+    sourceType: sourceType ? sourceTypeMap[sourceType] : null,
+    status: "RUNNING"
+  } as any);
+  return {
     id,
     type,
     sourceType,
-    startedAt: nowIso(),
+    startedAt,
     finishedAt: null,
     status: "running",
     pagesScanned: null,
@@ -21,8 +47,6 @@ export async function startRun(type: TraeRunType, sourceType: TraeSourceType | n
     logs: [],
     error: null
   };
-  await db.collection(TRAE_COLLECTIONS.runs).doc(id).set(run);
-  return run;
 }
 
 export interface FinishRunPatch {
@@ -39,16 +63,18 @@ export interface FinishRunPatch {
 }
 
 export async function finishRun(id: string, patch: FinishRunPatch): Promise<void> {
-  const db = getFirestoreDb();
-  await db
-    .collection(TRAE_COLLECTIONS.runs)
-    .doc(id)
-    .set(
-      {
-        ...patch,
-        logs: patch.logs?.slice(-50),
-        finishedAt: nowIso()
-      },
-      { merge: true }
-    );
+  const dc = getDataConnectDb();
+  await finishRunMutation(dc as any, {
+    id,
+    status: runStatusMap[patch.status],
+    pagesScanned: patch.pagesScanned ?? null,
+    topicsFound: patch.topicsFound ?? null,
+    topicsCreated: patch.topicsCreated ?? null,
+    topicsUpdated: patch.topicsUpdated ?? null,
+    evaluatedCount: patch.evaluatedCount ?? null,
+    failedCount: patch.failedCount ?? null,
+    matchedCount: patch.matchedCount ?? null,
+    logs: patch.logs ? patch.logs.slice(-50) : null,
+    error: patch.error ?? null
+  } as any);
 }

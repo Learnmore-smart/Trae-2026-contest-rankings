@@ -3,16 +3,11 @@ import * as cheerio from "cheerio";
 import type { TraeEvidence } from "./types.ts";
 
 const TRACKS = [
-  "效率工具",
-  "创意娱乐",
-  "教育学习",
-  "生活服务",
-  "开发者工具",
+  "生活娱乐",
+  "学习工作",
+  "社会服务",
   "硬件交互",
-  "AI 应用",
-  "游戏",
-  "公益",
-  "商业"
+  "社会公益"
 ];
 
 const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg"];
@@ -99,13 +94,27 @@ function selectDemoUrl(links: Array<{ url: string; label: string }>, forumHost: 
 
 function extractSessionIds(text: string): string[] {
   const ids = new Set<string>();
-  const labeled = /(?:session\s*id|sessionid|会话\s*(?:id|编号)|session\s*编号)\s*[:：#-]?\s*([A-Za-z0-9][A-Za-z0-9_-]{8,})/gi;
+
+  // 1. Lenient labeled matching:
+  // Match session/会话/uuid/id/编号, followed by optional numbers/letters/symbols, then a string of 8+ alphanumeric/dash/underscore characters
+  const labeled = /(?:session|会话|uuid|id|编号)\s*[a-zA-Z0-9一二三四五六七八九十]*\s*[:：=\-#\-]*\s*([A-Za-z0-9][A-Za-z0-9_\-]{7,})/gi;
   for (const match of text.matchAll(labeled)) {
-    ids.add(match[1]);
+    const val = match[1].trim();
+    // Exclude common false positives like HTML tags, vercel, etc.
+    if (!/^(http|https|github|vercel|netlify|preview|detail|image|picture|avatar|active)/i.test(val)) {
+      ids.add(val);
+    }
   }
 
-  const direct = /\b(?:trae[-_])?session[-_][A-Za-z0-9_-]{8,}\b/gi;
+  // 2. Direct session patterns (e.g. trae-session-xxx, session-xxx, trae_session_xxx, session_xxx)
+  const direct = /\b(?:trae[-_]?)?session[-_]?[A-Za-z0-9_-]{8,}\b/gi;
   for (const match of text.matchAll(direct)) {
+    ids.add(match[0]);
+  }
+
+  // 3. Standard UUIDs
+  const uuidRegex = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+  for (const match of text.matchAll(uuidRegex)) {
     ids.add(match[0]);
   }
 
@@ -113,8 +122,44 @@ function extractSessionIds(text: string): string[] {
 }
 
 function detectTrack(title: string, text: string, tags: string[] = []): string | null {
+  // 1. Prioritize explicit bracket prefixes in the title first
+  const prefixMatch = title.match(/[【\[]([^】\]\s]+)(?:赛道)?[】\]]/);
+  if (prefixMatch?.[1]) {
+    const rawPrefix = prefixMatch[1].trim();
+    if (rawPrefix.includes("生活娱乐") || rawPrefix.includes("娱乐")) return "生活娱乐";
+    if (rawPrefix.includes("学习工作") || rawPrefix.includes("学习") || rawPrefix.includes("工作")) return "学习工作";
+    if (rawPrefix.includes("社会服务") || rawPrefix.includes("生活服务")) return "社会服务";
+    if (rawPrefix.includes("硬件交互") || rawPrefix.includes("硬件")) return "硬件交互";
+    if (rawPrefix.includes("社会公益") || rawPrefix.includes("公益")) return "社会公益";
+  }
+
+  // 2. Search title for track names
+  if (title.includes("生活娱乐") || title.includes("生活娱乐赛道")) return "生活娱乐";
+  if (title.includes("学习工作") || title.includes("学习工作赛道")) return "学习工作";
+  if (title.includes("社会服务") || title.includes("社会服务赛道")) return "社会服务";
+  if (title.includes("硬件交互") || title.includes("硬件交互赛道")) return "硬件交互";
+  if (title.includes("社会公益") || title.includes("社会公益赛道") || title.includes("公益")) return "社会公益";
+
+  // 3. Fallback to tags
+  for (const tag of tags) {
+    if (tag.includes("生活娱乐") || tag.includes("娱乐")) return "生活娱乐";
+    if (tag.includes("学习工作") || tag.includes("学习") || tag.includes("工作")) return "学习工作";
+    if (tag.includes("社会服务") || tag.includes("服务")) return "社会服务";
+    if (tag.includes("硬件交互") || tag.includes("硬件")) return "硬件交互";
+    if (tag.includes("社会公益") || tag.includes("公益")) return "社会公益";
+  }
+
+  // 4. Fallback to keyword matching in text body (least priority)
   const haystack = `${title} ${text} ${tags.join(" ")}`;
-  return TRACKS.find((track) => haystack.includes(track)) ?? null;
+  const exactMatch = TRACKS.find((track) => haystack.includes(track));
+  if (exactMatch) return exactMatch;
+
+  if (haystack.includes("生活服务")) return "社会服务";
+  if (haystack.includes("教育学习")) return "学习工作";
+  if (haystack.includes("创意娱乐")) return "生活娱乐";
+  if (haystack.includes("硬件")) return "硬件交互";
+
+  return null;
 }
 
 function extractProcessKeywords(text: string): string[] {
@@ -128,6 +173,8 @@ export function extractTopicSignals(input: TopicSignalInput): TopicSignals {
   const html = input.html ?? "";
   const $ = cheerio.load(html);
   const contentText = normalizeWhitespace(input.text ?? (html ? htmlToText(html) : ""));
+  // Discourse may return non-string tag entries despite the type signature.
+  const tags = (input.tags ?? []).filter((t): t is string => typeof t === "string");
   const links = unique(
     $("a")
       .toArray()
@@ -168,7 +215,7 @@ export function extractTopicSignals(input: TopicSignalInput): TopicSignals {
     imageUrls,
     sessionIds,
     traeEvidence,
-    track: detectTrack(input.title, contentText, input.tags),
+    track: detectTrack(input.title, contentText, tags),
     links
   };
 }

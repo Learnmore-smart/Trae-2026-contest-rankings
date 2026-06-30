@@ -4,6 +4,7 @@ export type TraeSourceType = "signup" | "preliminary";
 export type TraeTopicStatus = "scraped" | "needs_judging" | "judged" | "scrape_error" | "judge_error";
 export type TraeRunType = "scrape" | "judge" | "match";
 export type TraeRunStatus = "running" | "success" | "partial" | "error";
+export type TraeAIProvider = "nvidia" | "openrouter";
 export type MatchMethod = "same_author" | "title_similarity" | "manual" | "none";
 export type MismatchRisk = "none" | "low" | "medium" | "high" | "unknown";
 export type CompetitionLevel = "极具竞争力" | "有竞争力" | "竞争力一般" | "较弱";
@@ -26,6 +27,12 @@ export interface TraeTopic {
   title: string;
   url: string;
   authorName: string;
+  /**
+   * Discourse `username` of the first-post author (the stable identity key the
+   * forum's `@` search indexes by). Carried in-memory only — used to confirm a
+   * preliminary↔signup match by person, not title. Not persisted to Data Connect.
+   */
+  authorUsername?: string | null;
   authorAvatarUrl: string | null;
   track: string | null;
   tags: string[];
@@ -66,10 +73,31 @@ export interface TraeMatch {
   updatedAt: string;
 }
 
+export interface TraeLLMCallLog {
+  provider: TraeAIProvider;
+  model: string;
+  latencyMs: number;
+  retryCount: number;
+  errorReason: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  rawResponse: string;
+}
+
+export interface TraeModelTokenUsage {
+  id: string;
+  provider: TraeAIProvider;
+  model: string;
+  input: number;
+  output: number;
+  updatedAt: string;
+}
+
 export interface TraeEvaluation {
   id: string;
   topicId: string;
   sourceType: "preliminary";
+  provider?: TraeAIProvider | null;
   model: string;
   promptVersion: string;
   totalScore: number;
@@ -88,7 +116,16 @@ export interface TraeEvaluation {
   complianceRisks: string[];
   dimensionComments: Record<string, string>;
   matchComment: string | null;
+  /** Full prompt (user message) sent to the model. Surfaced in the UI as "模型输入". */
+  promptText?: string;
+  /** System message sent to the model, shown alongside the prompt as part of the input. */
+  systemPrompt?: string;
+  /** Prompt tokens (输入词元) of the successful call; convenience copy of the winning llmCallLog. */
+  inputTokens?: number;
+  /** Completion tokens (输出词元) of the successful call. */
+  outputTokens?: number;
   rawModelResponse: string;
+  llmCallLogs?: TraeLLMCallLog[];
   error: string | null;
   createdAt: string;
 }
@@ -115,6 +152,19 @@ export interface TraePresence {
   sessionId: string;
   lastSeenAt: string;
   userAgentHash: string | null;
+}
+
+/**
+ * Resume cursor for paginated scraping. Lets repeated bounded runs walk the whole
+ * forum category (报名 ~20K / 初赛 ~2K) across many cron/dev triggers instead of
+ * re-fetching page 0 every time. Wraps back to page 0 after reaching the end.
+ */
+export interface TraeScrapeCursor {
+  sourceType: TraeSourceType;
+  nextPage: number;
+  totalSeen: number;
+  lastRunAt: string;
+  lastCompletedCycleAt: string | null;
 }
 
 export const dimensionCommentsSchema = z
@@ -161,6 +211,8 @@ export interface StatsPayload {
   preliminaryCount: number;
   evaluatedCount: number;
   matchedCount: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
   lastUpdatedAt: string | null;
   onlineCount: number;
   sourceUnavailable?: boolean;

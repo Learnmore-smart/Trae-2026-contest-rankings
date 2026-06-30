@@ -1,0 +1,60 @@
+- main [ref=e2]:
+  - navigation [ref=e3]:
+    - generic [ref=e4]: TRAE 创造力大赛
+    - tablist "Main sections" [ref=e5]:
+      - tab "首页" [selected] [ref=e6] [cursor=pointer]
+      - tab "榜单" [ref=e7] [cursor=pointer]
+    - generic [ref=e8]:
+      - generic [ref=e9]:
+        - text: 词元 0
+        - generic [ref=e10]: · 输入 0 / 输出 0
+      - generic [ref=e11]: "在线: 0"
+      - button "EN" [ref=e12] [cursor=pointer]
+  - generic [ref=e14]:
+    - generic [ref=e15]:
+      - generic [ref=e16]:
+        - paragraph [ref=e17]: 第三方评分台
+        - heading "我们把公开作品整理成一张可追踪的评分榜" [level=1] [ref=e18]
+        - paragraph [ref=e19]: 本站抓取 TRAE 中文社区公开报名帖与初赛 Demo 帖，匹配同一作品，再用免费模型生成模拟评分。它不是官方结果，而是给参赛者和观察者一个透明的数据视角：哪些作品已被收录，哪些已经评分，为什么排名会变化。
+      - generic [ref=e20]:
+        - generic [ref=e21]:
+          - paragraph [ref=e22]: 这个网站存在的意义
+          - paragraph [ref=e23]: 比赛帖分散、更新快、人工逐个比较成本高。这个页面把公开信息变成结构化榜单：先看收录进度，再看评分维度，最后进入详情页查看每个作品的证据、优势、风险和建议。
+          - generic [ref=e25]:
+            - generic [ref=e26]: 已评分
+            - strong [ref=e27]: 0/0
+        - generic [ref=e29]:
+          - button "榜单" [ref=e30] [cursor=pointer]:
+            - img [ref=e31]
+            - text: 榜单
+          - button "开始评分" [ref=e34] [cursor=pointer]:
+            - img [ref=e35]
+            - text: 开始评分
+    - generic [ref=e40]:
+      - generic [ref=e41]:
+        - generic [ref=e42]:
+          - paragraph [ref=e43]: 领造官阵容
+          - heading "大赛领造官" [level=2] [ref=e44]
+        - generic [ref=e45]: 本届特邀展示，与本站评分无关。
+      - generic [ref=e46]:
+        - article [ref=e47]:
+          - img "影视飓风Tim · 大赛领造官" [ref=e49]
+          - generic [ref=e50]:
+            - generic [ref=e51]: 影视飓风Tim
+            - generic [ref=e52]: 影像工程 / 内容系统
+        - article [ref=e53]:
+          - img "楼天城 · 大赛领造官" [ref=e55]
+          - generic [ref=e56]:
+            - generic [ref=e57]: 楼天城
+            - generic [ref=e58]: 算法竞技 / 工程判断
+        - article [ref=e59]:
+          - img "罗永浩 · 大赛领造官" [ref=e61]
+          - generic [ref=e62]:
+            - generic [ref=e63]: 罗永浩
+            - generic [ref=e64]: 产品表达 / 商业落地
+        - article [ref=e65]:
+          - img "胡彦斌 · 大赛领造官" [ref=e67]
+          - generic [ref=e68]:
+            - generic [ref=e69]: 胡彦斌
+            - generic [ref=e70]: 音乐科技 / 创意生产
+    - generic [ref=e71]: 免责声明：本站评分由 AI 根据 TRAE 中文社区公开帖子内容生成，仅供学习、观摩和参考，不代表 TRAE 官方结果，也不冒充官方评分或预测最终名次。

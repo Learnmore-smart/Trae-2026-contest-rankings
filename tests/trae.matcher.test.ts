@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { scoreTopicMatch } from "../lib/trae/matcher.ts";
+import { scoreConfirmedAuthorMatch, scoreTopicMatch } from "../lib/trae/matcher.ts";
 import type { TraeTopic } from "../lib/trae/types.ts";
 
 function topic(partial: Partial<TraeTopic>): TraeTopic {
@@ -75,5 +75,51 @@ describe("scoreTopicMatch", () => {
 
     assert.ok(result.matchConfidence < 45);
     assert.equal(result.mismatchRisk, "high");
+  });
+});
+
+describe("scoreConfirmedAuthorMatch", () => {
+  it("matches a forum-confirmed author even when the Demo title diverges from the 报名帖", () => {
+    // The whole point of the username-keyed lookup: identity, not title, decides
+    // whether a match exists. A pivoted project still matches, but flags as risky.
+    const preliminary = topic({
+      title: "硬件交互机器人",
+      contentText: "机器人通过传感器和实体按钮完成交互"
+    });
+    const signup = topic({
+      sourceType: "signup",
+      title: "一个 AI 写作工具",
+      contentText: "面向自媒体的文章生成和排版工具"
+    });
+
+    const result = scoreConfirmedAuthorMatch(preliminary, signup);
+
+    assert.ok(result.signupTopicId, "a confirmed author always yields a match");
+    assert.equal(result.matchMethod, "same_author");
+    assert.ok(result.matchConfidence >= 88);
+    assert.ok((result.directionConsistencyScore ?? 10) <= 3);
+    assert.equal(result.mismatchRisk, "high");
+  });
+
+  it("reads higher direction consistency when the signup idea continues into the Demo", () => {
+    const preliminary = topic({
+      title: "AI 学习助手 初赛 Demo",
+      contentText: "面向学生的 AI 学习助手，提供规划、测验和错题分析"
+    });
+    const signup = topic({
+      sourceType: "signup",
+      title: "AI 学习助手 报名",
+      contentText: "我报名做一个学生学习规划和测验助手"
+    });
+
+    const continued = scoreConfirmedAuthorMatch(preliminary, signup);
+    const diverged = scoreConfirmedAuthorMatch(
+      preliminary,
+      topic({ sourceType: "signup", title: "一个 AI 写作工具", contentText: "面向自媒体的文章生成和排版工具" })
+    );
+
+    assert.ok(continued.matchConfidence >= 88);
+    assert.ok((continued.directionConsistencyScore ?? 0) > (diverged.directionConsistencyScore ?? 0));
+    assert.notEqual(continued.mismatchRisk, "high");
   });
 });

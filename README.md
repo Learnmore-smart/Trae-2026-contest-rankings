@@ -9,24 +9,34 @@
 - Next.js App Router + TypeScript
 - Tailwind CSS
 - Firebase Admin SDK + Firestore
-- OpenRouter Chat Completions
+- NVIDIA and OpenRouter OpenAI-compatible free chat completions
 - Node 22 built-in TypeScript strip for local worker scripts
 
 ## 环境变量
 
 复制 `.env.example` 为 `.env.local`，至少配置：
 
+- `NVIDIA_API_KEY`
 - `OPENROUTER_API_KEY`
 - `TRAE_ADMIN_TOKEN`
 - `TRAE_CRON_SECRET`
 - `FIREBASE_SERVICE_ACCOUNT_KEY` 或 `GOOGLE_APPLICATION_CREDENTIALS`
 
+AI provider 策略必须保持 zero-budget，只使用免费 endpoint，不接入官方 DeepSeek paid API，也不自动切到任何付费 provider。
+
+Provider 顺序：
+
+1. NVIDIA free endpoint
+2. OpenRouter free models
+
 默认模型：
 
-- Primary: `openai/gpt-oss-120b`
-- Fallback: `nvidia/nemotron-3-ultra-550b-a55b:free`, `google/gemma-4-31b-it:free`
+- NVIDIA primary: `deepseek-ai/deepseek-v4-pro`
+- NVIDIA fallback: `minimaxai/minimax-m3`
+- OpenRouter primary: `openai/gpt-oss-120b`
+- OpenRouter fallback: `nvidia/nemotron-3-ultra-550b-a55b:free`, `google/gemma-4-31b-it:free`
 
-`TRAE_OPENROUTER_DAILY_CAP=0` 表示代码不主动限制请求数。遇到 429/5xx 会指数退避并切换 fallback 模型；免费模型不可用或 JSON 无法校验时会记录 `judge_error`，等待重试。
+所有模型调用统一走 `callLLMWithFallback()`。遇到 429/5xx/timeout/invalid JSON 会按 `AI_MAX_RETRIES_PER_MODEL` 和指数退避处理，再切换同 provider fallback；NVIDIA 全部失败后才尝试 OpenRouter。所有免费模型不可用或 JSON 无法校验时会记录 `judge_error`，等待下次定时任务重试。
 
 ## Firestore 设置
 
@@ -55,9 +65,9 @@ npm.cmd run dev
 
 访问：
 
-- Public: `http://localhost:3000/trae-contest-2026`
-- Detail: `http://localhost:3000/trae-contest-2026/project/<topicId>`
-- Admin: `http://localhost:3000/trae-contest-2026/admin`
+- Public: `http://localhost:5000/trae-contest-2026`
+- Detail: `http://localhost:5000/trae-contest-2026/project/<topicId>`
+- Admin: `http://localhost:5000/trae-contest-2026/admin`
 
 ## Worker scripts
 
@@ -101,7 +111,7 @@ gcloud run jobs create trae-match --image gcr.io/PROJECT_ID/trae-contest-ranking
 gcloud run jobs create trae-judge --image gcr.io/PROJECT_ID/trae-contest-rankings --region us-central1 --command npm --args run,trae:judge
 ```
 
-给 jobs 配置 Firestore、OpenRouter、TRAE 环境变量，并授予 Firestore 访问权限。
+给 jobs 配置 Firestore、NVIDIA、OpenRouter、TRAE 环境变量，并授予 Firestore 访问权限。
 
 ## Cloud Scheduler
 
@@ -136,4 +146,4 @@ npm run lint
 npm run build
 ```
 
-没有 Firestore 凭据时，公开页面仍会启动并显示空状态；实际抓取、匹配和评分需要 Firestore 与 OpenRouter 环境变量。
+没有 Firestore 凭据时，公开页面仍会启动并显示空状态；实际抓取、匹配和评分需要 Firestore、NVIDIA/OpenRouter 免费 endpoint 环境变量。

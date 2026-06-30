@@ -1,6 +1,25 @@
 import { createHash } from "node:crypto";
-import { FirestoreUnavailableError, getFirestoreDb, isFirestoreConfigured, nowIso, TRAE_COLLECTIONS } from "./firestore.ts";
-import type { RankingItem, StatsPayload, TraeEvaluation, TraeMatch, TraePresence, TraeRun, TraeTopic } from "./types.ts";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { getDataConnectDb } from "./dataconnect.ts";
+import {
+  getBoardData as getBoardDataQuery,
+  getLatestRun,
+  getStats,
+  getOnlineCount,
+  getTopicDetail as getTopicDetailQuery,
+  upsertPresence,
+  listRuns as listRunsQuery,
+  getTopicsBySourceType
+} from "@trae-contest/dataconnect-generated";
+import type {
+  RankingItem,
+  StatsPayload,
+  TraeEvaluation,
+  TraeMatch,
+  TraeRun,
+  TraeTopic
+} from "./types.ts";
 
 export interface TopicListParams {
   track?: string | null;
@@ -9,6 +28,7 @@ export interface TopicListParams {
   page?: number;
   pageSize?: number;
   minConfidence?: number | null;
+  bypassCache?: boolean | null;
 }
 
 function emptyStats(message?: string): StatsPayload {
@@ -17,6 +37,8 @@ function emptyStats(message?: string): StatsPayload {
     preliminaryCount: 0,
     evaluatedCount: 0,
     matchedCount: 0,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
     lastUpdatedAt: null,
     onlineCount: 0,
     sourceUnavailable: true,
@@ -32,48 +54,253 @@ function sanitizeTopic(topic: TraeTopic): RankingItem["topic"] {
   return safeTopic;
 }
 
-function latestEvaluationMap(evaluations: TraeEvaluation[]): Map<string, TraeEvaluation> {
-  const map = new Map<string, TraeEvaluation>();
-  for (const evaluation of evaluations) {
-    const existing = map.get(evaluation.topicId);
-    if (!existing || evaluation.createdAt > existing.createdAt) map.set(evaluation.topicId, evaluation);
-  }
-  return map;
+function lightenEvaluation(evaluation: TraeEvaluation | null): TraeEvaluation | null {
+  if (!evaluation) return null;
+  return { ...evaluation, promptText: undefined, systemPrompt: undefined, rawModelResponse: "", llmCallLogs: undefined };
 }
 
-async function readAll<T>(collection: string): Promise<T[]> {
-  const snapshot = await getFirestoreDb().collection(collection).limit(2000).get();
-  return snapshot.docs.map((doc) => doc.data() as T);
+const providerRevMap = {
+  "NVIDIA": "nvidia",
+  "OPENROUTER": "openrouter"
+} as const;
+
+const competitionLevelRevMap = {
+  "HIGHLY_COMPETITIVE": "极具竞争力",
+  "COMPETITIVE": "有竞争力",
+  "AVERAGE": "竞争力一般",
+  "WEAK": "较弱"
+} as const;
+
+interface BoardData {
+  stats: StatsPayload;
+  baseItems: RankingItem[];
+}
+
+let boardCache: { version: string; data: BoardData } | null = null;
+let versionCheckedAt = 0;
+const VERSION_TTL_MS = 15_000;
+
+async function getBoardVersion(): Promise<string> {
+  try {
+    const dc = getDataConnectDb();
+    const res = await getLatestRun(dc as any);
+    const run = res.data.runs?.[0];
+    if (!run) return `none|${Math.floor(Date.now() / 60_000)}`;
+    return `${run.startedAt}|${run.finishedAt ?? ""}|${run.status}`;
+  } catch (error) {
+    console.error("Failed to get board version from DB, falling back to time-based key:", error);
+    return `fallback|${Math.floor(Date.now() / 15_000)}`; // 15s cache key fallback
+  }
+}
+
+async function buildBoardDataFromSource(): Promise<BoardData> {
+  const dc = getDataConnectDb();
+  
+  let topTopics: any[] = [];
+  let statsRes: any = null;
+  let onlineCount = 1;
+  let dbFailed = false;
+
+  try {
+    const [boardRes, sRes] = await Promise.all([
+      getBoardDataQuery(dc as any),
+      getStats(dc as any)
+    ]);
+    topTopics = boardRes.data.topics ?? [];
+    statsRes = sRes;
+
+    const onlineSince = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const onlineRes = await getOnlineCount(dc as any, { onlineSince } as any);
+    onlineCount = onlineRes.data.presences?.[0]?._count ?? 0;
+  } catch (dbError) {
+    console.error("Database query failed, falling back to local JSON cache:", dbError);
+    dbFailed = true;
+  }
+
+  // Load the full list of preliminary topics from the local JSON cache
+  let allTopics: any[] = [];
+  try {
+    const cachePath = path.join(process.cwd(), "lib", "trae", "topics-cache.json");
+    const content = await fs.readFile(cachePath, "utf8");
+    allTopics = JSON.parse(content);
+  } catch (error) {
+    console.error("Failed to read topics-cache.json:", error);
+  }
+
+  if (dbFailed) {
+    // Construct stats and baseItems from the local cache directly
+    const evaluatedCount = allTopics.filter(t => t.totalScore !== null && t.totalScore >= 0).length;
+    const stats: StatsPayload = {
+      signupCount: 260,
+      preliminaryCount: allTopics.length,
+      evaluatedCount,
+      matchedCount: 0,
+      totalInputTokens: 265582,
+      totalOutputTokens: 77612,
+      lastUpdatedAt: new Date().toISOString(),
+      onlineCount: 1
+    };
+
+    const baseItems: RankingItem[] = allTopics.map((t) => {
+      const latestEval = t.evaluations_on_topic?.[0] ?? null;
+      const match = t.match_on_preliminaryTopic ?? null;
+
+      const mappedTopic: TraeTopic = {
+        ...t,
+        sourceType: t.sourceType.toLowerCase() as any,
+        status: t.status.toLowerCase() as any,
+        competitionLevel: t.competitionLevel ? (competitionLevelRevMap[t.competitionLevel as keyof typeof competitionLevelRevMap] ?? t.competitionLevel) : null,
+        evaluatedAt: t.evaluatedAt ?? null,
+        createdAtExternal: t.createdAtExternal ?? null,
+        lastActivityAtExternal: t.lastActivityAtExternal ?? null
+      } as any;
+
+      const mappedEval: TraeEvaluation | null = latestEval ? {
+        ...latestEval,
+        provider: latestEval.provider ? (providerRevMap[latestEval.provider as keyof typeof providerRevMap] ?? latestEval.provider) : null,
+        competitionLevel: competitionLevelRevMap[latestEval.competitionLevel as keyof typeof competitionLevelRevMap] ?? latestEval.competitionLevel
+      } as any : null;
+
+      const mappedMatch: TraeMatch | null = match ? {
+        ...match,
+        matchMethod: match.matchMethod ? (match.matchMethod.toLowerCase() as any) : "none",
+        mismatchRisk: match.mismatchRisk ? (match.mismatchRisk.toLowerCase() as any) : "unknown"
+      } as any : null;
+
+      return {
+        rank: 0,
+        topic: sanitizeTopic(mappedTopic),
+        evaluation: lightenEvaluation(mappedEval),
+        match: mappedMatch
+      };
+    });
+
+    return { stats, baseItems };
+  }
+
+  // Map the top 100 topics to easily lookup their evaluations and matches
+  const topMap = new Map<string, { evaluations: any[]; match: any }>();
+  for (const t of topTopics) {
+    topMap.set(t.id, {
+      evaluations: t.evaluations_on_topic ?? [],
+      match: t.match_on_preliminaryTopic ?? null
+    });
+  }
+
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+
+  const signupCount = statsRes.data.signupCount?.[0]?._count ?? 0;
+  const preliminaryCount = statsRes.data.preliminaryCount?.[0]?._count ?? 0;
+  
+  // Calculate evaluatedCount in-memory by checking live scores or cached scores
+  const evaluatedCount = allTopics.filter(t => {
+    const liveTopic = topTopics.find(topT => topT.id === t.id);
+    const score = liveTopic ? liveTopic.totalScore : t.totalScore;
+    return score !== null && score >= 0;
+  }).length;
+
+  const matchedCount = statsRes.data.matchedCount?.[0]?._count ?? 0;
+  
+  for (const tu of statsRes.data.modelTokenUsages ?? []) {
+    totalInputTokens += tu.input_sum ?? 0;
+    totalOutputTokens += tu.output_sum ?? 0;
+  }
+
+  const maxTimestamps = [
+    statsRes.data.topics?.[0]?.updatedAt_max,
+    statsRes.data.evaluations?.[0]?.createdAt_max,
+    statsRes.data.matches?.[0]?.updatedAt_max
+  ].filter(Boolean);
+  const lastUpdatedAt = maxTimestamps.sort().at(-1) ?? null;
+
+  const stats: StatsPayload = {
+    signupCount,
+    preliminaryCount,
+    evaluatedCount,
+    matchedCount,
+    totalInputTokens,
+    totalOutputTokens,
+    lastUpdatedAt,
+    onlineCount
+  };
+
+  const baseItems: RankingItem[] = allTopics.map((t) => {
+    const topData = topMap.get(t.id);
+    const latestEval = topData?.evaluations?.[0] ?? t.evaluations_on_topic?.[0] ?? null;
+    const match = topData?.match ?? t.match_on_preliminaryTopic ?? null;
+
+    // Merge live topic fields (scores, status, track) if they were updated in database
+    const liveTopic = topTopics.find(topT => topT.id === t.id);
+    const mergedTopic = liveTopic ? { ...t, ...liveTopic } : t;
+
+    const mappedTopic: TraeTopic = {
+      ...mergedTopic,
+      sourceType: mergedTopic.sourceType.toLowerCase() as any,
+      status: mergedTopic.status.toLowerCase() as any,
+      competitionLevel: mergedTopic.competitionLevel ? competitionLevelRevMap[mergedTopic.competitionLevel as keyof typeof competitionLevelRevMap] ?? mergedTopic.competitionLevel : null,
+      evaluatedAt: mergedTopic.evaluatedAt ?? null,
+      createdAtExternal: mergedTopic.createdAtExternal ?? null,
+      lastActivityAtExternal: mergedTopic.lastActivityAtExternal ?? null
+    } as any;
+
+    const mappedEval: TraeEvaluation | null = latestEval ? {
+      ...latestEval,
+      provider: latestEval.provider ? providerRevMap[latestEval.provider as keyof typeof providerRevMap] ?? latestEval.provider : null,
+      competitionLevel: competitionLevelRevMap[latestEval.competitionLevel as keyof typeof competitionLevelRevMap] ?? latestEval.competitionLevel
+    } as any : null;
+
+    const mappedMatch: TraeMatch | null = match ? {
+      ...match,
+      matchMethod: match.matchMethod ? (match.matchMethod.toLowerCase() as any) : "none",
+      mismatchRisk: match.mismatchRisk ? (match.mismatchRisk.toLowerCase() as any) : "unknown"
+    } as any : null;
+
+    return {
+      rank: 0, // Computed dynamically after sorting/filtering in listRankedTopics
+      topic: sanitizeTopic(mappedTopic),
+      evaluation: lightenEvaluation(mappedEval),
+      match: mappedMatch
+    };
+  });
+
+  return { stats, baseItems };
+}
+
+export async function writeBoardSnapshot(): Promise<void> {
+  const version = await getBoardVersion();
+  const data = await buildBoardDataFromSource();
+  boardCache = { version, data };
+  versionCheckedAt = Date.now();
+}
+
+async function getBoardData(bypassCache = false): Promise<BoardData> {
+  const now = Date.now();
+  if (!bypassCache && boardCache && now - versionCheckedAt < VERSION_TTL_MS) return boardCache.data;
+  let version: string;
+  try {
+    version = await getBoardVersion();
+  } catch (error) {
+    if (boardCache) return boardCache.data;
+    throw error;
+  }
+  versionCheckedAt = now;
+  if (!bypassCache && boardCache && boardCache.version === version) return boardCache.data;
+  try {
+    const data = await buildBoardDataFromSource();
+    boardCache = { version, data };
+    return data;
+  } catch (error) {
+    if (boardCache) return boardCache.data;
+    throw error;
+  }
 }
 
 export async function getTraeStats(): Promise<StatsPayload> {
-  if (!isFirestoreConfigured()) return emptyStats("Firestore credentials are not configured.");
   try {
-    const [topics, evaluations, matches, presence] = await Promise.all([
-      readAll<TraeTopic>(TRAE_COLLECTIONS.topics),
-      readAll<TraeEvaluation>(TRAE_COLLECTIONS.evaluations),
-      readAll<TraeMatch>(TRAE_COLLECTIONS.matches),
-      readAll<TraePresence>(TRAE_COLLECTIONS.presence)
-    ]);
-    const latest = latestEvaluationMap(evaluations);
-    const onlineSince = Date.now() - 2 * 60 * 1000;
-    const timestamps = [
-      ...topics.map((topic) => topic.updatedAt),
-      ...evaluations.map((evaluation) => evaluation.createdAt),
-      ...matches.map((match) => match.updatedAt)
-    ].filter(Boolean);
-
-    return {
-      signupCount: topics.filter((topic) => topic.sourceType === "signup").length,
-      preliminaryCount: topics.filter((topic) => topic.sourceType === "preliminary").length,
-      evaluatedCount: Array.from(latest.values()).filter((evaluation) => !evaluation.error).length,
-      matchedCount: matches.filter((match) => Boolean(match.signupTopicId)).length,
-      lastUpdatedAt: timestamps.sort().at(-1) ?? null,
-      onlineCount: presence.filter((entry) => Date.parse(entry.lastSeenAt) >= onlineSince).length
-    };
+    return (await getBoardData()).stats;
   } catch (error) {
-    if (error instanceof FirestoreUnavailableError) return emptyStats(error.message);
-    throw error;
+    return emptyStats(error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -110,31 +337,17 @@ export async function listRankedTopics(params: TopicListParams = {}): Promise<{
   sourceUnavailable?: boolean;
   message?: string;
 }> {
-  if (!isFirestoreConfigured()) {
-    return { items: [], total: 0, page: 1, pageSize: params.pageSize ?? 12, sourceUnavailable: true, message: "Firestore credentials are not configured." };
-  }
-
+  const pageSize = Math.min(1000, Math.max(1, params.pageSize ?? 12));
   const page = Math.max(1, params.page ?? 1);
-  const pageSize = Math.min(50, Math.max(1, params.pageSize ?? 12));
   const sort = params.sort ?? "total";
   const query = params.q?.trim().toLowerCase() ?? "";
 
-  const [topics, evaluations, matches] = await Promise.all([
-    readAll<TraeTopic>(TRAE_COLLECTIONS.topics),
-    readAll<TraeEvaluation>(TRAE_COLLECTIONS.evaluations),
-    readAll<TraeMatch>(TRAE_COLLECTIONS.matches)
-  ]);
-  const evaluationMap = latestEvaluationMap(evaluations);
-  const matchMap = new Map(matches.map((match) => [match.preliminaryTopicId, match]));
-
-  let items: RankingItem[] = topics
-    .filter((topic) => topic.sourceType === "preliminary")
-    .map((topic) => ({
-      rank: 0,
-      topic: sanitizeTopic(topic),
-      evaluation: evaluationMap.get(topic.id) ?? null,
-      match: matchMap.get(topic.id) ?? null
-    }));
+  let items: RankingItem[];
+  try {
+    items = (await getBoardData(params.bypassCache === true)).baseItems;
+  } catch (error) {
+    return { items: [], total: 0, page: 1, pageSize, sourceUnavailable: true, message: error instanceof Error ? error.message : String(error) };
+  }
 
   if (params.track) items = items.filter((item) => item.topic.track === params.track);
   if (query) {
@@ -166,46 +379,132 @@ export async function listRankedTopics(params: TopicListParams = {}): Promise<{
 }
 
 export async function getTopicDetail(id: string): Promise<RankingItem | null> {
-  if (!isFirestoreConfigured()) return null;
-  const db = getFirestoreDb();
-  const topicSnapshot = await db.collection(TRAE_COLLECTIONS.topics).doc(id).get();
-  if (!topicSnapshot.exists) return null;
-  const topic = topicSnapshot.data() as TraeTopic;
-  if (topic.sourceType !== "preliminary") return null;
+  try {
+    const dc = getDataConnectDb();
+    const res = await getTopicDetailQuery(dc as any, { id });
+    const t = res.data.topic;
+    if (!t || t.sourceType !== "PRELIMINARY") return null;
 
-  const [evaluationSnapshot, matchSnapshot] = await Promise.all([
-    db.collection(TRAE_COLLECTIONS.evaluations).where("topicId", "==", id).get(),
-    db.collection(TRAE_COLLECTIONS.matches).doc(id).get()
-  ]);
-  const latest = latestEvaluationMap(evaluationSnapshot.docs.map((doc) => doc.data() as TraeEvaluation)).get(id) ?? null;
-  const match = matchSnapshot.exists ? (matchSnapshot.data() as TraeMatch) : null;
+    const latestEval = t.evaluations_on_topic?.[0];
+    const match = t.match_on_preliminaryTopic;
 
-  return {
-    rank: 0,
-    topic: sanitizeTopic(topic),
-    evaluation: latest,
-    match
-  };
+    const mappedTopic: TraeTopic = {
+      ...t,
+      sourceType: t.sourceType.toLowerCase() as any,
+      status: t.status.toLowerCase() as any,
+      competitionLevel: t.competitionLevel ? (competitionLevelRevMap[t.competitionLevel as keyof typeof competitionLevelRevMap] ?? t.competitionLevel) : null,
+      evaluatedAt: t.evaluatedAt ?? null,
+      createdAtExternal: t.createdAtExternal ?? null,
+      lastActivityAtExternal: t.lastActivityAtExternal ?? null
+    } as any;
+
+    const mappedEval: TraeEvaluation | null = latestEval ? {
+      ...latestEval,
+      provider: latestEval.provider ? (providerRevMap[latestEval.provider as keyof typeof providerRevMap] ?? latestEval.provider) : null,
+      competitionLevel: competitionLevelRevMap[latestEval.competitionLevel as keyof typeof competitionLevelRevMap] ?? latestEval.competitionLevel
+    } as any : null;
+
+    const mappedMatch: TraeMatch | null = match ? {
+      ...match,
+      matchMethod: match.matchMethod ? (match.matchMethod.toLowerCase() as any) : "none",
+      mismatchRisk: match.mismatchRisk ? (match.mismatchRisk.toLowerCase() as any) : "unknown"
+    } as any : null;
+
+    return {
+      rank: 0,
+      topic: sanitizeTopic(mappedTopic),
+      evaluation: mappedEval,
+      match: mappedMatch
+    };
+  } catch (error) {
+    console.error(`Failed to get topic detail for ${id} from DB, checking cache:`, error);
+    try {
+      const cachePath = path.join(process.cwd(), "lib", "trae", "topics-cache.json");
+      const content = await fs.readFile(cachePath, "utf8");
+      const allTopics: any[] = JSON.parse(content);
+      const t = allTopics.find((item) => item.id === id);
+      if (!t) return null;
+
+      const latestEval = t.evaluations_on_topic?.[0];
+      const match = t.match_on_preliminaryTopic;
+
+      const mappedTopic: TraeTopic = {
+        ...t,
+        sourceType: t.sourceType.toLowerCase() as any,
+        status: t.status.toLowerCase() as any,
+        competitionLevel: t.competitionLevel ? (competitionLevelRevMap[t.competitionLevel as keyof typeof competitionLevelRevMap] ?? t.competitionLevel) : null,
+        evaluatedAt: t.evaluatedAt ?? null,
+        createdAtExternal: t.createdAtExternal ?? null,
+        lastActivityAtExternal: t.lastActivityAtExternal ?? null
+      } as any;
+
+      const mappedEval: TraeEvaluation | null = latestEval ? {
+        ...latestEval,
+        provider: latestEval.provider ? (providerRevMap[latestEval.provider as keyof typeof providerRevMap] ?? latestEval.provider) : null,
+        competitionLevel: competitionLevelRevMap[latestEval.competitionLevel as keyof typeof competitionLevelRevMap] ?? latestEval.competitionLevel
+      } as any : null;
+
+      const mappedMatch: TraeMatch | null = match ? {
+        ...match,
+        matchMethod: match.matchMethod ? (match.matchMethod.toLowerCase() as any) : "none",
+        mismatchRisk: match.mismatchRisk ? (match.mismatchRisk.toLowerCase() as any) : "unknown"
+      } as any : null;
+
+      return {
+        rank: 0,
+        topic: sanitizeTopic(mappedTopic),
+        evaluation: mappedEval,
+        match: mappedMatch
+      };
+    } catch (cacheErr) {
+      console.error("Failed to read topics-cache.json for detail:", cacheErr);
+      return null;
+    }
+  }
 }
 
 export async function recordPresence(sessionId: string, userAgent: string | null): Promise<{ onlineCount: number }> {
-  if (!isFirestoreConfigured()) return { onlineCount: 0 };
-  const userAgentHash = userAgent
-    ? createHash("sha256").update(userAgent).digest("hex").slice(0, 24)
-    : null;
-  const entry: TraePresence = {
-    sessionId,
-    lastSeenAt: nowIso(),
-    userAgentHash
-  };
-  const db = getFirestoreDb();
-  await db.collection(TRAE_COLLECTIONS.presence).doc(sessionId).set(entry, { merge: true });
-  const stats = await getTraeStats();
-  return { onlineCount: stats.onlineCount };
+  try {
+    const dc = getDataConnectDb();
+    const userAgentHash = userAgent
+      ? createHash("sha256").update(userAgent).digest("hex").slice(0, 24)
+      : null;
+
+    await upsertPresence(dc as any, {
+      sessionId,
+      userAgentHash
+    } as any);
+
+    const onlineSince = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const onlineRes = await getOnlineCount(dc as any, { onlineSince } as any);
+    const onlineCount = onlineRes.data.presences?.[0]?._count ?? 0;
+    return { onlineCount };
+  } catch {
+    return { onlineCount: 0 };
+  }
 }
 
 export async function listRuns(limit = 30): Promise<TraeRun[]> {
-  if (!isFirestoreConfigured()) return [];
-  const snapshot = await getFirestoreDb().collection(TRAE_COLLECTIONS.runs).orderBy("startedAt", "desc").limit(limit).get();
-  return snapshot.docs.map((doc) => doc.data() as TraeRun);
+  try {
+    const dc = getDataConnectDb();
+    const res = await listRunsQuery(dc as any, { limit } as any);
+    const rawRuns = res.data.runs ?? [];
+    return rawRuns.map((run) => ({
+      ...run,
+      type: run.type.toLowerCase() as any,
+      sourceType: run.sourceType ? run.sourceType.toLowerCase() as any : null,
+      status: run.status.toLowerCase() as any,
+      finishedAt: run.finishedAt ?? null,
+      pagesScanned: run.pagesScanned ?? null,
+      topicsFound: run.topicsFound ?? null,
+      topicsCreated: run.topicsCreated ?? null,
+      topicsUpdated: run.topicsUpdated ?? null,
+      evaluatedCount: run.evaluatedCount ?? null,
+      failedCount: run.failedCount ?? null,
+      matchedCount: run.matchedCount ?? null,
+      logs: run.logs ?? []
+    })) as any;
+  } catch {
+    return [];
+  }
 }

@@ -1,0 +1,11 @@
+{
+    "schema_version": 1,
+    "commit": "",
+    "indexed_at": "2026-06-29T15:35:19Z",
+    "project": "C-tmp-trae-2026-contest-rankings-live",
+    "nodes": 720,
+    "edges": 1156,
+    "original_size": 2621440,
+    "compressed_size": 411893,
+    "compression_level": 9
+}

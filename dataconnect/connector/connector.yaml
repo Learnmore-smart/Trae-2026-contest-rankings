@@ -1,0 +1,10 @@
+# SQL Connect connector configuration.
+# Generates a TypeScript SDK for server-side (Next.js API routes) usage.
+
+connectorId: "trae-contest"
+
+generate:
+  adminNodeSdk:
+    outputDir: "../../lib/dataconnect-generated"
+    package: "@trae-contest/dataconnect-generated"
+    packageJsonDir: "../.."

@@ -1,0 +1,232 @@
+# TRAE Contest 2026 — SQL Connect schema
+# Mapped from lib/trae/types.ts. Primary keys use String! to preserve existing
+# Firestore document IDs during migration.
+
+# ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum TraeSourceType {
+  SIGNUP
+  PRELIMINARY
+}
+
+enum TraeTopicStatus {
+  SCRAPED
+  NEEDS_JUDGING
+  JUDGED
+  SCRAPE_ERROR
+  JUDGE_ERROR
+}
+
+enum TraeRunType {
+  SCRAPE
+  JUDGE
+  MATCH
+}
+
+enum TraeRunStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  ERROR
+}
+
+enum TraeAiProvider {
+  NVIDIA
+  OPENROUTER
+}
+
+enum MatchMethod {
+  SAME_AUTHOR
+  TITLE_SIMILARITY
+  MANUAL
+  NONE
+}
+
+enum MismatchRisk {
+  NONE
+  LOW
+  MEDIUM
+  HIGH
+  UNKNOWN
+}
+
+# CompetitionLevel maps to Chinese display strings in the app layer:
+#   HIGHLY_COMPETITIVE → 极具竞争力
+#   COMPETITIVE        → 有竞争力
+#   AVERAGE            → 竞争力一般
+#   WEAK               → 较弱
+enum CompetitionLevel {
+  HIGHLY_COMPETITIVE
+  COMPETITIVE
+  AVERAGE
+  WEAK
+}
+
+# ─── Topic ────────────────────────────────────────────────────────────────────
+# Main entity: a forum topic scraped from the contest site (signup or preliminary).
+# Denormalized latest-evaluation scores live on this table so the leaderboard can
+# sort/filter/paginate without a JOIN — the hottest query path.
+
+type Topic
+  @table(name: "topics", key: "id")
+  @index(fields: ["sourceType", "totalScore"], order: [ASC, DESC])
+  @index(fields: ["sourceType", "track", "totalScore"], order: [ASC, ASC, DESC])
+  @index(fields: ["sourceType", "updatedAt"], order: [ASC, DESC]) {
+  id: String!
+  sourceType: TraeSourceType! @col(name: "source_type")
+  externalTopicId: String! @col(name: "external_topic_id")
+  slug: String!
+  title: String!
+  url: String!
+  authorName: String! @col(name: "author_name")
+  authorAvatarUrl: String @col(name: "author_avatar_url")
+  track: String
+  tags: [String]
+  replyCount: Int @col(name: "reply_count")
+  viewCount: Int @col(name: "view_count")
+  likeCount: Int @col(name: "like_count")
+  createdAtExternal: Timestamp @col(name: "created_at_external")
+  lastActivityAtExternal: Timestamp @col(name: "last_activity_at_external")
+  scrapedAt: Timestamp! @col(name: "scraped_at")
+  updatedAt: Timestamp! @col(name: "updated_at")
+  contentText: String! @col(name: "content_text")
+  contentHtml: String @col(name: "content_html")
+  excerpt: String!
+  demoUrl: String @col(name: "demo_url")
+  attachmentUrls: [String] @col(name: "attachment_urls")
+  imageUrls: [String] @col(name: "image_urls")
+  sessionIds: [String] @col(name: "session_ids")
+  traeEvidence: Any @col(name: "trae_evidence")
+  contentHash: String! @col(name: "content_hash")
+  status: TraeTopicStatus!
+  rawJson: Any @col(name: "raw_json")
+  rawHtml: String @col(name: "raw_html")
+
+  # Denormalized from the latest Evaluation — written by the judge pipeline.
+  # These power the leaderboard's sort dimensions directly on this table.
+  totalScore: Float @col(name: "total_score")
+  innovationScore: Float @col(name: "innovation_score")
+  practicalityScore: Float @col(name: "practicality_score")
+  completionScore: Float @col(name: "completion_score")
+  designScore: Float @col(name: "design_score")
+  complianceRiskScore: Float @col(name: "compliance_risk_score")
+  directionConsistencyScore: Float @col(name: "direction_consistency_score")
+  confidenceScore: Float @col(name: "confidence_score")
+  competitionLevel: CompetitionLevel @col(name: "competition_level")
+  evaluatedAt: Timestamp @col(name: "evaluated_at")
+}
+
+# ─── Evaluation ───────────────────────────────────────────────────────────────
+# An AI judge's assessment of a preliminary topic. A topic may have multiple
+# evaluations over time (re-judges); the latest one (by createdAt) is canonical.
+
+type Evaluation @table(name: "evaluations", key: "id") {
+  id: String!
+  topic: Topic! @ref(fields: "topicId")
+  topicId: String! @col(name: "topic_id") @index
+  sourceType: String! @col(name: "source_type")
+  provider: TraeAiProvider
+  model: String!
+  promptVersion: String! @col(name: "prompt_version")
+  totalScore: Float! @col(name: "total_score")
+  innovationScore: Float! @col(name: "innovation_score")
+  practicalityScore: Float! @col(name: "practicality_score")
+  completionScore: Float! @col(name: "completion_score")
+  designScore: Float! @col(name: "design_score")
+  complianceRiskScore: Float! @col(name: "compliance_risk_score")
+  directionConsistencyScore: Float @col(name: "direction_consistency_score")
+  confidenceScore: Float! @col(name: "confidence_score")
+  competitionLevel: CompetitionLevel! @col(name: "competition_level")
+  summary: String!
+  strengths: [String]
+  weaknesses: [String]
+  suggestions: [String]
+  complianceRisks: [String] @col(name: "compliance_risks")
+  dimensionComments: Any @col(name: "dimension_comments")
+  matchComment: String @col(name: "match_comment")
+  promptText: String @col(name: "prompt_text")
+  systemPrompt: String @col(name: "system_prompt")
+  inputTokens: Int @col(name: "input_tokens")
+  outputTokens: Int @col(name: "output_tokens")
+  rawModelResponse: String! @col(name: "raw_model_response")
+  llmCallLogs: [Any] @col(name: "llm_call_logs")
+  error: String
+  createdAt: Timestamp! @col(name: "created_at") @index
+}
+
+# ─── Match ────────────────────────────────────────────────────────────────────
+# Links a preliminary topic to its corresponding signup topic (same author/project).
+# 1:1 with preliminary topics — id == preliminaryTopicId (preserved from Firestore).
+
+type Match @table(name: "matches", key: "id") {
+  id: String!
+  preliminaryTopicId: String! @col(name: "preliminary_topic_id") @unique
+  preliminaryTopic: Topic! @ref(fields: "preliminaryTopicId")
+  signupTopicId: String @col(name: "signup_topic_id")
+  signupTopic: Topic @ref(fields: "signupTopicId")
+  preliminaryAuthorName: String! @col(name: "preliminary_author_name")
+  signupAuthorName: String @col(name: "signup_author_name")
+  matchMethod: MatchMethod! @col(name: "match_method")
+  matchConfidence: Float! @col(name: "match_confidence")
+  titleSimilarity: Float @col(name: "title_similarity")
+  directionConsistencyScore: Float @col(name: "direction_consistency_score")
+  directionConsistencyComment: String @col(name: "direction_consistency_comment")
+  mismatchRisk: MismatchRisk! @col(name: "mismatch_risk")
+  createdAt: Timestamp! @col(name: "created_at")
+  updatedAt: Timestamp! @col(name: "updated_at")
+}
+
+# ─── Run ──────────────────────────────────────────────────────────────────────
+# Pipeline run log. The latest run's startedAt/finishedAt/status acts as the
+# cache version key for the board.
+
+type Run @table(name: "runs", key: "id") {
+  id: String!
+  type: TraeRunType!
+  sourceType: TraeSourceType @col(name: "source_type")
+  startedAt: Timestamp! @col(name: "started_at") @index
+  finishedAt: Timestamp @col(name: "finished_at")
+  status: TraeRunStatus!
+  pagesScanned: Int @col(name: "pages_scanned")
+  topicsFound: Int @col(name: "topics_found")
+  topicsCreated: Int @col(name: "topics_created")
+  topicsUpdated: Int @col(name: "topics_updated")
+  evaluatedCount: Int @col(name: "evaluated_count")
+  failedCount: Int @col(name: "failed_count")
+  matchedCount: Int @col(name: "matched_count")
+  logs: [String]
+  error: String
+}
+
+# ─── Presence ─────────────────────────────────────────────────────────────────
+# Online-user tracking. The board's "online count" is a single indexed COUNT(*)
+# query — no more reading N docs per heartbeat (the Firestore cost killer).
+
+type Presence @table(name: "presence", key: "sessionId") {
+  sessionId: String! @col(name: "session_id")
+  lastSeenAt: Timestamp! @col(name: "last_seen_at") @index
+  userAgentHash: String @col(name: "user_agent_hash")
+}
+
+# ─── ModelTokenUsage ──────────────────────────────────────────────────────────
+# Aggregated token usage per (provider, model). Powers the "tokens used" stat.
+
+type ModelTokenUsage @table(name: "model_token_usage", key: "id") {
+  id: String!
+  provider: TraeAiProvider!
+  model: String!
+  input: Int!
+  output: Int!
+  updatedAt: Timestamp! @col(name: "updated_at")
+}
+
+# ─── ScrapeCursor ─────────────────────────────────────────────────────────────
+# Resume cursor for paginated scraping. Keyed by sourceType.
+
+type ScrapeCursor @table(name: "scrape_cursors", key: "sourceType") {
+  sourceType: TraeSourceType! @col(name: "source_type")
+  nextPage: Int! @col(name: "next_page")
+  totalSeen: Int! @col(name: "total_seen")
+  lastRunAt: Timestamp! @col(name: "last_run_at")
+  lastCompletedCycleAt: Timestamp @col(name: "last_completed_cycle_at")
+}

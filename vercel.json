@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/trae-contest/cron/run-all",
+      "schedule": "*/30 * * * *"
+    }
+  ]
+}

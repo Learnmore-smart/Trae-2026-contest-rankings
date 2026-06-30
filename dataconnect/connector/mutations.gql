@@ -1,0 +1,523 @@
+# TRAE Contest 2026 — SQL Connect mutations
+#
+# Auth model:
+#   - Presence heartbeat is PUBLIC (any visitor can record presence).
+#   - All pipeline mutations (Topic/Evaluation/Match/Run/TokenUsage/ScrapeCursor)
+#     are NO_ACCESS — they run server-side via the Admin SDK, which bypasses @auth.
+#     The NO_ACCESS level prevents direct client calls if the connector ID leaks.
+#   - Server timestamps use `_expr: "request.time"` so the DB clock is authoritative.
+
+# ─── Topic (scraper writes) ───────────────────────────────────────────────────
+mutation UpsertTopic(
+  $id: String!
+  $sourceType: TraeSourceType!
+  $externalTopicId: String!
+  $slug: String!
+  $title: String!
+  $url: String!
+  $authorName: String!
+  $authorAvatarUrl: String
+  $track: String
+  $tags: [String!]
+  $replyCount: Int
+  $viewCount: Int
+  $likeCount: Int
+  $createdAtExternal: Timestamp
+  $lastActivityAtExternal: Timestamp
+  $contentText: String!
+  $contentHtml: String
+  $excerpt: String!
+  $demoUrl: String
+  $attachmentUrls: [String!]
+  $imageUrls: [String!]
+  $sessionIds: [String!]
+  $traeEvidence: Any
+  $contentHash: String!
+  $status: TraeTopicStatus!
+  $rawJson: Any
+  $rawHtml: String
+) @auth(level: NO_ACCESS) {
+  topic_upsert(data: {
+    id: $id
+    sourceType: $sourceType
+    externalTopicId: $externalTopicId
+    slug: $slug
+    title: $title
+    url: $url
+    authorName: $authorName
+    authorAvatarUrl: $authorAvatarUrl
+    track: $track
+    tags: $tags
+    replyCount: $replyCount
+    viewCount: $viewCount
+    likeCount: $likeCount
+    createdAtExternal: $createdAtExternal
+    lastActivityAtExternal: $lastActivityAtExternal
+    scrapedAt_expr: "request.time"
+    updatedAt_expr: "request.time"
+    contentText: $contentText
+    contentHtml: $contentHtml
+    excerpt: $excerpt
+    demoUrl: $demoUrl
+    attachmentUrls: $attachmentUrls
+    imageUrls: $imageUrls
+    sessionIds: $sessionIds
+    traeEvidence: $traeEvidence
+    contentHash: $contentHash
+    status: $status
+    rawJson: $rawJson
+    rawHtml: $rawHtml
+  })
+}
+
+# ─── Topic evaluation state (judge writes denormalized scores) ────────────────
+# After the judge writes an Evaluation, it mirrors the scores + status onto the
+# Topic row so the leaderboard can sort/filter without a JOIN. Uses _update so
+# only the listed fields change (scraper-owned fields like contentText stay).
+mutation UpdateTopicEvaluationState(
+  $id: String!
+  $status: TraeTopicStatus!
+  $totalScore: Float
+  $innovationScore: Float
+  $practicalityScore: Float
+  $completionScore: Float
+  $designScore: Float
+  $complianceRiskScore: Float
+  $directionConsistencyScore: Float
+  $confidenceScore: Float
+  $competitionLevel: CompetitionLevel
+) @auth(level: NO_ACCESS) {
+  topic_update(
+    id: $id
+    data: {
+      status: $status
+      totalScore: $totalScore
+      innovationScore: $innovationScore
+      practicalityScore: $practicalityScore
+      completionScore: $completionScore
+      designScore: $designScore
+      complianceRiskScore: $complianceRiskScore
+      directionConsistencyScore: $directionConsistencyScore
+      confidenceScore: $confidenceScore
+      competitionLevel: $competitionLevel
+      evaluatedAt_expr: "request.time"
+      updatedAt_expr: "request.time"
+    }
+  )
+}
+
+# ─── Evaluation (judge writes) ────────────────────────────────────────────────
+mutation UpsertEvaluation(
+  $id: String!
+  $topicId: String!
+  $sourceType: String!
+  $provider: TraeAiProvider
+  $model: String!
+  $promptVersion: String!
+  $totalScore: Float!
+  $innovationScore: Float!
+  $practicalityScore: Float!
+  $completionScore: Float!
+  $designScore: Float!
+  $complianceRiskScore: Float!
+  $directionConsistencyScore: Float
+  $confidenceScore: Float!
+  $competitionLevel: CompetitionLevel!
+  $summary: String!
+  $strengths: [String!]
+  $weaknesses: [String!]
+  $suggestions: [String!]
+  $complianceRisks: [String!]
+  $dimensionComments: Any
+  $matchComment: String
+  $promptText: String
+  $systemPrompt: String
+  $inputTokens: Int
+  $outputTokens: Int
+  $rawModelResponse: String!
+  $llmCallLogs: [Any!]
+  $error: String
+) @auth(level: NO_ACCESS) {
+  evaluation_upsert(data: {
+    id: $id
+    topicId: $topicId
+    sourceType: $sourceType
+    provider: $provider
+    model: $model
+    promptVersion: $promptVersion
+    totalScore: $totalScore
+    innovationScore: $innovationScore
+    practicalityScore: $practicalityScore
+    completionScore: $completionScore
+    designScore: $designScore
+    complianceRiskScore: $complianceRiskScore
+    directionConsistencyScore: $directionConsistencyScore
+    confidenceScore: $confidenceScore
+    competitionLevel: $competitionLevel
+    summary: $summary
+    strengths: $strengths
+    weaknesses: $weaknesses
+    suggestions: $suggestions
+    complianceRisks: $complianceRisks
+    dimensionComments: $dimensionComments
+    matchComment: $matchComment
+    promptText: $promptText
+    systemPrompt: $systemPrompt
+    inputTokens: $inputTokens
+    outputTokens: $outputTokens
+    rawModelResponse: $rawModelResponse
+    llmCallLogs: $llmCallLogs
+    error: $error
+    createdAt_expr: "request.time"
+  })
+}
+
+# ─── Match (matcher writes) ───────────────────────────────────────────────────
+mutation UpsertMatch(
+  $id: String!
+  $preliminaryTopicId: String!
+  $signupTopicId: String
+  $preliminaryAuthorName: String!
+  $signupAuthorName: String
+  $matchMethod: MatchMethod!
+  $matchConfidence: Float!
+  $titleSimilarity: Float
+  $directionConsistencyScore: Float
+  $directionConsistencyComment: String
+  $mismatchRisk: MismatchRisk!
+) @auth(level: NO_ACCESS) {
+  match_upsert(data: {
+    id: $id
+    preliminaryTopicId: $preliminaryTopicId
+    signupTopicId: $signupTopicId
+    preliminaryAuthorName: $preliminaryAuthorName
+    signupAuthorName: $signupAuthorName
+    matchMethod: $matchMethod
+    matchConfidence: $matchConfidence
+    titleSimilarity: $titleSimilarity
+    directionConsistencyScore: $directionConsistencyScore
+    directionConsistencyComment: $directionConsistencyComment
+    mismatchRisk: $mismatchRisk
+    createdAt_expr: "request.time"
+    updatedAt_expr: "request.time"
+  })
+}
+
+# ─── Run (pipeline start) ─────────────────────────────────────────────────────
+mutation UpsertRun(
+  $id: String!
+  $type: TraeRunType!
+  $sourceType: TraeSourceType
+  $status: TraeRunStatus!
+) @auth(level: NO_ACCESS) {
+  run_upsert(data: {
+    id: $id
+    type: $type
+    sourceType: $sourceType
+    status: $status
+    startedAt_expr: "request.time"
+  })
+}
+
+# ─── Run (pipeline finish) ────────────────────────────────────────────────────
+# Updates only the finish-time fields; leaves startedAt intact. Uses _update so
+# the caller doesn't have to re-pass type/sourceType.
+mutation FinishRun(
+  $id: String!
+  $status: TraeRunStatus!
+  $pagesScanned: Int
+  $topicsFound: Int
+  $topicsCreated: Int
+  $topicsUpdated: Int
+  $evaluatedCount: Int
+  $failedCount: Int
+  $matchedCount: Int
+  $logs: [String!]
+  $error: String
+) @auth(level: NO_ACCESS) {
+  run_update(
+    id: $id
+    data: {
+      status: $status
+      finishedAt_expr: "request.time"
+      pagesScanned: $pagesScanned
+      topicsFound: $topicsFound
+      topicsCreated: $topicsCreated
+      topicsUpdated: $topicsUpdated
+      evaluatedCount: $evaluatedCount
+      failedCount: $failedCount
+      matchedCount: $matchedCount
+      logs: $logs
+      error: $error
+    }
+  )
+}
+
+# ─── Presence (public heartbeat) ──────────────────────────────────────────────
+# Called on every board load / heartbeat. lastSeenAt is indexed so the online
+# count query is a cheap range scan, not a full-table read.
+mutation UpsertPresence(
+  $sessionId: String!
+  $userAgentHash: String
+) @auth(level: PUBLIC, insecureReason: "Presence heartbeat is public.") {
+  presence_upsert(data: {
+    sessionId: $sessionId
+    userAgentHash: $userAgentHash
+    lastSeenAt_expr: "request.time"
+  })
+}
+
+# ─── Model token usage (judge writes) ─────────────────────────────────────────
+mutation UpsertModelTokenUsage(
+  $id: String!
+  $provider: TraeAiProvider!
+  $model: String!
+  $input: Int!
+  $output: Int!
+) @auth(level: NO_ACCESS) {
+  modelTokenUsage_upsert(data: {
+    id: $id
+    provider: $provider
+    model: $model
+    input: $input
+    output: $output
+    updatedAt_expr: "request.time"
+  })
+}
+
+# ─── Scrape cursor (scraper resume) ───────────────────────────────────────────
+mutation UpsertScrapeCursor(
+  $sourceType: TraeSourceType!
+  $nextPage: Int!
+  $totalSeen: Int!
+  $lastCompletedCycleAt: Timestamp
+) @auth(level: NO_ACCESS) {
+  scrapeCursor_upsert(data: {
+    sourceType: $sourceType
+    nextPage: $nextPage
+    totalSeen: $totalSeen
+    lastRunAt_expr: "request.time"
+    lastCompletedCycleAt: $lastCompletedCycleAt
+  })
+}
+
+# ─── Migration Mutations (Preserve historical timestamps) ──────────────────────
+
+mutation MigrateTopic(
+  $id: String!
+  $sourceType: TraeSourceType!
+  $externalTopicId: String!
+  $slug: String!
+  $title: String!
+  $url: String!
+  $authorName: String!
+  $authorAvatarUrl: String
+  $track: String
+  $tags: [String!]
+  $replyCount: Int
+  $viewCount: Int
+  $likeCount: Int
+  $createdAtExternal: Timestamp
+  $lastActivityAtExternal: Timestamp
+  $scrapedAt: Timestamp!
+  $updatedAt: Timestamp!
+  $contentText: String!
+  $contentHtml: String
+  $excerpt: String!
+  $demoUrl: String
+  $attachmentUrls: [String!]
+  $imageUrls: [String!]
+  $sessionIds: [String!]
+  $traeEvidence: Any
+  $contentHash: String!
+  $status: TraeTopicStatus!
+  $rawJson: Any
+  $rawHtml: String
+  $totalScore: Float
+  $innovationScore: Float
+  $practicalityScore: Float
+  $completionScore: Float
+  $designScore: Float
+  $complianceRiskScore: Float
+  $directionConsistencyScore: Float
+  $confidenceScore: Float
+  $competitionLevel: CompetitionLevel
+  $evaluatedAt: Timestamp
+) @auth(level: NO_ACCESS) {
+  topic_upsert(data: {
+    id: $id
+    sourceType: $sourceType
+    externalTopicId: $externalTopicId
+    slug: $slug
+    title: $title
+    url: $url
+    authorName: $authorName
+    authorAvatarUrl: $authorAvatarUrl
+    track: $track
+    tags: $tags
+    replyCount: $replyCount
+    viewCount: $viewCount
+    likeCount: $likeCount
+    createdAtExternal: $createdAtExternal
+    lastActivityAtExternal: $lastActivityAtExternal
+    scrapedAt: $scrapedAt
+    updatedAt: $updatedAt
+    contentText: $contentText
+    contentHtml: $contentHtml
+    excerpt: $excerpt
+    demoUrl: $demoUrl
+    attachmentUrls: $attachmentUrls
+    imageUrls: $imageUrls
+    sessionIds: $sessionIds
+    traeEvidence: $traeEvidence
+    contentHash: $contentHash
+    status: $status
+    rawJson: $rawJson
+    rawHtml: $rawHtml
+    totalScore: $totalScore
+    innovationScore: $innovationScore
+    practicalityScore: $practicalityScore
+    completionScore: $completionScore
+    designScore: $designScore
+    complianceRiskScore: $complianceRiskScore
+    directionConsistencyScore: $directionConsistencyScore
+    confidenceScore: $confidenceScore
+    competitionLevel: $competitionLevel
+    evaluatedAt: $evaluatedAt
+  })
+}
+
+mutation MigrateEvaluation(
+  $id: String!
+  $topicId: String!
+  $sourceType: String!
+  $provider: TraeAiProvider
+  $model: String!
+  $promptVersion: String!
+  $totalScore: Float!
+  $innovationScore: Float!
+  $practicalityScore: Float!
+  $completionScore: Float!
+  $designScore: Float!
+  $complianceRiskScore: Float!
+  $directionConsistencyScore: Float
+  $confidenceScore: Float!
+  $competitionLevel: CompetitionLevel!
+  $summary: String!
+  $strengths: [String!]
+  $weaknesses: [String!]
+  $suggestions: [String!]
+  $complianceRisks: [String!]
+  $dimensionComments: Any
+  $matchComment: String
+  $promptText: String
+  $systemPrompt: String
+  $inputTokens: Int
+  $outputTokens: Int
+  $rawModelResponse: String!
+  $llmCallLogs: [Any!]
+  $error: String
+  $createdAt: Timestamp!
+) @auth(level: NO_ACCESS) {
+  evaluation_upsert(data: {
+    id: $id
+    topicId: $topicId
+    sourceType: $sourceType
+    provider: $provider
+    model: $model
+    promptVersion: $promptVersion
+    totalScore: $totalScore
+    innovationScore: $innovationScore
+    practicalityScore: $practicalityScore
+    completionScore: $completionScore
+    designScore: $designScore
+    complianceRiskScore: $complianceRiskScore
+    directionConsistencyScore: $directionConsistencyScore
+    confidenceScore: $confidenceScore
+    competitionLevel: $competitionLevel
+    summary: $summary
+    strengths: $strengths
+    weaknesses: $weaknesses
+    suggestions: $suggestions
+    complianceRisks: $complianceRisks
+    dimensionComments: $dimensionComments
+    matchComment: $matchComment
+    promptText: $promptText
+    systemPrompt: $systemPrompt
+    inputTokens: $inputTokens
+    outputTokens: $outputTokens
+    rawModelResponse: $rawModelResponse
+    llmCallLogs: $llmCallLogs
+    error: $error
+    createdAt: $createdAt
+  })
+}
+
+mutation MigrateMatch(
+  $id: String!
+  $preliminaryTopicId: String!
+  $signupTopicId: String
+  $preliminaryAuthorName: String!
+  $signupAuthorName: String
+  $matchMethod: MatchMethod!
+  $matchConfidence: Float!
+  $titleSimilarity: Float
+  $directionConsistencyScore: Float
+  $directionConsistencyComment: String
+  $mismatchRisk: MismatchRisk!
+  $createdAt: Timestamp!
+  $updatedAt: Timestamp!
+) @auth(level: NO_ACCESS) {
+  match_upsert(data: {
+    id: $id
+    preliminaryTopicId: $preliminaryTopicId
+    signupTopicId: $signupTopicId
+    preliminaryAuthorName: $preliminaryAuthorName
+    signupAuthorName: $signupAuthorName
+    matchMethod: $matchMethod
+    matchConfidence: $matchConfidence
+    titleSimilarity: $titleSimilarity
+    directionConsistencyScore: $directionConsistencyScore
+    directionConsistencyComment: $directionConsistencyComment
+    mismatchRisk: $mismatchRisk
+    createdAt: $createdAt
+    updatedAt: $updatedAt
+  })
+}
+
+mutation MigrateRun(
+  $id: String!
+  $type: TraeRunType!
+  $sourceType: TraeSourceType
+  $startedAt: Timestamp!
+  $finishedAt: Timestamp
+  $status: TraeRunStatus!
+  $pagesScanned: Int
+  $topicsFound: Int
+  $topicsCreated: Int
+  $topicsUpdated: Int
+  $evaluatedCount: Int
+  $failedCount: Int
+  $matchedCount: Int
+  $logs: [String!]
+  $error: String
+) @auth(level: NO_ACCESS) {
+  run_upsert(data: {
+    id: $id
+    type: $type
+    sourceType: $sourceType
+    startedAt: $startedAt
+    finishedAt: $finishedAt
+    status: $status
+    pagesScanned: $pagesScanned
+    topicsFound: $topicsFound
+    topicsCreated: $topicsCreated
+    topicsUpdated: $topicsUpdated
+    evaluatedCount: $evaluatedCount
+    failedCount: $failedCount
+    matchedCount: $matchedCount
+    logs: $logs
+    error: $error
+  })
+}
+

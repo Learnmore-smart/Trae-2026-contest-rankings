@@ -1,0 +1,318 @@
+# TRAE Contest 2026 — SQL Connect queries
+#
+# Auth model:
+#   - Board reads are PUBLIC (the leaderboard is a public page).
+#   - All queries are invoked server-side from Next.js API routes via the Admin
+#     SDK, which bypasses @auth. The @auth directives declare intent and protect
+#     against direct client calls if the connector ID leaks.
+
+# ─── Board data ───────────────────────────────────────────────────────────────
+# The board cache: fetches every preliminary topic with its latest evaluation
+# and match, joined in one query. Cached in-memory for ~15s (same pattern as the
+# old Firestore boardCache). SQL has no per-read billing, so scanning the full
+# preliminary set per cache miss is cheap. Sort/paginate happens in app code,
+# matching the existing listRankedTopics implementation.
+query GetBoardData @auth(level: PUBLIC, insecureReason: "Leaderboard is public.") {
+  topics(
+    where: { sourceType: { eq: PRELIMINARY } }
+    orderBy: [{ totalScore: DESC }]
+    limit: 1000
+  ) {
+    id
+    sourceType
+    externalTopicId
+    slug
+    title
+    url
+    authorName
+    authorAvatarUrl
+    track
+    tags
+    replyCount
+    viewCount
+    likeCount
+    createdAtExternal
+    lastActivityAtExternal
+    scrapedAt
+    updatedAt
+    contentText
+    excerpt
+    demoUrl
+    attachmentUrls
+    imageUrls
+    sessionIds
+    traeEvidence
+    contentHash
+    status
+    # Denormalized scores — power sort/filter directly on Topic, no JOIN.
+    totalScore
+    innovationScore
+    practicalityScore
+    completionScore
+    designScore
+    complianceRiskScore
+    directionConsistencyScore
+    confidenceScore
+    competitionLevel
+    evaluatedAt
+    # Latest evaluation (1:many → take newest by createdAt). Lightened — drops
+    # promptText/systemPrompt/rawModelResponse/llmCallLogs to keep payload small.
+    evaluations_on_topic(orderBy: [{ createdAt: DESC }], limit: 1) {
+      id
+      provider
+      model
+      promptVersion
+      totalScore
+      innovationScore
+      practicalityScore
+      completionScore
+      designScore
+      complianceRiskScore
+      directionConsistencyScore
+      confidenceScore
+      competitionLevel
+      summary
+      strengths
+      weaknesses
+      suggestions
+      complianceRisks
+      dimensionComments
+      matchComment
+      inputTokens
+      outputTokens
+      error
+      createdAt
+    }
+    # Match (1:1 via @unique preliminaryTopicId).
+    match_on_preliminaryTopic {
+      id
+      preliminaryTopicId
+      signupTopicId
+      preliminaryAuthorName
+      signupAuthorName
+      matchMethod
+      matchConfidence
+      titleSimilarity
+      directionConsistencyScore
+      directionConsistencyComment
+      mismatchRisk
+      createdAt
+      updatedAt
+    }
+  }
+}
+
+# ─── Topic detail ─────────────────────────────────────────────────────────────
+# Full topic page: topic + latest evaluation (unlike board, includes prompt and
+# raw model response so the UI can show "模型输入/输出") + match.
+query GetTopicDetail($id: String!) @auth(level: PUBLIC, insecureReason: "Topic detail is public.") {
+  topic(id: $id) {
+    id
+    sourceType
+    externalTopicId
+    slug
+    title
+    url
+    authorName
+    authorAvatarUrl
+    track
+    tags
+    replyCount
+    viewCount
+    likeCount
+    createdAtExternal
+    lastActivityAtExternal
+    scrapedAt
+    updatedAt
+    contentText
+    contentHtml
+    excerpt
+    demoUrl
+    attachmentUrls
+    imageUrls
+    sessionIds
+    traeEvidence
+    contentHash
+    status
+    rawJson
+    rawHtml
+    totalScore
+    innovationScore
+    practicalityScore
+    completionScore
+    designScore
+    complianceRiskScore
+    directionConsistencyScore
+    confidenceScore
+    competitionLevel
+    evaluatedAt
+    evaluations_on_topic(orderBy: [{ createdAt: DESC }], limit: 1) {
+      id
+      topicId
+      sourceType
+      provider
+      model
+      promptVersion
+      totalScore
+      innovationScore
+      practicalityScore
+      completionScore
+      designScore
+      complianceRiskScore
+      directionConsistencyScore
+      confidenceScore
+      competitionLevel
+      summary
+      strengths
+      weaknesses
+      suggestions
+      complianceRisks
+      dimensionComments
+      matchComment
+      promptText
+      systemPrompt
+      inputTokens
+      outputTokens
+      rawModelResponse
+      llmCallLogs
+      error
+      createdAt
+    }
+    match_on_preliminaryTopic {
+      id
+      preliminaryTopicId
+      signupTopicId
+      preliminaryAuthorName
+      signupAuthorName
+      matchMethod
+      matchConfidence
+      titleSimilarity
+      directionConsistencyScore
+      directionConsistencyComment
+      mismatchRisk
+      createdAt
+      updatedAt
+    }
+  }
+}
+
+# ─── Stats ────────────────────────────────────────────────────────────────────
+# Powers the stats bar. Uses aliases to run multiple aggregations in one round
+# trip. evaluatedCount approximates "preliminary topics with a non-null
+# evaluatedAt" — the denormalized flag set by the judge pipeline.
+query GetStats @auth(level: PUBLIC, insecureReason: "Stats are public.") {
+  signupCount: topics(where: { sourceType: { eq: SIGNUP } }) { _count }
+  preliminaryCount: topics(where: { sourceType: { eq: PRELIMINARY } }) { _count }
+  evaluatedCount: topics(
+    where: { sourceType: { eq: PRELIMINARY }, evaluatedAt: { isNull: false } }
+  ) { _count }
+  matchedCount: matches(where: { signupTopicId: { isNull: false } }) { _count }
+  modelTokenUsages {
+    input_sum
+    output_sum
+  }
+  # lastUpdatedAt: max timestamp across the mutable collections.
+  topics { updatedAt_max }
+  evaluations { createdAt_max }
+  matches { updatedAt_max }
+}
+
+# ─── Online count ─────────────────────────────────────────────────────────────
+# Single indexed COUNT(*) — replaces the Firestore pattern of reading every
+# presence doc per heartbeat. At 1000 concurrent users this is ~$6,500/month on
+# Firestore; on SQL it's one cheap indexed query.
+query GetOnlineCount($onlineSince: Timestamp!) @auth(level: PUBLIC, insecureReason: "Online count is public.") {
+  presences(where: { lastSeenAt: { ge: $onlineSince } }) { _count }
+}
+
+# ─── Latest run (cache version key) ───────────────────────────────────────────
+# The board cache uses the latest run's startedAt/finishedAt/status as a version
+# key: it only rebuilds when the pipeline mutates data. One cheap indexed query.
+query GetLatestRun @auth(level: PUBLIC, insecureReason: "Run history is public.") {
+  runs(orderBy: [{ startedAt: DESC }], limit: 1) {
+    id
+    type
+    sourceType
+    startedAt
+    finishedAt
+    status
+  }
+}
+
+# ─── Run history (admin UI) ───────────────────────────────────────────────────
+query ListRuns($limit: Int!) @auth(level: PUBLIC, insecureReason: "Run history is public.") {
+  runs(orderBy: [{ startedAt: DESC }], limit: $limit) {
+    id
+    type
+    sourceType
+    startedAt
+    finishedAt
+    status
+    pagesScanned
+    topicsFound
+    topicsCreated
+    topicsUpdated
+    evaluatedCount
+    failedCount
+    matchedCount
+    logs
+    error
+  }
+}
+
+# ─── Scraper cursor (pipeline only) ───────────────────────────────────────────
+query GetScrapeCursor($sourceType: TraeSourceType!) @auth(level: NO_ACCESS) {
+  scrapeCursors(where: { sourceType: { eq: $sourceType } }) {
+    sourceType
+    nextPage
+    totalSeen
+    lastRunAt
+    lastCompletedCycleAt
+  }
+}
+
+# ─── Topics by Source Type (pipeline only) ────────────────────────────────────
+query GetTopicsBySourceType($sourceType: TraeSourceType!) @auth(level: NO_ACCESS) {
+  topics(
+    where: { sourceType: { eq: $sourceType } }
+    limit: 1000
+  ) {
+    id
+    sourceType
+    externalTopicId
+    slug
+    title
+    url
+    authorName
+    authorAvatarUrl
+    track
+    tags
+    replyCount
+    viewCount
+    likeCount
+    createdAtExternal
+    lastActivityAtExternal
+    scrapedAt
+    updatedAt
+    contentText
+    contentHtml
+    excerpt
+    demoUrl
+    attachmentUrls
+    imageUrls
+    sessionIds
+    traeEvidence
+    contentHash
+    status
+    totalScore
+    innovationScore
+    practicalityScore
+    completionScore
+    designScore
+    complianceRiskScore
+    directionConsistencyScore
+    confidenceScore
+    competitionLevel
+    evaluatedAt
+  }
+}

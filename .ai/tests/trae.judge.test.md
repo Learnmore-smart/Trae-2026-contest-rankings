@@ -10,6 +10,7 @@ Verifies model JSON parsing, repair, and Zod validation behavior.
 
 - Tests fenced JSON extraction.
 - Tests invalid score rejection.
+- Leaves provider fallback behavior to `tests/trae.llm.test.ts`.
 
 ## Dependencies
 
@@ -22,3 +23,4 @@ Verifies model JSON parsing, repair, and Zod validation behavior.
 |------|--------|--------|
 | 2026-06-29 | Planned judge parser tests before implementation. | Codex |
 | 2026-06-29 | Synced final Node test runner. | Codex |
+| 2026-06-29 | Planned judge tests to remain focused on parser behavior after LLM client extraction. | Codex |
