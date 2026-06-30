@@ -58,6 +58,7 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 - 2026-06-30 Codex: Owner reported the ranking list now loads 424 works but the header still shows `已评分 0/0`. Root cause: `getTraeStats()` uses only the lightweight Data Connect stats query and returns `emptyStats()` on failure, while `listRankedTopics()` can already fall back to `topics-cache.json`.
 - Fix strategy: add a local cache stats builder and use it as the `getTraeStats()` fallback when Data Connect stats fail. Keep the lightweight Data Connect path as the primary path to avoid reintroducing deadline-prone board reads.
 - Regression risk: fallback `lastUpdatedAt` and counts come from the snapshot file and may lag behind live DB, but they are consistent with the rows the page is displaying.
+- Implemented: extracted `readTopicsCache()` and `statsPayloadFromCacheTopics()`, reused the cache-derived stats in board fallback, and made `getTraeStats()` fall back to those counts before returning an unavailable 0/0 payload.
 
 ## Important Notes / NEVER Change
 
@@ -76,3 +77,4 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 | 2026-06-30 | Implemented independent stats read path for Data Connect deadline recovery. | Codex |
 | 2026-06-30 | Planned local cache fallback fix for missing Data Connect credentials. | Codex |
 | 2026-06-30 | Planned stats fallback from local topic cache for 0/0 header fix. | Codex |
+| 2026-06-30 | Implemented stats fallback from local topic cache for 100/424 header recovery. | Codex |

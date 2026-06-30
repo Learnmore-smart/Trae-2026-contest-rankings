@@ -9,5 +9,7 @@ ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
+ENV HOSTNAME="0.0.0.0"
 EXPOSE 8080
-CMD ["sh", "-c", "next start -p ${PORT:-8080}"]
+CMD ["sh", "-c", "npx next start -p ${PORT:-8080}"]
+

@@ -72,3 +72,4 @@ Guards public contest routing and workflow safety invariants.
 | 2026-06-30 | Planned local cache fallback regression guard. | Codex |
 | 2026-06-30 | Planned base-path API prefix regression guard. | Codex |
 | 2026-06-30 | Planned stats local-cache fallback regression guard. | Codex |
+| 2026-06-30 | Implemented stats local-cache fallback regression guard. | Codex |
