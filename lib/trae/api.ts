@@ -9,8 +9,7 @@ import {
   getOnlineCount,
   getTopicDetail as getTopicDetailQuery,
   upsertPresence,
-  listRuns as listRunsQuery,
-  getTopicsBySourceType
+  listRuns as listRunsQuery
 } from "@trae-contest/dataconnect-generated";
 import type {
   RankingItem,
@@ -91,6 +90,51 @@ async function getBoardVersion(): Promise<string> {
     console.error("Failed to get board version from DB, falling back to time-based key:", error);
     return `fallback|${Math.floor(Date.now() / 15_000)}`; // 15s cache key fallback
   }
+}
+
+async function getOnlineCountValue(dc: unknown): Promise<number> {
+  try {
+    const onlineSince = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const onlineRes = await getOnlineCount(dc as any, { onlineSince } as any);
+    return onlineRes.data.presences?.[0]?._count ?? 0;
+  } catch (error) {
+    console.error("Failed to get online count for stats:", error);
+    return 0;
+  }
+}
+
+function statsPayloadFromResponse(statsRes: any, onlineCount: number): StatsPayload {
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+
+  for (const tu of statsRes.data.modelTokenUsages ?? []) {
+    totalInputTokens += tu.input_sum ?? 0;
+    totalOutputTokens += tu.output_sum ?? 0;
+  }
+
+  const maxTimestamps = [
+    statsRes.data.topics?.[0]?.updatedAt_max,
+    statsRes.data.evaluations?.[0]?.createdAt_max,
+    statsRes.data.matches?.[0]?.updatedAt_max
+  ].filter(Boolean);
+
+  return {
+    signupCount: statsRes.data.signupCount?.[0]?._count ?? 0,
+    preliminaryCount: statsRes.data.preliminaryCount?.[0]?._count ?? 0,
+    evaluatedCount: statsRes.data.evaluatedCount?.[0]?._count ?? 0,
+    matchedCount: statsRes.data.matchedCount?.[0]?._count ?? 0,
+    totalInputTokens,
+    totalOutputTokens,
+    lastUpdatedAt: maxTimestamps.sort().at(-1) ?? null,
+    onlineCount
+  };
+}
+
+async function buildStatsFromSource(): Promise<StatsPayload> {
+  const dc = getDataConnectDb();
+  const statsRes = await getStats(dc as any);
+  const onlineCount = await getOnlineCountValue(dc);
+  return statsPayloadFromResponse(statsRes, onlineCount);
 }
 
 async function buildBoardDataFromSource(): Promise<BoardData> {
@@ -298,7 +342,7 @@ async function getBoardData(bypassCache = false): Promise<BoardData> {
 
 export async function getTraeStats(): Promise<StatsPayload> {
   try {
-    return (await getBoardData()).stats;
+    return await buildStatsFromSource();
   } catch (error) {
     return emptyStats(error instanceof Error ? error.message : String(error));
   }

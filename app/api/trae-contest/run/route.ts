@@ -60,7 +60,7 @@ async function runPipeline(state: PipelineState): Promise<void> {
     await runTraeMatching();
 
     set({ phase: "judge", message: "正在调用免费 AI 模型评分…" });
-    await judgeChangedTraeTopics({ mode: "unjudged" });
+    const judgeResult = await judgeChangedTraeTopics({ mode: "unjudged" });
 
     // Refresh the board snapshot so the next public load reads 1 doc instead of re-scanning
     // 5 collections. Best-effort: a failure here doesn't undo the pipeline's work.
@@ -74,7 +74,7 @@ async function runPipeline(state: PipelineState): Promise<void> {
       running: false,
       phase: "done",
       finishedAt: new Date().toISOString(),
-      message: "本轮抓取、匹配、评分已完成。",
+      message: `本轮抓取、匹配、评分已完成；评分 ${judgeResult.evaluatedCount} 个，失败 ${judgeResult.failedCount} 个。`,
       error: null
     });
   } catch (error) {

@@ -19,7 +19,7 @@ export default async function DevPage() {
   return (
     <main className="min-h-screen bg-[var(--page-bg)] px-4 py-6 text-stone-100 sm:px-6 lg:px-10">
       <div className="mx-auto max-w-5xl">
-        <Link href="/trae-contest-2026" className="control-button ghost w-fit">
+        <Link href="/" className="control-button ghost w-fit">
           返回榜单
         </Link>
         <header className="mt-8 border-b border-white/10 pb-6">

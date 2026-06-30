@@ -8,7 +8,7 @@ Guards the landing hero markup and CSS hooks used by the annotated container lay
 
 ## What It Does
 
-- Reads `app/trae-contest-2026/contest-client.tsx` and `app/globals.css`.
+- Reads `app/contest-client.tsx`, `app/globals.css`, and `app/contest.css`.
 - Verifies the hero has explicit copy, side rail, action rail, and telemetry hook classes.
 - Verifies the removed side-panel progress container does not return.
 - Verifies CSS keeps the side rail top-aligned and the action rail positioned in the right column on desktop, with a mobile single-column fallback.
@@ -21,14 +21,17 @@ Guards the landing hero markup and CSS hooks used by the annotated container lay
 
 ## Dependencies
 
-- Internal: `app/trae-contest-2026/contest-client.tsx` - markup hooks under test.
-- Internal: `app/globals.css` - layout and visual rules under test.
+- Internal: `app/contest-client.tsx` - markup hooks under test.
+- Internal: `app/globals.css` - global visual rules under test.
+- Internal: `app/contest.css` - contest-specific layout and visual rules under test.
 - External: Node built-in `node:test` and `node:assert/strict`.
 
 ## Agent Decisions / Thoughts
 
 - 2026-06-29 Codex: This is a visual layout change without an existing browser test harness, so use a focused source-level guard first, then verify in-browser with the running Next page.
 - 2026-06-29 Codex: Extend the guard for the full tech revamp by asserting stable command-center hooks rather than brittle color declarations.
+- 2026-06-30 Codex: The public contest source moved to root-level `app/*`; update visual guards to read the current client and detail client paths.
+- 2026-06-30 Codex: Contest-specific layout CSS now lives in `app/contest.css`, while global tokens and imports remain in `app/globals.css`; tests should combine both sources for layout assertions.
 
 ## Mobile Layout Repair Note
 
@@ -65,3 +68,5 @@ Guards the landing hero markup and CSS hooks used by the annotated container lay
 | 2026-06-29 | Planned landing hero layout regression test. | Codex |
 | 2026-06-30 | Added regression guards for light theme split and row/ring ranking layout. | Codex |
 | 2026-06-30 | Updated hero layout guard for removal of the side-panel progress container. | Codex |
+| 2026-06-30 | Updated source paths after root-level route move. | Codex |
+| 2026-06-30 | Updated CSS fixture input to include contest-specific stylesheet. | Codex |

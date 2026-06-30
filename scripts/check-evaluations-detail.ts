@@ -12,7 +12,7 @@ async function main() {
   const topics = res.data.topics ?? [];
   
   // Filter evaluated topics (excluding -1 placeholder scores)
-  const evaluated = topics.filter(t => t.totalScore !== null && t.totalScore >= 0);
+  const evaluated = topics.filter(t => t.totalScore != null && t.totalScore >= 0);
   console.log(`Loaded ${evaluated.length} evaluated topics.\n`);
 
   for (const topic of evaluated.slice(0, 10)) {

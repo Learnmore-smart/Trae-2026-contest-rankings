@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-const adminClientPath = join(process.cwd(), "app/trae-contest-2026/admin/admin-client.tsx");
+const adminClientPath = join(process.cwd(), "app/admin/admin-client.tsx");
 const adminClient = readFileSync(adminClientPath, "utf8");
 
 test("admin console busy badge stays generic while actions run", () => {

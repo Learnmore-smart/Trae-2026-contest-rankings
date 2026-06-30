@@ -1,6 +1,5 @@
 import nextEnv from "@next/env";
 import { writeFileSync, unlinkSync } from "node:fs";
-import { execSync } from "node:child_file"; // Wait, in Node.js it's "child_process"
 import { execSync as exec } from "node:child_process";
 import { join } from "node:path";
 

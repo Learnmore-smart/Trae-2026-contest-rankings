@@ -1,5 +1,10 @@
-import { redirect } from "next/navigation";
+import ContestClient from "./contest-client";
+import "./contest.css";
 
-export default function Home() {
-  redirect("/trae-contest-2026");
+export const metadata = {
+  title: "TRAE AI 创造力大赛 · 第三方 AI 评分榜"
+};
+
+export default function TraeContestPage() {
+  return <ContestClient activeTab="landing" />;
 }

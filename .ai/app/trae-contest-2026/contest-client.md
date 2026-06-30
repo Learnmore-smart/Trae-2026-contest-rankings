@@ -86,6 +86,15 @@ Implements the public ranking UI for `/trae-contest-2026`.
 |------|-----|-------|-----|
 | 2026-06-29 | Refreshing while viewing `榜单` returned to `首页`. | The top-level section lived only in client state, and the nav used buttons that did not change the URL. | Add `/trae-contest-2026/ranking`, pass the active tab from each route, and render route links for `首页` and `榜单`. |
 
+## Bug Fix Plan: Preserve Ranking During Pipeline Reload
+
+- 2026-06-30 Codex: Owner observed that already-scored ranking rows appeared to disappear temporarily after clicking scoring/retry. Root cause in this component: `loading` renders `<LoadingGrid>` for every reload, even when `items` already contains the previous successful list, so a pipeline completion refresh hides the old rows while `/stats` and `/topics` are reloading.
+- Fix strategy: keep existing rows visible during background reloads by only rendering the initial skeleton when `loading && items.length === 0`. Do not change fetch URLs, filters, sorting, run polling, or the successful payload replacement semantics.
+- Regression risk: an empty result after search/filter must still show the empty state once loading finishes; the condition must not pin stale rows after a successful empty filtered response.
+- Implemented: ranking skeleton now only renders for the first empty load, so existing rows remain visible during pipeline completion refreshes.
+- 2026-06-30 Codex: Also render backend pipeline status messages for done/error states so the new bounded judge batch count is visible beside the button.
+- 2026-06-30 Codex: Deadline fix plan: load `/stats` independently from `/topics` so a topic-list failure does not force the progress header to `0/0`.
+
 ## Important Notes / NEVER Change
 
 - The disclaimer must remain visible and unambiguous.

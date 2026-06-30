@@ -8,7 +8,7 @@ Guards the admin console's compact running-status UI against leaking long action
 
 ## What It Does
 
-- Reads `app/trae-contest-2026/admin/admin-client.tsx` as UTF-8 source.
+- Reads `app/admin/admin-client.tsx` as UTF-8 source.
 - Verifies the inline busy badge uses generic running copy.
 - Verifies the old `正在执行：{busy}` interpolation does not return.
 
@@ -20,12 +20,13 @@ Guards the admin console's compact running-status UI against leaking long action
 
 ## Dependencies
 
-- Internal: `app/trae-contest-2026/admin/admin-client.tsx`.
+- Internal: `app/admin/admin-client.tsx`.
 - External: Node built-in `node:test` and `node:assert/strict`.
 
 ## Agent Decisions / Thoughts
 
 - 2026-06-30 Codex: Use a source-level Node test to match the repo's existing lightweight regression style instead of introducing a React component harness for a single copy/layout fix.
+- 2026-06-30 Codex: The admin source moved to `app/admin`; keep the same busy badge contract and update only the source path.
 
 ## Important Notes / NEVER Change
 
@@ -43,3 +44,4 @@ Guards the admin console's compact running-status UI against leaking long action
 |------|--------|--------|
 | 2026-06-30 | Planned admin console busy-badge regression test. | Codex |
 | 2026-06-30 | Added the admin console busy-badge regression test. | Codex |
+| 2026-06-30 | Updated source path after root-level route move. | Codex |

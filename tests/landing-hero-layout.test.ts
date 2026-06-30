@@ -3,8 +3,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-const component = readFileSync(join(process.cwd(), "app/trae-contest-2026/contest-client.tsx"), "utf8");
-const css = readFileSync(join(process.cwd(), "app/globals.css"), "utf8");
+const component = readFileSync(join(process.cwd(), "app/contest-client.tsx"), "utf8");
+const globalCss = readFileSync(join(process.cwd(), "app/globals.css"), "utf8");
+const contestCssPath = join(process.cwd(), "app/contest.css");
+const contestCss = existsSync(contestCssPath) ? readFileSync(contestCssPath, "utf8") : "";
+const css = `${globalCss}\n${contestCss}`;
 const themePath = join(process.cwd(), "app/theme.css");
 const theme = existsSync(themePath) ? readFileSync(themePath, "utf8") : "";
 
@@ -42,7 +45,7 @@ test("mobile nav and hero rules prevent horizontal overflow", () => {
   assert.match(css, /html,\s*body\s*{[\s\S]*?overflow-x:\s*hidden;/);
   assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.site-nav\s*{[\s\S]*?max-width:\s*100vw;[\s\S]*?overflow-x:\s*hidden;/);
   assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.brand-code\s*{[\s\S]*?display:\s*none;/);
-  assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.nav-metrics__detail\s*{[\s\S]*?display:\s*none;/);
+  assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.nav-metrics__detail\s*{[\s\S]*?display:\s*inline;/);
   assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.landing-hero-title\s*{[\s\S]*?font-size:\s*clamp\(/);
   assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.landing-hero-title\s*{[\s\S]*?overflow-wrap:\s*anywhere;/);
   assert.match(css, /@media \(max-width: 768px\)\s*{[\s\S]*?\.hero-actions \.control-button\s*{[\s\S]*?width:\s*100%;/);
@@ -90,7 +93,7 @@ test("ranking controls stay compact and cards open details directly", () => {
   assert.match(theme, /--shadow-card:\s*none;/);
 
   // Assert details page theming and dropdowns
-  const detailComponent = readFileSync(join(process.cwd(), "app/trae-contest-2026/project/project-detail-client.tsx"), "utf8");
+  const detailComponent = readFileSync(join(process.cwd(), "app/project/project-detail-client.tsx"), "utf8");
   assert.match(detailComponent, /className="[^"]*\btech-shell\b[^"]*"/);
   assert.match(detailComponent, /useContestTheme\(\)/);
   assert.match(detailComponent, /<NavMenu/);

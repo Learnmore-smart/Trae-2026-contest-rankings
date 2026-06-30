@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { Play, RefreshCw } from "lucide-react";
 
+const API_BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
 const TASKS = [
   { task: "scrape-signup", label: "抓取报名区", hint: "更新报名帖，只用于后续匹配。" },
   { task: "scrape-preliminary", label: "抓取初赛区", hint: "更新会进入榜单的 Demo 帖。" },
@@ -19,7 +21,7 @@ export default function DevClient() {
     setBusy(task);
     setOutput("任务运行中，长任务可能需要几分钟...");
     try {
-      const response = await fetch("/api/trae-contest/dev/run", {
+      const response = await fetch(`${API_BASE}/api/trae-contest/dev/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ task })

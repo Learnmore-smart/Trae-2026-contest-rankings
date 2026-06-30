@@ -39,6 +39,14 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 - 2026-06-30 Codex: Keep public payload sanitization and cache behavior, but treat generated Data Connect `Any` payloads and enum conversions as a server-only adapter boundary.
 - Implemented: removed the stale write-side competition-level mapper and kept read paths on `dataconnect.ts`.
 
+## Bug Fix Plan: Stats Must Not Depend On Board Query
+
+- 2026-06-30 Codex: Owner reported `4 DEADLINE_EXCEEDED` and the public page showing `0/0`. Root cause: `getTraeStats()` calls `getBoardData()`, which rebuilds the full board via `GetBoardData`. After raising that nested query to 5000 topics, Data Connect hit its 300s deadline; because the client treated stats/topics as one all-or-nothing load, the first render fell back to null stats and showed `0/0`.
+- Fix strategy: make `getTraeStats()` call the lightweight `GetStats` aggregation directly and fetch online count separately. Keep `listRankedTopics()` on board data, but let stats survive even when topic list loading fails.
+- Regression risk: stats and list can be briefly out of sync during a pipeline run; that is better than showing an empty contest.
+- 2026-06-30 Codex: Implementation target is a new `buildStatsFromSource()` helper used only by `getTraeStats()`, leaving board cache/list behavior unchanged.
+- Implemented: added `buildStatsFromSource()` using `GetStats` plus online count, and changed `getTraeStats()` to avoid `getBoardData()`.
+
 ## Important Notes / NEVER Change
 
 - Public APIs must not return `rawHtml` or unrestricted raw model internals.
@@ -52,3 +60,5 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 | 2026-06-30 | Added board snapshot doc caching and listRankedTopics cache bypass. | Antigravity |
 | 2026-06-30 | Planned Data Connect read-model verification and lint-boundary cleanup. | Codex |
 | 2026-06-30 | Verified Data Connect read smoke test and removed stale mapper warning. | Codex |
+| 2026-06-30 | Planned independent stats read path for Data Connect deadline recovery. | Codex |
+| 2026-06-30 | Implemented independent stats read path for Data Connect deadline recovery. | Codex |
