@@ -35,6 +35,12 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 - Regression risk: stats and list can be briefly out of sync while the board cache rebuilds; this is acceptable and much better than displaying an empty contest.
 - Implemented: `/stats` is started independently and applies `setStats` from its own promise; `/topics` failure no longer prevents the stats payload from being rendered.
 
+## Bug Fix Plan: API Requests Must Respect Base Path
+
+- 2026-06-30 Codex: Owner reported the ranking UI showing `榜单数据加载失败`. Root cause in local reproduction: `next.config.mjs` still sets `basePath: "/trae-contest-2026"`, but the client defaults `API_BASE` to an empty string unless `NEXT_PUBLIC_BASE_PATH` is manually set, so requests go to `/api/trae-contest/*` and return 404 under the configured base path.
+- Fix strategy: make the client default API/image path prefix match the configured base path while preserving `NEXT_PUBLIC_BASE_PATH` as an override.
+- Regression risk: if the app is later truly moved to root, `next.config.mjs` and this default must be changed together.
+
 ## Important Notes / NEVER Change
 
 - Keep the public disclaimer visible.
@@ -46,3 +52,4 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 |------|--------|--------|
 | 2026-06-30 | Created documentation for root-level contest client after route move. | Codex |
 | 2026-06-30 | Implemented independent stats loading for Data Connect deadline recovery. | Codex |
+| 2026-06-30 | Planned base-path-aware API request fix for ranking load failures. | Codex |

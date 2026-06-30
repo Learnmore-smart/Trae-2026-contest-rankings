@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 
 const appDir = join(process.cwd(), "app");
 const landingPagePath = join(appDir, "page.tsx");
 const rankingPagePath = join(appDir, "ranking/page.tsx");
 const clientPath = join(appDir, "contest-client.tsx");
+const nextConfigPath = join(process.cwd(), "next.config.mjs");
 const runRoutePath = join(process.cwd(), "app/api/trae-contest/run/route.ts");
 const dataConnectQueriesPath = join(process.cwd(), "dataconnect/connector/queries.gql");
 const traeApiPath = join(process.cwd(), "lib/trae/api.ts");
+const topicsCachePath = join(process.cwd(), "lib/trae/topics-cache.json");
 
 const read = (path: string) => readFileSync(path, "utf8");
 
@@ -36,6 +39,15 @@ test("ranking reload keeps existing rows visible while refreshing", () => {
   assert.match(client, /loading && items\.length === 0 \? \([\s\S]*?<LoadingGrid viewMode={viewMode} \/>/);
 });
 
+test("client API requests default to configured Next base path", () => {
+  const client = read(clientPath);
+  const nextConfig = read(nextConfigPath);
+  const basePath = nextConfig.match(/basePath:\s*"([^"]+)"/)?.[1];
+
+  assert.equal(basePath, "/trae-contest-2026");
+  assert.match(client, /const API_BASE = process\.env\.NEXT_PUBLIC_BASE_PATH \?\? "\/trae-contest-2026";/);
+});
+
 test("data connect nested topic reads stay below deadline-prone size", () => {
   const queries = read(dataConnectQueriesPath);
   const boardQuery = queries.match(/query GetBoardData[\s\S]*?\n}/)?.[0] ?? "";
@@ -56,6 +68,73 @@ test("stats load path is independent from ranking topic list", () => {
   assert.match(client, /setStats\(statsPayload\)/);
   assert.doesNotMatch(traeApi, /export async function getTraeStats\(\): Promise<StatsPayload> \{\s*try \{\s*return \(await getBoardData\(\)\)\.stats;/);
   assert.match(traeApi, /async function buildStatsFromSource\(\): Promise<StatsPayload>/);
+});
+
+test("ranking topics fall back to local cache when Data Connect is unconfigured", async () => {
+  const envKeys = [
+    "FIREBASE_SERVICE_ACCOUNT_KEY",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "FIREBASE_CONFIG",
+    "GCLOUD_PROJECT",
+    "GOOGLE_CLOUD_PROJECT",
+    "FIREBASE_PROJECT_ID"
+  ];
+  const previousEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
+  const originalConsoleError = console.error;
+  for (const key of envKeys) delete process.env[key];
+
+  try {
+    console.error = () => undefined;
+    const moduleUrl = `${pathToFileURL(traeApiPath).href}?fallback-test=${Date.now()}`;
+    const { listRankedTopics } = await import(moduleUrl) as typeof import("../lib/trae/api.ts");
+    const payload = await listRankedTopics({ page: 1, pageSize: 3, sort: "total", bypassCache: true });
+
+    assert.equal(payload.sourceUnavailable, undefined);
+    assert.ok(payload.total > 0, "expected cached topics to be available without Data Connect credentials");
+    assert.ok(payload.items.length > 0, "expected first cached ranking page to include rows");
+  } finally {
+    for (const [key, value] of previousEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    console.error = originalConsoleError;
+  }
+});
+
+test("ranking stats fall back to local cache when Data Connect is unconfigured", async () => {
+  type CachedTopic = {
+    totalScore?: number | null;
+  };
+  const cachedTopics = JSON.parse(read(topicsCachePath)) as CachedTopic[];
+  const expectedEvaluatedCount = cachedTopics.filter((topic) => typeof topic.totalScore === "number" && topic.totalScore >= 0).length;
+  const envKeys = [
+    "FIREBASE_SERVICE_ACCOUNT_KEY",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "FIREBASE_CONFIG",
+    "GCLOUD_PROJECT",
+    "GOOGLE_CLOUD_PROJECT",
+    "FIREBASE_PROJECT_ID"
+  ];
+  const previousEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
+  const originalConsoleError = console.error;
+  for (const key of envKeys) delete process.env[key];
+
+  try {
+    console.error = () => undefined;
+    const moduleUrl = `${pathToFileURL(traeApiPath).href}?stats-fallback-test=${Date.now()}`;
+    const { getTraeStats } = await import(moduleUrl) as typeof import("../lib/trae/api.ts");
+    const stats = await getTraeStats();
+
+    assert.equal(stats.sourceUnavailable, undefined);
+    assert.equal(stats.preliminaryCount, cachedTopics.length);
+    assert.equal(stats.evaluatedCount, expectedEvaluatedCount);
+  } finally {
+    for (const [key, value] of previousEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    console.error = originalConsoleError;
+  }
 });
 
 test("public run status reports bounded judging batch counts", () => {

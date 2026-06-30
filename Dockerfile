@@ -9,5 +9,5 @@ ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
-EXPOSE 5000
-CMD ["npm", "run", "start"]
+EXPOSE 8080
+CMD ["sh", "-c", "next start -p ${PORT:-8080}"]

@@ -130,6 +130,34 @@ function statsPayloadFromResponse(statsRes: any, onlineCount: number): StatsPayl
   };
 }
 
+async function readTopicsCache(): Promise<any[]> {
+  const cachePath = path.join(process.cwd(), "lib", "trae", "topics-cache.json");
+  const content = await fs.readFile(cachePath, "utf8");
+  return JSON.parse(content);
+}
+
+function statsPayloadFromCacheTopics(allTopics: any[], onlineCount = 1): StatsPayload {
+  const evaluatedCount = allTopics.filter((topic) => topic.totalScore !== null && topic.totalScore >= 0).length;
+  const updatedAtValues = allTopics
+    .flatMap((topic) => [
+      topic.updatedAt,
+      topic.evaluatedAt,
+      topic.evaluations_on_topic?.[0]?.createdAt
+    ])
+    .filter(Boolean);
+
+  return {
+    signupCount: 260,
+    preliminaryCount: allTopics.length,
+    evaluatedCount,
+    matchedCount: 0,
+    totalInputTokens: 265582,
+    totalOutputTokens: 77612,
+    lastUpdatedAt: updatedAtValues.sort().at(-1) ?? null,
+    onlineCount
+  };
+}
+
 async function buildStatsFromSource(): Promise<StatsPayload> {
   const dc = getDataConnectDb();
   const statsRes = await getStats(dc as any);
@@ -138,14 +166,13 @@ async function buildStatsFromSource(): Promise<StatsPayload> {
 }
 
 async function buildBoardDataFromSource(): Promise<BoardData> {
-  const dc = getDataConnectDb();
-  
   let topTopics: any[] = [];
   let statsRes: any = null;
   let onlineCount = 1;
   let dbFailed = false;
 
   try {
+    const dc = getDataConnectDb();
     const [boardRes, sRes] = await Promise.all([
       getBoardDataQuery(dc as any),
       getStats(dc as any)
@@ -164,26 +191,14 @@ async function buildBoardDataFromSource(): Promise<BoardData> {
   // Load the full list of preliminary topics from the local JSON cache
   let allTopics: any[] = [];
   try {
-    const cachePath = path.join(process.cwd(), "lib", "trae", "topics-cache.json");
-    const content = await fs.readFile(cachePath, "utf8");
-    allTopics = JSON.parse(content);
+    allTopics = await readTopicsCache();
   } catch (error) {
     console.error("Failed to read topics-cache.json:", error);
   }
 
   if (dbFailed) {
     // Construct stats and baseItems from the local cache directly
-    const evaluatedCount = allTopics.filter(t => t.totalScore !== null && t.totalScore >= 0).length;
-    const stats: StatsPayload = {
-      signupCount: 260,
-      preliminaryCount: allTopics.length,
-      evaluatedCount,
-      matchedCount: 0,
-      totalInputTokens: 265582,
-      totalOutputTokens: 77612,
-      lastUpdatedAt: new Date().toISOString(),
-      onlineCount: 1
-    };
+    const stats = statsPayloadFromCacheTopics(allTopics, 1);
 
     const baseItems: RankingItem[] = allTopics.map((t) => {
       const latestEval = t.evaluations_on_topic?.[0] ?? null;
@@ -344,6 +359,11 @@ export async function getTraeStats(): Promise<StatsPayload> {
   try {
     return await buildStatsFromSource();
   } catch (error) {
+    try {
+      return statsPayloadFromCacheTopics(await readTopicsCache(), 1);
+    } catch {
+      // Fall through to the explicit unavailable payload when neither live stats nor the snapshot can be read.
+    }
     return emptyStats(error instanceof Error ? error.message : String(error));
   }
 }

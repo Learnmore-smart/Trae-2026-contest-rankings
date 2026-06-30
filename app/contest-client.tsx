@@ -29,7 +29,7 @@ import { useContestLanguage, type ContestLanguage } from "./i18n";
 import { useContestTheme, type ContestTheme } from "./theme";
 import type { RankingItem, StatsPayload } from "@/lib/trae/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
+const API_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "/trae-contest-2026";
 
 const TRACKS = ["全部赛道", "生活娱乐", "学习工作", "社会服务", "硬件交互", "社会公益"];
 const SORTS = ["total", "innovation", "practicality", "completion", "design", "confidence", "views", "replies", "updated"] as const;

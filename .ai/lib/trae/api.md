@@ -47,6 +47,18 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 - 2026-06-30 Codex: Implementation target is a new `buildStatsFromSource()` helper used only by `getTraeStats()`, leaving board cache/list behavior unchanged.
 - Implemented: added `buildStatsFromSource()` using `GetStats` plus online count, and changed `getTraeStats()` to avoid `getBoardData()`.
 
+## Bug Fix Plan: Local Cache Fallback Must Survive Missing Data Connect Credentials
+
+- 2026-06-30 Codex: Owner reported the public ranking screen showing a data-load failure / empty 0-row board. Root cause: `buildBoardDataFromSource()` calls `getDataConnectDb()` before its `try` block, so missing Firebase Data Connect credentials throw before the existing local `topics-cache.json` fallback can run.
+- Fix strategy: move Data Connect initialization inside the guarded DB block, keep the existing cache load path, and assert that the board builder can still return cached rows when Data Connect is unavailable.
+- Regression risk: fallback stats are approximate when DB is unavailable, but this is preferable to hiding the cached public contest rows.
+
+## Bug Fix Plan: Stats Must Derive From Local Cache When Data Connect Is Unavailable
+
+- 2026-06-30 Codex: Owner reported the ranking list now loads 424 works but the header still shows `已评分 0/0`. Root cause: `getTraeStats()` uses only the lightweight Data Connect stats query and returns `emptyStats()` on failure, while `listRankedTopics()` can already fall back to `topics-cache.json`.
+- Fix strategy: add a local cache stats builder and use it as the `getTraeStats()` fallback when Data Connect stats fail. Keep the lightweight Data Connect path as the primary path to avoid reintroducing deadline-prone board reads.
+- Regression risk: fallback `lastUpdatedAt` and counts come from the snapshot file and may lag behind live DB, but they are consistent with the rows the page is displaying.
+
 ## Important Notes / NEVER Change
 
 - Public APIs must not return `rawHtml` or unrestricted raw model internals.
@@ -62,3 +74,5 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 | 2026-06-30 | Verified Data Connect read smoke test and removed stale mapper warning. | Codex |
 | 2026-06-30 | Planned independent stats read path for Data Connect deadline recovery. | Codex |
 | 2026-06-30 | Implemented independent stats read path for Data Connect deadline recovery. | Codex |
+| 2026-06-30 | Planned local cache fallback fix for missing Data Connect credentials. | Codex |
+| 2026-06-30 | Planned stats fallback from local topic cache for 0/0 header fix. | Codex |
