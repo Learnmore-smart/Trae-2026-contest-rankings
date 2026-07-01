@@ -1,7 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { createHash } from "node:crypto";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import * as cheerio from "cheerio";
 import { getTraeConfig } from "./config.ts";
 import { extractTopicSignals, getContentHash, htmlToText, normalizeWhitespace } from "./extractors.ts";
@@ -456,38 +454,6 @@ function topicToVariables(topic: TraeTopic, status: keyof typeof topicStatusMap)
   };
 }
 
-async function updateLocalTopicsCache(topic: TraeTopic, status: string): Promise<void> {
-  try {
-    const cachePath = path.join(process.cwd(), "lib", "trae", "topics-cache.json");
-    let items: any[] = [];
-    try {
-      const content = await fs.readFile(cachePath, "utf8");
-      items = JSON.parse(content);
-    } catch {
-      // If it doesn't exist, we start with empty
-    }
-
-    const vars = topicToVariables(topic, status as any);
-
-    const index = items.findIndex((item) => item.id === topic.id);
-    const updatedItem = {
-      ...vars,
-      evaluations_on_topic: index >= 0 ? (items[index].evaluations_on_topic ?? []) : [],
-      match_on_preliminaryTopic: index >= 0 ? (items[index].match_on_preliminaryTopic ?? null) : null
-    };
-
-    if (index >= 0) {
-      items[index] = updatedItem;
-    } else {
-      items.push(updatedItem);
-    }
-
-    await fs.writeFile(cachePath, JSON.stringify(items, null, 2), "utf8");
-  } catch (error) {
-    console.error("Failed to update local topics cache:", error);
-  }
-}
-
 export async function upsertTopic(topic: TraeTopic): Promise<"created" | "updated" | "unchanged"> {
   const dc = getDataConnectDb();
   const existingRes = await getTopicDetail(dc as any, { id: topic.id } as any);
@@ -508,7 +474,6 @@ export async function upsertTopic(topic: TraeTopic): Promise<"created" | "update
       confidenceScore: -1,
       competitionLevel: null
     } as any);
-    await updateLocalTopicsCache(topic, topic.status);
     return "created";
   }
 
@@ -518,7 +483,6 @@ export async function upsertTopic(topic: TraeTopic): Promise<"created" | "update
 
   const updatedStatus = topic.sourceType === "preliminary" ? "needs_judging" : "scraped";
   await upsertTopicMutation(dc as any, topicToVariables(topic, updatedStatus) as any);
-  await updateLocalTopicsCache(topic, updatedStatus);
   return "updated";
 }
 
