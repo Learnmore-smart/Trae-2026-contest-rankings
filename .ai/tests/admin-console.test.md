@@ -10,6 +10,7 @@ Guards the admin console's compact running-status UI against leaking long action
 
 - Reads `app/admin/admin-client.tsx` as UTF-8 source.
 - Verifies the inline busy badge uses generic running copy.
+- Verifies the admin run-log empty state names SQL/Data Connect instead of Firestore.
 - Verifies the old `正在执行：{busy}` interpolation does not return.
 
 ## Public API
@@ -27,6 +28,7 @@ Guards the admin console's compact running-status UI against leaking long action
 
 - 2026-06-30 Codex: Use a source-level Node test to match the repo's existing lightweight regression style instead of introducing a React component harness for a single copy/layout fix.
 - 2026-06-30 Codex: The admin source moved to `app/admin`; keep the same busy badge contract and update only the source path.
+- 2026-07-01 Codex: The admin page's server actions go through Data Connect generated operations, so the source-level copy test should reject stale Firestore wording in the operator console.
 
 ## Important Notes / NEVER Change
 
@@ -46,8 +48,20 @@ Guards the admin console's compact running-status UI against leaking long action
 | 2026-06-30 | Added the admin console busy-badge regression test. | Codex |
 | 2026-06-30 | Updated source path after root-level route move. | Codex |
 | 2026-07-01 | Added a source-level regression test for judge `batchMax: 12` and `concurrency: 3`. | Codex |
+| 2026-07-01 | Planned SQL/Data Connect admin empty-state wording regression test. | Codex |
+| 2026-07-01 | Added SQL/Data Connect admin empty-state wording regression test. | Codex |
 
 ## Planned Change: Judge Batch Settings Test
 
 - 2026-07-01 Codex: Add a source-level assertion that the admin judge actions request `batchMax: 12` and `concurrency: 3`.
 - Implemented for all three judge actions: unjudged, changed, and low-confidence.
+
+## Planned Change: Admin Theme Shell Test
+
+- 2026-07-01 Codex: Add a source-level assertion that the admin root `<main>` uses `tech-shell`, matching the public pages' theme wrapper.
+- Implemented the admin `tech-shell` source-level assertion.
+
+## Planned Change: SQL/Data Connect Empty State Test
+
+- 2026-07-01 Codex: Add assertions that the admin client contains `SQL/Data Connect` and does not contain the old `Firestore` label.
+- Implemented with source-level `SQL/Data Connect` positive and `Firestore` negative assertions.

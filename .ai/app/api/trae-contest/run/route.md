@@ -50,3 +50,10 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-06-30 | Created route documentation and planned batch-count status fix. | Codex |
+
+## Planned Change: Public Scrape Plus Immediate Judge
+
+- 2026-07-01 Codex: Owner clarified the public click must still run scrape/match, but existing unjudged work should begin judging immediately instead of waiting behind scrape.
+- Implement with two bounded `unjudged` judge passes: one concurrent with scrape/match for existing backlog, and one after matching for newly discovered backlog.
+- Keep the public lock, cooldown, and board snapshot refresh.
+- Implemented with `PUBLIC_JUDGE_MAX = 12`, `PUBLIC_JUDGE_CONCURRENCY = 3`, immediate `judgeUnjudgedBatch()`, concurrent `scrapeAndMatch`, and a post-match judge batch.

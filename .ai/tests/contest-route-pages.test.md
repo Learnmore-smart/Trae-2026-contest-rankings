@@ -82,6 +82,12 @@ Guards public contest routing and workflow safety invariants.
 | 2026-07-01 | Planned detail-page basePath, error contrast, and AI I/O audit guards. | Codex |
 | 2026-07-01 | Implemented detail-page basePath, error contrast, AI I/O, ranking error contrast, and pipeline error-detail guards. | Codex |
 
+## Planned Change: Public Run Workflow Guard
+
+- 2026-07-01 Codex: Add a source-level guard that public run keeps `scrapeAllTraeSources()` and `runTraeMatching()`, starts a bounded unjudged judge batch before scrape completes, and runs a second bounded unjudged batch after match.
+- Guard the public run optimistic client status so users see scoring started immediately.
+- Implemented source-level assertions for public judge constants, scrape/match preservation, immediate and post-match judge calls, and optimistic judge status.
+
 ## Bug Fix Plan: Detail Page Must Work Under Base Path
 
 - 2026-07-01 Codex: Owner reported every ranking row opens a detail page that says the work does not exist or is not a preliminary entry. Root cause: `app/project/project-detail-client.tsx` defaults `API_BASE` to an empty string, while this deployment is served under Next.js `basePath: "/trae-contest-2026"`. The browser fetches `/api/trae-contest/topics/...` instead of `/trae-contest-2026/api/trae-contest/topics/...`.

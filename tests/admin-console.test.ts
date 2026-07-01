@@ -28,3 +28,12 @@ test("admin judge actions request twelve-topic batches with three workers", () =
     assert.equal(action[2], "3");
   }
 });
+
+test("admin console opts into the shared theme shell", () => {
+  assert.match(adminClient, /<main className="score-grid tech-shell min-h-screen/);
+});
+
+test("admin empty state points operators at SQL Data Connect storage", () => {
+  assert.match(adminClient, /SQL\/Data Connect/);
+  assert.doesNotMatch(adminClient, /Firestore/);
+});

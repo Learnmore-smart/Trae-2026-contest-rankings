@@ -23,10 +23,14 @@ export interface PipelineStatus {
 }
 
 const COOLDOWN_MS = 30_000;
+const PUBLIC_JUDGE_MAX = 12;
+const PUBLIC_JUDGE_CONCURRENCY = 3;
 
 interface PipelineState {
   status: PipelineStatus;
 }
+
+type JudgeBatchResult = Awaited<ReturnType<typeof judgeChangedTraeTopics>>;
 
 // Persist across Next.js dev hot-reloads / route module re-evaluation.
 const globalState = globalThis as typeof globalThis & { __traePipeline?: PipelineState };
@@ -47,20 +51,45 @@ function getState(): PipelineState {
   return globalState.__traePipeline;
 }
 
+function judgeUnjudgedBatch(): Promise<JudgeBatchResult> {
+  return judgeChangedTraeTopics({
+    mode: "unjudged",
+    max: PUBLIC_JUDGE_MAX,
+    concurrency: PUBLIC_JUDGE_CONCURRENCY
+  });
+}
+
+function mergeJudgeResults(results: JudgeBatchResult[]): Pick<JudgeBatchResult, "evaluatedCount" | "failedCount"> {
+  return results.reduce(
+    (summary, result) => ({
+      evaluatedCount: summary.evaluatedCount + result.evaluatedCount,
+      failedCount: summary.failedCount + result.failedCount
+    }),
+    { evaluatedCount: 0, failedCount: 0 }
+  );
+}
+
 async function runPipeline(state: PipelineState): Promise<void> {
   const set = (patch: Partial<PipelineStatus>) => {
     state.status = { ...state.status, ...patch };
   };
 
   try {
-    set({ phase: "scrape", message: "正在抓取报名与初赛专区…" });
-    await scrapeAllTraeSources();
+    set({ phase: "judge", message: "正在评分现有未评分作品，同时抓取公开帖子…" });
+    const immediateJudge = judgeUnjudgedBatch();
+    const scrapeAndMatch = (async () => {
+      set({ phase: "scrape", message: "正在抓取报名与初赛专区，同时评分未评分作品…" });
+      await scrapeAllTraeSources();
 
-    set({ phase: "match", message: "正在匹配报名方向…" });
-    await runTraeMatching();
+      set({ phase: "match", message: "正在匹配报名方向…" });
+      await runTraeMatching();
+    })();
 
-    set({ phase: "judge", message: "正在调用免费 AI 模型评分…" });
-    const judgeResult = await judgeChangedTraeTopics({ mode: "unjudged" });
+    const [, immediateJudgeResult] = await Promise.all([scrapeAndMatch, immediateJudge]);
+
+    set({ phase: "judge", message: "正在评分新匹配的未评分作品…" });
+    const postMatchJudgeResult = await judgeUnjudgedBatch();
+    const judgeResult = mergeJudgeResults([immediateJudgeResult, postMatchJudgeResult]);
 
     // Refresh the board snapshot so the next public load reads 1 doc instead of re-scanning
     // 5 collections. Best-effort: a failure here doesn't undo the pipeline's work.
@@ -112,10 +141,10 @@ export function POST(): NextResponse {
 
   state.status = {
     running: true,
-    phase: "scrape",
+    phase: "judge",
     startedAt: new Date().toISOString(),
     finishedAt: null,
-    message: "流水线已启动…",
+    message: "评分与抓取已启动…",
     error: null
   };
 

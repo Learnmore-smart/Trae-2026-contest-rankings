@@ -48,3 +48,8 @@ Renders full AI scoring details for one preliminary Demo topic.
 |------|--------|--------|
 | 2026-07-01 | Added root-level detail client documentation before fixing deployed detail API path and readable error state. | Codex |
 | 2026-07-01 | Implemented base-path API fetch, readable error state, and AI input/output rendering. | Codex |
+
+## Change Plan: AI I/O Implementation Alignment
+
+- 2026-07-01 Codex: Static tests already require rendering persisted `systemPrompt`, `promptText`, and `rawModelResponse`; reconcile the component implementation with that existing auditability contract.
+- Implemented `CodeBlock` rendering for system prompt, user prompt, and raw model output when present.

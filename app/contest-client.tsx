@@ -643,7 +643,7 @@ function RunButton({ language, onCompleted }: { language: ContestLanguage; onCom
 
   const trigger = useCallback(async () => {
     if (status?.running) return;
-    setStatus({ running: true, phase: "scrape", startedAt: null, finishedAt: null, message: t.scraping, error: null });
+    setStatus({ running: true, phase: "judge", startedAt: null, finishedAt: null, message: t.judging, error: null });
     try {
       const response = await fetch(`${API_BASE}/api/trae-contest/run`, { method: "POST" });
       const next = (await response.json()) as PipelineStatus;
@@ -653,7 +653,7 @@ function RunButton({ language, onCompleted }: { language: ContestLanguage; onCom
     } catch {
       setStatus({ running: false, phase: "error", startedAt: null, finishedAt: null, message: t.failed, error: "Network error" });
     }
-  }, [handleSettled, startPolling, status?.running, t.failed, t.scraping]);
+  }, [handleSettled, startPolling, status?.running, t.failed, t.judging]);
 
   const phase: RunPhase = status?.phase ?? "idle";
   const running = status?.running ?? false;

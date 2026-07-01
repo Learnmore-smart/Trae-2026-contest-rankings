@@ -70,3 +70,9 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 | 2026-06-30 | Implemented suppression of unknown row track labels. | Codex |
 | 2026-07-01 | Planned readable ranking errors and visible backend pipeline error details. | Codex |
 | 2026-07-01 | Implemented readable ranking error panel and surfaced backend pipeline error details. | Codex |
+
+## Change Plan: Public Run Starts Scoring Immediately
+
+- 2026-07-01 Codex: The public button still triggers scrape/match, but the optimistic status should show scoring starts immediately while the backend continues to report authoritative phase updates.
+- Implement by initializing `RunButton` to the `judge` phase and `t.judging` message after click.
+- Implemented the optimistic `judge` status and dependency update.

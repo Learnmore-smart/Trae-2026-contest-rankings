@@ -233,9 +233,17 @@ test("public run status reports bounded judging batch counts", () => {
   const route = read(runRoutePath);
   const client = read(clientPath);
 
-  assert.match(route, /const judgeResult = await judgeChangedTraeTopics\(\{ mode: "unjudged" \}\);/);
+  assert.match(route, /const PUBLIC_JUDGE_MAX = 12;/);
+  assert.match(route, /const PUBLIC_JUDGE_CONCURRENCY = 3;/);
+  assert.match(route, /await scrapeAllTraeSources\(\);/);
+  assert.match(route, /await runTraeMatching\(\);/);
+  assert.match(route, /return judgeChangedTraeTopics\(\{\s*mode: "unjudged",\s*max: PUBLIC_JUDGE_MAX,\s*concurrency: PUBLIC_JUDGE_CONCURRENCY\s*\}\);/);
+  assert.match(route, /const immediateJudge = judgeUnjudgedBatch\(\);/);
+  assert.match(route, /const postMatchJudgeResult = await judgeUnjudgedBatch\(\);/);
+  assert.match(route, /await Promise\.all\(\[scrapeAndMatch, immediateJudge\]\);/);
   assert.match(route, /judgeResult\.evaluatedCount/);
   assert.match(route, /judgeResult\.failedCount/);
+  assert.match(client, /setStatus\(\{ running: true, phase: "judge", startedAt: null, finishedAt: null, message: t\.judging, error: null \}\);/);
   assert.match(client, /cooldown \? t\.cooldown : status\?\.message \?\? phaseMessage\(phase, language\)/);
   assert.match(client, /phase === "error" && status\?\.error/);
 });

@@ -164,7 +164,7 @@ export default function AdminClient() {
   }
 
   return (
-    <main className="score-grid min-h-screen px-4 py-6 text-stone-100 sm:px-6 lg:px-10">
+    <main className="score-grid tech-shell min-h-screen px-4 py-6 text-stone-100 sm:px-6 lg:px-10">
       <div className="mx-auto max-w-7xl">
         <Link href="/" className="control-button ghost w-fit">
           <ArrowLeft className="h-4 w-4" />
@@ -277,7 +277,7 @@ export default function AdminClient() {
               ))}
             </div>
           ) : (
-            <p className="mt-4 text-sm text-stone-500">暂无 run 记录，或 Firestore 尚未配置/未授权。</p>
+            <p className="mt-4 text-sm text-stone-500">暂无 run 记录，或 SQL/Data Connect 尚未配置/未授权。</p>
           )}
         </section>
       </div>
