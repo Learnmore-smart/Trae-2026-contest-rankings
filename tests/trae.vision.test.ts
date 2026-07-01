@@ -155,6 +155,29 @@ describe("describeTopicImages", () => {
     });
   });
 
+  it("asks Kimi to classify official screenshot evidence categories", async () => {
+    await withEnv(zeroBudgetEnv(), async () => {
+      let promptText = "";
+      await describeTopicImages(
+        { ...baseTopic, imageUrls: ["https://a.test/trae.png", "https://a.test/demo.png"] },
+        {
+          config: getTraeConfig(),
+          fetchFn: async (_url, init) => {
+            const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ type: string; text?: string }> }> };
+            const textPart = body.messages[0]?.content.find((part) => part.type === "text");
+            promptText = textPart?.text ?? "";
+            return visionResponse("ok");
+          },
+          sleepFn: async () => undefined
+        }
+      );
+
+      assert.match(promptText, /Trae usage\/development process screenshot/i);
+      assert.match(promptText, /finished Demo\/product interface screenshot/i);
+      assert.match(promptText, /at least one/i);
+    });
+  });
+
   it("caps image count at 4 to bound tokens/cost", async () => {
     await withEnv(zeroBudgetEnv(), async () => {
       const manyImages = Array.from({ length: 8 }, (_, i) => `https://a.test/${i}.png`);

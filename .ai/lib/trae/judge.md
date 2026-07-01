@@ -41,6 +41,8 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - 2026-07-01 Codex: Implemented the guardrail in both evaluator and consensus prompts, because the final stored text comes from the consensus referee. The prompt now lists detected Demo-like URL count and tells the model not to describe automation failure as missing contestant materials when public URLs exist.
 - 2026-07-01 Codex: Update compliance hints to key off generalized Demo evidence (`web_url`, `download`, `qr_or_image`) rather than `topic.demoUrl` alone. Missing web screenshot is not a material defect for non-web apps.
 - 2026-07-01 Codex: Judge should infer non-web Demo evidence from legacy topic fields (`attachmentUrls`, QR/miniprogram text cues, `imageUrls`) so rejudging older scraped rows does not require a full re-scrape before avoiding false "missing Demo" risks.
+- 2026-07-01 Codex: Final scoring prompt should explicitly treat uploaded ordinary screenshots as official material evidence. The model must evaluate whether image vision shows Trae usage/development process screenshots and finished Demo/product interface screenshots, not only whether a web Demo URL was opened.
+- 2026-07-01 Codex: Verified existing final scoring prompt already contains the uploaded screenshot evidence rule; added regression coverage without changing judge runtime code.
 
 ## Planned Change: SQL Connect Runtime
 
@@ -75,6 +77,9 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | 2026-07-01 | Planned non-web Demo evidence handling in judge prompts and risk hints. | Codex |
 | 2026-07-01 | Implemented generalized Demo evidence handling in prompt context, evidence limits, and compliance risk hints. | Codex |
 | 2026-07-01 | Implemented legacy-field fallback for non-web Demo evidence during rejudge. | Codex |
+| 2026-07-01 | Planned explicit judge guidance for ordinary uploaded screenshot evidence categories. | Codex |
+| 2026-07-01 | Verified explicit judge guidance and added regression coverage for ordinary uploaded screenshot evidence categories. | Codex |
+| 2026-07-01 | Implemented explicit judge guidance that uploaded screenshots can satisfy official ordinary screenshot material requirements. | Codex |
 
 ## Planned Change: Bounded Judge Concurrency
 

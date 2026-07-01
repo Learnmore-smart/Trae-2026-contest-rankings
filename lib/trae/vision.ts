@@ -76,7 +76,9 @@ export async function describeTopicImages(
       type: "text",
       text:
         "以下是 TRAE 大赛参赛帖子中作者上传的图片（开发过程截图或产品截图）。" +
-        "请客观描述你实际看到的内容：是否显示真实可用的产品界面、是否只是营销/概念/占位图、界面完成度与质量如何。" +
+        "请按官方普通截图证据标准客观检查：是否至少有一张（at least one）Trae usage/development process screenshot（展示使用 Trae、提示词、会话、开发过程或调试过程），" +
+        "以及是否至少有一张（at least one）finished Demo/product interface screenshot（展示成品 Demo、产品界面、二维码/小程序体验入口或可运行结果）。" +
+        "请同时描述你实际看到的内容：是否显示真实可用的产品界面、是否只是营销/概念/占位图、界面完成度与质量如何。" +
         "用中文写 2-4 句话总结，只描述图片中实际出现的内容，不要编造未展示的功能。"
     },
     ...imageUrls.map((url) => ({ type: "image_url" as const, image_url: { url } }))

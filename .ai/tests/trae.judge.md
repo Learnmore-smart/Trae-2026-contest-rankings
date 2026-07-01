@@ -31,6 +31,8 @@ Regression tests for prompt construction, JSON parsing, evaluator orchestration,
 - 2026-07-01 Codex: Implemented the regression against `buildConsensusJudgePrompt()` because that prompt produces the final persisted evaluation.
 - 2026-07-01 Codex: Add regression that an app/mini-program topic with download or QR evidence does not get a "missing Demo URL" compliance hint, and that the prompt lists non-web Demo evidence.
 - 2026-07-01 Codex: Add legacy-row regression so rejudge can infer non-web Demo evidence from `attachmentUrls`, QR/miniprogram text, and `imageUrls` even when the newer evidence fields are absent.
+- 2026-07-01 Codex: Add prompt regression that final scoring treats uploaded screenshots as official material evidence and asks the judge to evaluate Trae usage/development screenshots plus finished Demo/product screenshots.
+- 2026-07-01 Codex: Implemented the uploaded screenshot evidence prompt regression in `buildJudgePrompt()` tests.
 
 ## Important Notes / NEVER Change
 
@@ -52,3 +54,6 @@ Regression tests for prompt construction, JSON parsing, evaluator orchestration,
 | 2026-07-01 | Planned regression for non-web Demo evidence in judge prompts. | Codex |
 | 2026-07-01 | Added regression that download/QR evidence prevents a false missing-Demo-URL risk and is listed in prompt context. | Codex |
 | 2026-07-01 | Added legacy-field fallback regression for non-web Demo evidence during rejudge. | Codex |
+| 2026-07-01 | Planned regression for ordinary uploaded screenshot evidence guidance in judge prompts. | Codex |
+| 2026-07-01 | Added ordinary uploaded screenshot evidence guidance regression in judge prompt tests. | Codex |
+| 2026-07-01 | Added regression for ordinary uploaded screenshot evidence guidance in judge prompts. | Codex |

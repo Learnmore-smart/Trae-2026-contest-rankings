@@ -35,6 +35,8 @@ Gathers real visual evidence for judging: describes a topic's post images and ca
 - 2026-06-30 Claude: Both public functions swallow every failure mode (missing images, missing demo URL, non-http scheme, all vision models throttled/erroring) and resolve to `null` rather than throwing, so a flaky vision model degrades the judge back to the pre-existing "not performed" disclaimer instead of failing the whole evaluation.
 - 2026-06-30 Claude: Deliberately did not persist evidence on the `Topic` row — recomputes on every `judgeOneTopic()` call. Adding a cache column means a Data Connect schema migration and generated-SDK regeneration, out of scope for this fix; acceptable given current judge volume.
 - 2026-07-01 Codex: Visual selection should also infer QR/miniprogram priority from legacy topic text and image filenames when `traeEvidence.visualDemoImageUrls` is absent, so old rows can be rejudged without losing the likely demo-access image under the 4-image cap.
+- 2026-07-01 Codex: Official screenshot evidence should be evaluated as ordinary uploaded screenshots, not only web Demo browsing. The vision prompt should explicitly ask Kimi to distinguish whether images show Trae usage/development process and whether images show the finished Demo/product interface.
+- 2026-07-01 Codex: Implemented explicit Kimi wording for official screenshot evidence categories in `describeTopicImages()`.
 
 ## Important Notes / NEVER Change
 
@@ -50,6 +52,9 @@ Gathers real visual evidence for judging: describes a topic's post images and ca
 | 2026-07-01 | Planned visual demo image prioritization for non-web submissions. | Codex |
 | 2026-07-01 | Implemented visual demo image prioritization so QR/miniprogram images are sent to vision before generic screenshots. | Codex |
 | 2026-07-01 | Implemented legacy text/filename fallback for QR/miniprogram image priority. | Codex |
+| 2026-07-01 | Planned explicit Kimi image-review wording for official screenshot evidence categories. | Codex |
+| 2026-07-01 | Implemented Kimi image-review wording for official screenshot evidence categories. | Codex |
+| 2026-07-01 | Implemented explicit Kimi image-review wording for Trae usage screenshots and finished Demo/product screenshots. | Codex |
 
 ## Planned Change: Visual Demo Image Priority
 

@@ -29,6 +29,8 @@ Regression tests for zero-budget visual evidence gathering.
 
 - 2026-07-01 Codex: Add coverage that QR/miniprogram candidate images from `traeEvidence.visualDemoImageUrls` are prioritized before generic screenshots so Kimi sees at least one likely demo-access image when the post is not a web app.
 - 2026-07-01 Codex: Add coverage for legacy rows where QR/miniprogram text cues and image filenames must be enough to prioritize the likely demo-access image even without `visualDemoImageUrls`.
+- 2026-07-01 Codex: Add coverage that the Kimi image-review prompt asks for the official screenshot evidence categories: Trae usage/development process and finished Demo/product interface.
+- 2026-07-01 Codex: Implemented the prompt regression in `describeTopicImages()` tests.
 
 ## Important Notes / NEVER Change
 
@@ -48,3 +50,6 @@ Regression tests for zero-budget visual evidence gathering.
 | 2026-07-01 | Created vision test documentation for multi-shape Demo evidence. | Codex |
 | 2026-07-01 | Added regression that `visualDemoImageUrls` are prioritized before generic screenshots under the 4-image cap. | Codex |
 | 2026-07-01 | Added legacy text/filename fallback regression for QR/miniprogram image priority. | Codex |
+| 2026-07-01 | Planned Kimi prompt regression for official screenshot evidence categories. | Codex |
+| 2026-07-01 | Added Kimi prompt regression for official screenshot evidence categories. | Codex |
+| 2026-07-01 | Added Kimi prompt regression for official screenshot evidence categories. | Codex |

@@ -238,6 +238,7 @@ export function buildJudgePrompt(
 - ${designDimension}
 
 合规/材料风险只作为评分解释参考，不做单独审核页面。重点识别：缺 Demo、缺 TRAE 实践过程、缺 3 张开发截图、缺 3 个 Session ID、作品与报名方向不一致、只有概念没有 Demo、赛道/标题/标签不一致、材料不足导致置信度降低。
+Uploaded screenshot evidence can satisfy official ordinary screenshot material requirements. When image vision is available, explicitly use it to judge whether there is at least one Trae usage/development process screenshot and at least one finished Demo/product interface screenshot. Do not require a web Demo URL when uploaded screenshots, download packages, QR codes, or mini-program evidence already show a usable product/demo path.
 
 报名匹配信息：
 ${summarizeMatch(match)}

@@ -192,6 +192,21 @@ describe("multi-evaluator judging", () => {
     assert.doesNotMatch(prompt, /截图或视觉识别未成功/);
   });
 
+  it("treats uploaded screenshots as official material evidence categories", () => {
+    const prompt = buildJudgePrompt(topic, null, {
+      imageEvidence: {
+        summary: "Trae usage/development process screenshot: yes. Finished Demo/product interface screenshot: yes.",
+        provider: "nvidia",
+        model: "moonshotai/kimi-k2.6"
+      },
+      demoEvidence: null
+    });
+
+    assert.match(prompt, /Uploaded screenshot evidence can satisfy official ordinary screenshot material requirements/i);
+    assert.match(prompt, /Trae usage\/development process screenshot/i);
+    assert.match(prompt, /finished Demo\/product interface screenshot/i);
+  });
+
   it("builds a consensus prompt from all evaluator outputs and evidence limits", () => {
     const profiles = getJudgeEvaluatorProfiles();
     const prompt = buildConsensusJudgePrompt(
