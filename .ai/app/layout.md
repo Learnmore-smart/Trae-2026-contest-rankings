@@ -1,6 +1,6 @@
 # app/layout.tsx
 
-> Last updated: 2026-06-29 | Protection: STANDARD
+> Last updated: 2026-07-01 | Protection: STANDARD
 
 ## Purpose
 
@@ -9,7 +9,7 @@ Defines global HTML shell and metadata for the Next.js app.
 ## What It Does
 
 - Sets Chinese language metadata for the public TRAE ranking site.
-- Declares the TRAE favicon from `public/icons/trae.ico`.
+- Declares the TRAE favicon from `public/icons/favicon.ico`.
 - Loads global CSS.
 - Applies a small inline theme bootstrap script before paint so the saved theme does not flash.
 
@@ -28,6 +28,7 @@ Defines global HTML shell and metadata for the Next.js app.
 - 2026-06-29 Codex: Keep root layout minimal; route pages own their visual design.
 - 2026-06-29 Codex: Use Next.js `metadata.icons` so the browser favicon comes from the supplied TRAE `.ico` asset without adding manual `<head>` markup.
 - 2026-06-30 Codex: Theme bootstrapping belongs in the root layout because CSS variables are read before the route client hook hydrates.
+- 2026-07-01 Codex: User explicitly requested the favicon source be `public/icons/favicon.ico`; keep the existing `/trae-contest-2026` base path in metadata URLs.
 
 ## Change History
 
@@ -36,3 +37,4 @@ Defines global HTML shell and metadata for the Next.js app.
 | 2026-06-29 | Planned root layout. | Codex |
 | 2026-06-29 | Planned TRAE favicon metadata update. | Codex |
 | 2026-06-30 | Added pre-hydration theme bootstrap plan. | Codex |
+| 2026-07-01 | Planned favicon metadata switch to `public/icons/favicon.ico`. | Codex |
