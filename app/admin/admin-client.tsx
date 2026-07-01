@@ -12,15 +12,20 @@ interface Action {
   description: string;
   endpoint: string;
   body?: Record<string, unknown>;
+  // Judging now runs vision + 4-evaluator + consensus calls per topic, so a single
+  // request asking for 50 topics can never finish inside a serverless timeout. Loop
+  // small batches client-side instead, so each request fits and progress is visible.
+  loop?: boolean;
+  batchMax?: number;
 }
 
 const ACTIONS: Action[] = [
   { label: "抓取报名专区", description: "更新报名帖，供后续方向匹配使用。", endpoint: "/api/trae-contest/admin/scrape", body: { sourceType: "signup" } },
   { label: "抓取初赛专区", description: "更新会进入榜单候选池的 Demo 帖。", endpoint: "/api/trae-contest/admin/scrape", body: { sourceType: "preliminary" } },
   { label: "执行报名/初赛匹配", description: "按作者和标题相似度关联报名帖。", endpoint: "/api/trae-contest/admin/match" },
-  { label: "评分未评分作品", description: "只评尚未生成结果的初赛作品。", endpoint: "/api/trae-contest/admin/judge", body: { mode: "unjudged" } },
-  { label: "重评内容变化作品", description: "内容 hash 变化后重新评分。", endpoint: "/api/trae-contest/admin/judge", body: { mode: "changed" } },
-  { label: "重评低置信度作品", description: "复跑低置信度模型输出。", endpoint: "/api/trae-contest/admin/judge", body: { mode: "low-confidence" } }
+  { label: "评分未评分作品", description: "只评尚未生成结果的初赛作品。每批少量提交，自动循环直到评完。", endpoint: "/api/trae-contest/admin/judge", body: { mode: "unjudged" }, loop: true, batchMax: 3 },
+  { label: "重评内容变化作品", description: "内容 hash 变化后重新评分。每批少量提交，自动循环直到评完。", endpoint: "/api/trae-contest/admin/judge", body: { mode: "changed" }, loop: true, batchMax: 3 },
+  { label: "重评低置信度作品", description: "复跑低置信度模型输出。每批少量提交，自动循环直到评完。", endpoint: "/api/trae-contest/admin/judge", body: { mode: "low-confidence" }, loop: true, batchMax: 3 }
 ];
 
 function fmt(value: string | null): string {
@@ -74,6 +79,20 @@ export default function AdminClient() {
     }
   }
 
+  async function postAction(action: Action, body: Record<string, unknown>) {
+    const response = await fetch(`${API_BASE}${action.endpoint}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(text);
+    return text;
+  }
+
   async function runAction(action: Action) {
     if (!token) {
       setMessage("请输入 TRAE_ADMIN_TOKEN");
@@ -82,17 +101,31 @@ export default function AdminClient() {
     setBusy(action.label);
     setMessage(null);
     try {
-      const response = await fetch(`${API_BASE}${action.endpoint}`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(action.body ?? {})
-      });
-      const text = await response.text();
-      if (!response.ok) throw new Error(text);
-      setMessage(`${action.label} 已触发：${text.slice(0, 500)}`);
+      if (!action.loop) {
+        const text = await postAction(action, action.body ?? {});
+        setMessage(`${action.label} 已触发：${text.slice(0, 500)}`);
+        await loadRuns();
+        return;
+      }
+
+      // Each topic now runs vision + 4-evaluator + consensus calls, so one big
+      // request can never finish inside a serverless timeout. Loop small batches
+      // until a batch judges nothing, so this reliably drains the whole backlog
+      // instead of silently dying mid-request after a couple of topics.
+      let totalEvaluated = 0;
+      let totalFailed = 0;
+      const maxIterations = 500;
+      for (let i = 0; i < maxIterations; i += 1) {
+        const text = await postAction(action, { ...(action.body ?? {}), max: action.batchMax ?? 3 });
+        const payload = JSON.parse(text) as { result?: { evaluatedCount?: number; failedCount?: number } };
+        const evaluatedCount = payload.result?.evaluatedCount ?? 0;
+        const failedCount = payload.result?.failedCount ?? 0;
+        totalEvaluated += evaluatedCount;
+        totalFailed += failedCount;
+        setMessage(`${action.label} 进行中：已评 ${totalEvaluated}，失败 ${totalFailed} …`);
+        if (evaluatedCount + failedCount === 0) break;
+      }
+      setMessage(`${action.label} 完成：共评 ${totalEvaluated}，失败 ${totalFailed}。`);
       await loadRuns();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "操作失败");

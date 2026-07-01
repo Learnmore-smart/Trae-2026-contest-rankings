@@ -5,6 +5,7 @@ import { scrapeAllTraeSources, scrapeTraeSource } from "@/lib/trae/scraper";
 import type { TraeSourceType } from "@/lib/trae/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isValidAdminToken(extractBearerToken(request.headers))) {

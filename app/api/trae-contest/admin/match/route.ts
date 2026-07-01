@@ -4,6 +4,7 @@ import { writeBoardSnapshot } from "@/lib/trae/api";
 import { runTraeMatching } from "@/lib/trae/matcher";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isValidAdminToken(extractBearerToken(request.headers))) {
