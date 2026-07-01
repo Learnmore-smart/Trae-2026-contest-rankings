@@ -30,6 +30,41 @@ export interface TopicListParams {
   bypassCache?: boolean | null;
 }
 
+const OFFICIAL_TRACKS = ["生活娱乐", "学习工作", "社会服务", "硬件交互", "社会公益"] as const;
+
+function sourceTypeValue(value: unknown): string {
+  return typeof value === "string" ? value.toLowerCase() : "";
+}
+
+function preliminaryCacheTopics(allTopics: any[]): any[] {
+  return allTopics.filter((topic) => sourceTypeValue(topic?.sourceType) === "preliminary");
+}
+
+function normalizeOfficialTrack(topic: {
+  track?: string | null;
+  title?: string | null;
+  excerpt?: string | null;
+  contentText?: string | null;
+  tags?: string[] | null;
+}): string | null {
+  const tags = Array.isArray(topic.tags) ? topic.tags : [];
+  const haystack = [topic.title, topic.excerpt, topic.contentText, topic.track, ...tags]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join(" ");
+
+  for (const track of OFFICIAL_TRACKS) {
+    if (haystack.includes(track)) return track;
+  }
+
+  if (/教育学习|学习|工作/.test(haystack)) return "学习工作";
+  if (/生活服务|社会服务|智慧助老|养老|老人/.test(haystack)) return "社会服务";
+  if (/公益/.test(haystack)) return "社会公益";
+  if (/硬件|传感器|机器人|设备/.test(haystack)) return "硬件交互";
+  if (/创意娱乐|生活娱乐|游戏|娱乐|音乐|影视/.test(haystack)) return "生活娱乐";
+
+  return null;
+}
+
 function emptyStats(message?: string): StatsPayload {
   return {
     signupCount: 0,
@@ -50,7 +85,7 @@ function sanitizeTopic(topic: TraeTopic): RankingItem["topic"] {
   void contentHtml;
   void rawHtml;
   void rawJson;
-  return safeTopic;
+  return { ...safeTopic, track: normalizeOfficialTrack(topic) };
 }
 
 function lightenEvaluation(evaluation: TraeEvaluation | null): TraeEvaluation | null {
@@ -69,6 +104,47 @@ const competitionLevelRevMap = {
   "AVERAGE": "竞争力一般",
   "WEAK": "较弱"
 } as const;
+
+function mapTopicRecord(topic: any): TraeTopic {
+  return {
+    ...topic,
+    sourceType: sourceTypeValue(topic.sourceType) as any,
+    status: sourceTypeValue(topic.status) as any,
+    track: normalizeOfficialTrack(topic),
+    competitionLevel: topic.competitionLevel ? (competitionLevelRevMap[topic.competitionLevel as keyof typeof competitionLevelRevMap] ?? topic.competitionLevel) : null,
+    evaluatedAt: topic.evaluatedAt ?? null,
+    createdAtExternal: topic.createdAtExternal ?? null,
+    lastActivityAtExternal: topic.lastActivityAtExternal ?? null
+  } as any;
+}
+
+function mapEvaluationRecord(evaluation: any): TraeEvaluation | null {
+  if (!evaluation) return null;
+  return {
+    ...evaluation,
+    provider: evaluation.provider ? (providerRevMap[evaluation.provider as keyof typeof providerRevMap] ?? evaluation.provider) : null,
+    competitionLevel: competitionLevelRevMap[evaluation.competitionLevel as keyof typeof competitionLevelRevMap] ?? evaluation.competitionLevel
+  } as any;
+}
+
+function mapMatchRecord(match: any): TraeMatch | null {
+  if (!match) return null;
+  return {
+    ...match,
+    matchMethod: match.matchMethod ? (match.matchMethod.toLowerCase() as any) : "none",
+    mismatchRisk: match.mismatchRisk ? (match.mismatchRisk.toLowerCase() as any) : "unknown"
+  } as any;
+}
+
+function rankingItemFromRecord(topic: any, lighten = true): RankingItem {
+  const evaluation = mapEvaluationRecord(topic.evaluations_on_topic?.[0] ?? null);
+  return {
+    rank: 0,
+    topic: sanitizeTopic(mapTopicRecord(topic)),
+    evaluation: lighten ? lightenEvaluation(evaluation) : evaluation,
+    match: mapMatchRecord(topic.match_on_preliminaryTopic ?? null)
+  };
+}
 
 interface BoardData {
   stats: StatsPayload;
@@ -137,8 +213,9 @@ async function readTopicsCache(): Promise<any[]> {
 }
 
 function statsPayloadFromCacheTopics(allTopics: any[], onlineCount = 1): StatsPayload {
-  const evaluatedCount = allTopics.filter((topic) => topic.totalScore !== null && topic.totalScore >= 0).length;
-  const updatedAtValues = allTopics
+  const preliminaryTopics = preliminaryCacheTopics(allTopics);
+  const evaluatedCount = preliminaryTopics.filter((topic) => topic.totalScore !== null && topic.totalScore >= 0).length;
+  const updatedAtValues = preliminaryTopics
     .flatMap((topic) => [
       topic.updatedAt,
       topic.evaluatedAt,
@@ -147,8 +224,8 @@ function statsPayloadFromCacheTopics(allTopics: any[], onlineCount = 1): StatsPa
     .filter(Boolean);
 
   return {
-    signupCount: 260,
-    preliminaryCount: allTopics.length,
+    signupCount: allTopics.filter((topic) => sourceTypeValue(topic?.sourceType) === "signup").length,
+    preliminaryCount: preliminaryTopics.length,
     evaluatedCount,
     matchedCount: 0,
     totalInputTokens: 265582,
@@ -188,140 +265,18 @@ async function buildBoardDataFromSource(): Promise<BoardData> {
     dbFailed = true;
   }
 
-  // Load the full list of preliminary topics from the local JSON cache
   let allTopics: any[] = [];
-  try {
-    allTopics = await readTopicsCache();
-  } catch (error) {
-    console.error("Failed to read topics-cache.json:", error);
-  }
-
   if (dbFailed) {
-    // Construct stats and baseItems from the local cache directly
-    const stats = statsPayloadFromCacheTopics(allTopics, 1);
-
-    const baseItems: RankingItem[] = allTopics.map((t) => {
-      const latestEval = t.evaluations_on_topic?.[0] ?? null;
-      const match = t.match_on_preliminaryTopic ?? null;
-
-      const mappedTopic: TraeTopic = {
-        ...t,
-        sourceType: t.sourceType.toLowerCase() as any,
-        status: t.status.toLowerCase() as any,
-        competitionLevel: t.competitionLevel ? (competitionLevelRevMap[t.competitionLevel as keyof typeof competitionLevelRevMap] ?? t.competitionLevel) : null,
-        evaluatedAt: t.evaluatedAt ?? null,
-        createdAtExternal: t.createdAtExternal ?? null,
-        lastActivityAtExternal: t.lastActivityAtExternal ?? null
-      } as any;
-
-      const mappedEval: TraeEvaluation | null = latestEval ? {
-        ...latestEval,
-        provider: latestEval.provider ? (providerRevMap[latestEval.provider as keyof typeof providerRevMap] ?? latestEval.provider) : null,
-        competitionLevel: competitionLevelRevMap[latestEval.competitionLevel as keyof typeof competitionLevelRevMap] ?? latestEval.competitionLevel
-      } as any : null;
-
-      const mappedMatch: TraeMatch | null = match ? {
-        ...match,
-        matchMethod: match.matchMethod ? (match.matchMethod.toLowerCase() as any) : "none",
-        mismatchRisk: match.mismatchRisk ? (match.mismatchRisk.toLowerCase() as any) : "unknown"
-      } as any : null;
-
-      return {
-        rank: 0,
-        topic: sanitizeTopic(mappedTopic),
-        evaluation: lightenEvaluation(mappedEval),
-        match: mappedMatch
-      };
-    });
-
-    return { stats, baseItems };
+    try {
+      allTopics = await readTopicsCache();
+    } catch (error) {
+      console.error("Failed to read topics-cache.json:", error);
+    }
   }
 
-  // Map the top 100 topics to easily lookup their evaluations and matches
-  const topMap = new Map<string, { evaluations: any[]; match: any }>();
-  for (const t of topTopics) {
-    topMap.set(t.id, {
-      evaluations: t.evaluations_on_topic ?? [],
-      match: t.match_on_preliminaryTopic ?? null
-    });
-  }
-
-  let totalInputTokens = 0;
-  let totalOutputTokens = 0;
-
-  const signupCount = statsRes.data.signupCount?.[0]?._count ?? 0;
-  const preliminaryCount = statsRes.data.preliminaryCount?.[0]?._count ?? 0;
-  
-  // Calculate evaluatedCount in-memory by checking live scores or cached scores
-  const evaluatedCount = allTopics.filter(t => {
-    const liveTopic = topTopics.find(topT => topT.id === t.id);
-    const score = liveTopic ? liveTopic.totalScore : t.totalScore;
-    return score !== null && score >= 0;
-  }).length;
-
-  const matchedCount = statsRes.data.matchedCount?.[0]?._count ?? 0;
-  
-  for (const tu of statsRes.data.modelTokenUsages ?? []) {
-    totalInputTokens += tu.input_sum ?? 0;
-    totalOutputTokens += tu.output_sum ?? 0;
-  }
-
-  const maxTimestamps = [
-    statsRes.data.topics?.[0]?.updatedAt_max,
-    statsRes.data.evaluations?.[0]?.createdAt_max,
-    statsRes.data.matches?.[0]?.updatedAt_max
-  ].filter(Boolean);
-  const lastUpdatedAt = maxTimestamps.sort().at(-1) ?? null;
-
-  const stats: StatsPayload = {
-    signupCount,
-    preliminaryCount,
-    evaluatedCount,
-    matchedCount,
-    totalInputTokens,
-    totalOutputTokens,
-    lastUpdatedAt,
-    onlineCount
-  };
-
-  const baseItems: RankingItem[] = allTopics.map((t) => {
-    const topData = topMap.get(t.id);
-    const latestEval = topData?.evaluations?.[0] ?? t.evaluations_on_topic?.[0] ?? null;
-    const match = topData?.match ?? t.match_on_preliminaryTopic ?? null;
-
-    // Merge live topic fields (scores, status, track) if they were updated in database
-    const liveTopic = topTopics.find(topT => topT.id === t.id);
-    const mergedTopic = liveTopic ? { ...t, ...liveTopic } : t;
-
-    const mappedTopic: TraeTopic = {
-      ...mergedTopic,
-      sourceType: mergedTopic.sourceType.toLowerCase() as any,
-      status: mergedTopic.status.toLowerCase() as any,
-      competitionLevel: mergedTopic.competitionLevel ? competitionLevelRevMap[mergedTopic.competitionLevel as keyof typeof competitionLevelRevMap] ?? mergedTopic.competitionLevel : null,
-      evaluatedAt: mergedTopic.evaluatedAt ?? null,
-      createdAtExternal: mergedTopic.createdAtExternal ?? null,
-      lastActivityAtExternal: mergedTopic.lastActivityAtExternal ?? null
-    } as any;
-
-    const mappedEval: TraeEvaluation | null = latestEval ? {
-      ...latestEval,
-      provider: latestEval.provider ? providerRevMap[latestEval.provider as keyof typeof providerRevMap] ?? latestEval.provider : null,
-      competitionLevel: competitionLevelRevMap[latestEval.competitionLevel as keyof typeof competitionLevelRevMap] ?? latestEval.competitionLevel
-    } as any : null;
-
-    const mappedMatch: TraeMatch | null = match ? {
-      ...match,
-      matchMethod: match.matchMethod ? (match.matchMethod.toLowerCase() as any) : "none",
-      mismatchRisk: match.mismatchRisk ? (match.mismatchRisk.toLowerCase() as any) : "unknown"
-    } as any : null;
-
-    return {
-      rank: 0, // Computed dynamically after sorting/filtering in listRankedTopics
-      topic: sanitizeTopic(mappedTopic),
-      evaluation: lightenEvaluation(mappedEval),
-      match: mappedMatch
-    };
-  });
+  const sourceTopics = dbFailed ? preliminaryCacheTopics(allTopics) : topTopics;
+  const stats = dbFailed ? statsPayloadFromCacheTopics(allTopics, 1) : statsPayloadFromResponse(statsRes, onlineCount);
+  const baseItems: RankingItem[] = sourceTopics.map((topic) => rankingItemFromRecord(topic));
 
   return { stats, baseItems };
 }

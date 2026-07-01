@@ -669,7 +669,14 @@ function RunButton({ language, onCompleted }: { language: ContestLanguage; onCom
       </button>
       {!running && (phase === "done" || phase === "error" || cooldown) ? (
         <span className={`pipeline-status ${phase === "error" ? "is-error" : phase === "done" ? "is-done" : ""}`}>
-          <span>{cooldown ? t.cooldown : status?.message ?? phaseMessage(phase, language)}</span>
+          <span className="min-w-0">
+            <span className="block">{cooldown ? t.cooldown : status?.message ?? phaseMessage(phase, language)}</span>
+            {phase === "error" && status?.error ? (
+              <span className="mt-1 block max-w-[42rem] truncate text-xs font-semibold text-rose-900 dark:text-rose-100/80">
+                {status.error}
+              </span>
+            ) : null}
+          </span>
         </span>
       ) : null}
     </div>
@@ -710,7 +717,7 @@ function RankCard({ item, language, viewMode }: { item: RankingItem; language: C
   const router = useRouter();
   const tier = item.rank === 1 ? "gold" : item.rank === 2 ? "silver" : item.rank === 3 ? "bronze" : null;
   const isTop = item.rank === 1;
-  const trackName = item.topic.track ? (TRACK_LABELS[item.topic.track]?.[language] ?? item.topic.track) : language === "zh" ? "未知赛道" : "Unknown track";
+  const trackName = item.topic.track ? (TRACK_LABELS[item.topic.track]?.[language] ?? item.topic.track) : null;
   const detailHref = `/project/${encodeURIComponent(item.topic.id)}`;
   const openDetail = () => router.push(detailHref);
   const hasSummary = Boolean(item.evaluation?.summary);
@@ -741,8 +748,12 @@ function RankCard({ item, language, viewMode }: { item: RankingItem; language: C
       <div className="rank-row__content">
           <div className="rank-row__meta">
             <span>{item.topic.authorName}</span>
-            <span className="h-1 w-1 rounded-full bg-slate-700" />
-            <span>{trackName}</span>
+            {trackName ? (
+              <>
+                <span className="h-1 w-1 rounded-full bg-slate-700" />
+                <span>{trackName}</span>
+              </>
+            ) : null}
             <span className="h-1 w-1 rounded-full bg-slate-700" />
             <span>{fmtDate(item.topic.updatedAt, language)}</span>
           </div>
@@ -1169,7 +1180,11 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
                   </div>
                 </div>
 
-                {error ? <div className="rounded-md border border-red-300/25 bg-red-400/10 p-6 text-red-100">{error}</div> : null}
+                {error ? (
+                  <div role="alert" className="rounded-md border border-rose-300 bg-white p-6 font-semibold text-rose-900 shadow-sm dark:border-rose-300/25 dark:bg-rose-400/10 dark:text-rose-100">
+                    {error}
+                  </div>
+                ) : null}
 
                 {loading && items.length === 0 ? (
                   <LoadingGrid viewMode={viewMode} />

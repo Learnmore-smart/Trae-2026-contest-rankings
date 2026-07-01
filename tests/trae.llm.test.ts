@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getTraeConfig } from "../lib/trae/config.ts";
-import { buildLLMFallbackPlan, callLLMWithFallback } from "../lib/trae/llm.ts";
+import { buildLLMFallbackPlan, buildVisionLLMFallbackPlan, callLLMWithFallback, callVisionLLMWithFallback } from "../lib/trae/llm.ts";
 
 type EnvPatch = Record<string, string | undefined>;
 
@@ -11,6 +11,7 @@ const aiEnvKeys = [
   "NVIDIA_PRIMARY_MODEL",
   "NVIDIA_FALLBACK_MODELS",
   "NVIDIA_IMAGE_MODEL",
+  "NVIDIA_IMAGE_FALLBACK_MODEL",
   "OPENROUTER_API_KEY",
   "OPENROUTER_BASE_URL",
   "OPENROUTER_PRIMARY_MODEL",
@@ -50,6 +51,7 @@ function zeroBudgetEnv(overrides: EnvPatch = {}): EnvPatch {
     NVIDIA_PRIMARY_MODEL: "moonshotai/kimi-k2.6",
     NVIDIA_FALLBACK_MODELS: "z-ai/glm-5.1,deepseek-ai/deepseek-v4-flash",
     NVIDIA_IMAGE_MODEL: "moonshotai/kimi-k2.6",
+    NVIDIA_IMAGE_FALLBACK_MODEL: "minimaxai/minimax-m3",
     OPENROUTER_API_KEY: "openrouter-key",
     OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1",
     OPENROUTER_PRIMARY_MODEL: "openai/gpt-oss-120b",
@@ -268,6 +270,52 @@ describe("LLM zero-budget fallback client", () => {
         ["rate_limited", "rate_limited"]
       );
       assert.deepEqual(result.parsed, { ok: true });
+    });
+  });
+
+  it("builds the vision plan from the image model then the image fallback model, nvidia only", () => {
+    withEnv(zeroBudgetEnv(), () => {
+      const plan = buildVisionLLMFallbackPlan(getTraeConfig());
+      assert.deepEqual(
+        plan.map((entry) => `${entry.provider}:${entry.model}`),
+        ["nvidia:moonshotai/kimi-k2.6", "nvidia:minimaxai/minimax-m3"]
+      );
+    });
+  });
+
+  it("deduplicates the vision plan when the image model and its fallback are the same", () => {
+    withEnv(zeroBudgetEnv({ NVIDIA_IMAGE_FALLBACK_MODEL: "moonshotai/kimi-k2.6" }), () => {
+      const plan = buildVisionLLMFallbackPlan(getTraeConfig());
+      assert.deepEqual(plan.map((entry) => entry.model), ["moonshotai/kimi-k2.6"]);
+    });
+  });
+
+  it("sends multimodal image_url content and omits response_format for vision calls", async () => {
+    await withEnv(zeroBudgetEnv(), async () => {
+      const requests: Array<{ model: string; responseFormat: unknown }> = [];
+
+      const result = await callVisionLLMWithFallback({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "describe this" },
+              { type: "image_url", image_url: { url: "https://example.test/a.png" } }
+            ]
+          }
+        ],
+        config: getTraeConfig(),
+        fetchFn: async (_url, init) => {
+          const body = JSON.parse(String(init?.body)) as { model: string; response_format?: unknown };
+          requests.push({ model: body.model, responseFormat: body.response_format });
+          return Response.json({ choices: [{ message: { content: "a description" } }] });
+        },
+        sleepFn: async () => undefined
+      });
+
+      assert.equal(requests[0]?.model, "moonshotai/kimi-k2.6");
+      assert.equal(requests[0]?.responseFormat, undefined);
+      assert.equal(result.content, "a description");
     });
   });
 });

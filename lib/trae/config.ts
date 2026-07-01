@@ -8,6 +8,8 @@ export interface TraeConfig {
   nvidiaPrimaryModel: string;
   nvidiaFallbackModels: string[];
   nvidiaImageModel: string;
+  /** Secondary vision-capable model when the primary image model soft-throttles. */
+  nvidiaImageFallbackModel: string;
   openRouterApiKey: string | null;
   openRouterBaseUrl: string;
   openRouterPrimaryModel: string;
@@ -85,6 +87,7 @@ export function getTraeConfig(): TraeConfig {
       "deepseek-ai/deepseek-v4-flash"
     ]),
     nvidiaImageModel: process.env.NVIDIA_IMAGE_MODEL ?? "moonshotai/kimi-k2.6",
+    nvidiaImageFallbackModel: process.env.NVIDIA_IMAGE_FALLBACK_MODEL ?? "minimaxai/minimax-m3",
     openRouterApiKey: process.env.OPENROUTER_API_KEY ?? null,
     openRouterBaseUrl: process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
     openRouterPrimaryModel: process.env.OPENROUTER_PRIMARY_MODEL ?? "openai/gpt-oss-120b:free",

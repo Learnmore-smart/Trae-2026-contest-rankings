@@ -10,7 +10,7 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 
 - Supplies defaults for NVIDIA and OpenRouter free endpoint model names, limits, rate limits, and forum URLs.
 - Tunes the matcher's forum signup lookups: `maxForumLookupsPerRun` (env `TRAE_MAX_FORUM_LOOKUPS_PER_RUN`, default `0` = unlimited), `forumLookupConcurrency` (`TRAE_FORUM_LOOKUP_CONCURRENCY`, default 16), `forumMinRequestMs` per-host start spacing (`TRAE_FORUM_MIN_REQUEST_MS`, default 150), and `forumMaxRetries` (`TRAE_FORUM_MAX_RETRIES`, default 5). Defaults favor fastest convergence; the forum host is the only real limiter (Retry-After + host-wide cooldown + backoff cover throttling).
-- Keeps NVIDIA text judging order explicit and separate from the preferred NVIDIA image/multimodal model.
+- Keeps NVIDIA text judging order explicit and separate from the preferred NVIDIA image/multimodal model, plus a distinct `nvidiaImageFallbackModel` (env `NVIDIA_IMAGE_FALLBACK_MODEL`, default `minimaxai/minimax-m3`) used when the primary image model soft-throttles.
 - Keeps secret access server-side.
 - Parses numeric env vars defensively.
 
@@ -50,3 +50,4 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 | 2026-06-30 | Default lookups unlimited; added `forumLookupConcurrency` (16) and `forumMinRequestMs` (150) for fastest convergence (SQL fixed-cost, AI free). | Claude |
 | 2026-06-30 | Added `forumMaxRetries` (`TRAE_FORUM_MAX_RETRIES`, default 5) for the 429/Retry-After backoff. | Claude |
 | 2026-06-30 | Planned NVIDIA text order change to Kimi K2.6 primary, GLM 5.1 fallback, DeepSeek V4 Flash final fallback. | Codex |
+| 2026-06-30 | Added `nvidiaImageFallbackModel` (`NVIDIA_IMAGE_FALLBACK_MODEL`, default `minimaxai/minimax-m3`) so `lib/trae/vision.ts` has a second vision-capable model when the primary soft-throttles. | Claude |

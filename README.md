@@ -31,12 +31,25 @@ Provider 顺序：
 
 默认模型：
 
-- NVIDIA primary: `deepseek-ai/deepseek-v4-pro`
-- NVIDIA fallback: `minimaxai/minimax-m3`
-- OpenRouter primary: `openai/gpt-oss-120b`
+- NVIDIA text primary: `moonshotai/kimi-k2.6`
+- NVIDIA text fallback: `z-ai/glm-5.1`, `deepseek-ai/deepseek-v4-flash`
+- NVIDIA image/vision primary: `moonshotai/kimi-k2.6`（`NVIDIA_IMAGE_MODEL`）
+- NVIDIA image/vision fallback: `minimaxai/minimax-m3`（`NVIDIA_IMAGE_FALLBACK_MODEL`）
+- OpenRouter primary: `openai/gpt-oss-120b:free`
 - OpenRouter fallback: `nvidia/nemotron-3-ultra-550b-a55b:free`, `google/gemma-4-31b-it:free`
 
-所有模型调用统一走 `callLLMWithFallback()`。遇到 429/5xx/timeout/invalid JSON 会按 `AI_MAX_RETRIES_PER_MODEL` 和指数退避处理，再切换同 provider fallback；NVIDIA 全部失败后才尝试 OpenRouter。所有免费模型不可用或 JSON 无法校验时会记录 `judge_error`，等待下次定时任务重试。
+所有文本评分调用统一走 `callLLMWithFallback()`。遇到 429/5xx/timeout/invalid JSON 会按 `AI_MAX_RETRIES_PER_MODEL` 和指数退避处理，再切换同 provider fallback；NVIDIA 全部失败后才尝试 OpenRouter。所有免费模型不可用或 JSON 无法校验时会记录 `judge_error`，等待下次定时任务重试。
+
+### 多评委共识评分 + 真实视觉证据
+
+每个帖子由 4 个独立 evaluator（产品价值、技术完成度、UX/设计、证据合规）各自打一次分，再由一个 consensus 裁判对比 4 份结果、给出唯一最终分——避免单一 LLM 主观打分（详见 `lib/trae/judge.ts` 的 `JUDGE_EVALUATOR_PROFILES` 和 `buildConsensusJudgePrompt`）。
+
+评分前会先收集真实视觉证据（`lib/trae/vision.ts`），而不是只把图片链接和 Demo 网址当文字塞进 prompt：
+
+- **帖子图片**：把帖子里最多 4 张图片以 `image_url` 形式发给 NVIDIA 视觉模型，要求客观描述实际看到的内容（真实产品界面 vs. 营销/概念图）。
+- **Demo 截图**：通过免费、无需 API key 的 `image.thum.io` 截图代理渲染 Demo 网址并截图（等同于人类打开链接第一眼看到的画面），再让视觉模型描述这是可交互产品、纯静态落地页，还是打不开/报错页面——这正是用来纠正"静态网页也能拿高分"问题的证据来源。
+- 任一环节失败（无图片、无 Demo、模型限流、截图失败）都会优雅降级为原有的"本轮未进行视觉识别/未进行交互式浏览"免责声明，不会让模型编造证据。
+- 未做持久化缓存：每次评分都会重新采集视觉证据（未写入 Data Connect schema），后续如评分量增大可考虑按 `contentHash`/`demoUrl` 缓存。
 
 ## Firestore 设置
 

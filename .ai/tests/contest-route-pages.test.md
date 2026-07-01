@@ -19,6 +19,8 @@ Guards public contest routing and workflow safety invariants.
 - Verifies the board read path keeps Data Connect initialization inside fallback-safe code.
 - Verifies client API requests default to the configured Next.js base path.
 - Verifies stats fall back to local topic-cache counts when Data Connect is unavailable.
+- Verifies fallback ranking rows are preliminary-only and expose only official track labels after normalization.
+- Verifies the live Data Connect board path uses live query topics as the ranking base rather than the bundled JSON cache.
 
 ## Public API
 
@@ -44,6 +46,8 @@ Guards public contest routing and workflow safety invariants.
 - 2026-06-30 Codex: Add a static regression guard for the local JSON fallback because missing Data Connect credentials are common in local development and should not blank the public ranking.
 - 2026-06-30 Codex: Add a static regression guard tying the client API prefix to `next.config.mjs` basePath, because wrong-prefix API calls surface as `榜单数据加载失败`.
 - 2026-06-30 Codex: Add a runtime regression guard for stats fallback so the ranking header cannot show `0/0` while cached rows are visible.
+- 2026-06-30 Codex: Add regression guards for official-track normalization and for avoiding the 424-row bundled snapshot as the live ranking base when Data Connect succeeds.
+- 2026-06-30 Codex: Implemented the official-track fallback test, preliminary-only fallback stats assertion, and static live-board-source guard.
 
 ## Important Notes / NEVER Change
 
@@ -73,3 +77,13 @@ Guards public contest routing and workflow safety invariants.
 | 2026-06-30 | Planned base-path API prefix regression guard. | Codex |
 | 2026-06-30 | Planned stats local-cache fallback regression guard. | Codex |
 | 2026-06-30 | Implemented stats local-cache fallback regression guard. | Codex |
+| 2026-06-30 | Planned official-track and live-board-source regression guards. | Codex |
+| 2026-06-30 | Implemented official-track and live-board-source regression guards. | Codex |
+| 2026-07-01 | Planned detail-page basePath, error contrast, and AI I/O audit guards. | Codex |
+| 2026-07-01 | Implemented detail-page basePath, error contrast, AI I/O, ranking error contrast, and pipeline error-detail guards. | Codex |
+
+## Bug Fix Plan: Detail Page Must Work Under Base Path
+
+- 2026-07-01 Codex: Owner reported every ranking row opens a detail page that says the work does not exist or is not a preliminary entry. Root cause: `app/project/project-detail-client.tsx` defaults `API_BASE` to an empty string, while this deployment is served under Next.js `basePath: "/trae-contest-2026"`. The browser fetches `/api/trae-contest/topics/...` instead of `/trae-contest-2026/api/trae-contest/topics/...`.
+- Fix strategy: add a static guard requiring the detail client to use the same configured base-path fallback as the ranking client.
+- 2026-07-01 Codex: Also guard the detail error panel contrast and AI input/output rendering so the user can read errors and audit scoring prompts.

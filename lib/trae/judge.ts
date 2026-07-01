@@ -4,6 +4,7 @@ import { getTraeConfig } from "./config.ts";
 import { getDataConnectDb, nowIso } from "./dataconnect.ts";
 import { callLLMWithFallback, LLMFallbackError } from "./llm.ts";
 import { finishRun, startRun } from "./runs.ts";
+import { gatherVisualEvidence, type TopicVisualEvidence } from "./vision.ts";
 import {
   getBoardData,
   upsertEvaluation,
@@ -14,13 +15,62 @@ import {
 import {
   evaluationOutputSchema,
   type EvaluationOutput,
+  type TraeAIProvider,
   type TraeEvaluation,
   type TraeLLMCallLog,
   type TraeMatch,
   type TraeTopic
 } from "./types.ts";
 
-export const PROMPT_VERSION = "trae-contest-2026-v1";
+export const PROMPT_VERSION = "trae-contest-2026-v3-visual-evidence";
+
+export type JudgeEvaluatorId = "product" | "technical" | "ux" | "risk";
+
+export interface JudgeEvaluatorProfile {
+  id: JudgeEvaluatorId;
+  label: string;
+  focus: string;
+}
+
+export interface JudgeEvaluatorConsensusInput {
+  profile: JudgeEvaluatorProfile;
+  output: EvaluationOutput;
+  rawContent: string;
+}
+
+interface JudgeEvaluatorRun extends JudgeEvaluatorConsensusInput {
+  provider: TraeAIProvider;
+  model: string;
+  prompt: string;
+  callLogs: TraeLLMCallLog[];
+}
+
+const JUDGE_EVALUATOR_PROFILES: readonly JudgeEvaluatorProfile[] = [
+  {
+    id: "product",
+    label: "Product value evaluator",
+    focus: "Judge real user value, problem clarity, market/use-case fit, and whether the work is more than a thin static page."
+  },
+  {
+    id: "technical",
+    label: "Technical completion evaluator",
+    focus: "Judge implementation completeness, functional depth, TRAE process evidence, demo availability, and engineering credibility."
+  },
+  {
+    id: "ux",
+    label: "UX and design evaluator",
+    focus: "Judge visual hierarchy, interaction quality, usability, polish, and whether the submitted experience is actually inspectable."
+  },
+  {
+    id: "risk",
+    label: "Evidence and compliance evaluator",
+    focus: "Judge missing evidence, signup-direction mismatch, missing session IDs/screenshots, unsupported claims, and confidence penalties."
+  }
+];
+
+export function getJudgeEvaluatorProfiles(): JudgeEvaluatorProfile[] {
+  return JUDGE_EVALUATOR_PROFILES.map((profile) => ({ ...profile }));
+}
 
 export function parseEvaluationJson(raw: string): EvaluationOutput {
   const candidate = extractJsonCandidate(raw);
@@ -71,20 +121,38 @@ function complianceHints(topic: TraeTopic, match: TraeMatch | null): string[] {
   return risks;
 }
 
-export function buildJudgePrompt(topic: TraeTopic, match: TraeMatch | null): string {
+function formatVisualEvidenceSection(topic: TraeTopic, visualEvidence: TopicVisualEvidence | null): string {
+  const demoSection = visualEvidence?.demoEvidence
+    ? `Demo 自动截图与视觉识别（AI 已实际截图并查看该网页刚才的真实渲染效果，等同于人类打开链接第一眼看到的画面）：\n${visualEvidence.demoEvidence.summary}`
+    : topic.demoUrl
+      ? "Demo 自动浏览：本轮截图或视觉识别未成功，仅使用帖子公开文本与 URL，不要假设已实际查看该页面。"
+      : "Demo 自动浏览：未检测到 Demo 链接。";
+
+  const imageSection = visualEvidence?.imageEvidence
+    ? `图片视觉识别（AI 已实际查看以下图片内容）：\n${visualEvidence.imageEvidence.summary}`
+    : `图片链接（本轮未进行视觉识别）：\n${topic.imageUrls.slice(0, 20).map((url) => `- ${url}`).join("\n") || "未检测到"}`;
+
+  return [demoSection, `图片数量：${topic.imageUrls.length}`, imageSection].join("\n");
+}
+
+export function buildJudgePrompt(
+  topic: TraeTopic,
+  match: TraeMatch | null,
+  visualEvidence: TopicVisualEvidence | null = null
+): string {
   const isHardwareTrack = topic.track?.includes("硬件") || /硬件|设备|传感器|机器人/.test(topic.title);
   const designDimension = isHardwareTrack
     ? "美观度/设计体验 20 分：硬件交互赛道改看交互流畅、体验融合、软硬件反馈闭环。"
-    : "美观度/设计体验 20 分：视觉美观、信息架构、交互体验、完成后的观摩价值。";
+    : "美观度/设计体验 20 分：视觉美观、信息架构、交互体验、完成后的观摩价值。若截图/视觉证据显示只是静态介绍页而非可交互产品，本项不得评为高分。";
 
   return `你是 TRAE AI 创造力大赛第三方 AI 模拟评分员。本站不是官方评分，不预测官方结果。
 
-请仅根据公开帖子内容评分。信息不足时不要给高分，要降低 confidenceScore，并在 weaknesses/complianceRisks 中说明。
+请仅根据公开帖子内容和下方提供的真实视觉证据评分。信息不足时不要给高分，要降低 confidenceScore，并在 weaknesses/complianceRisks 中说明。
 
 评分维度：
 - 创新性 30 分：创意新颖性、AI 使用方式、差异化。
 - 实用性 30 分：真实需求、可用价值、用户场景、落地潜力。
-- 完成度 20 分：是否有可体验 Demo、功能完整度、帖子材料充分度。
+- 完成度 20 分：是否有可体验 Demo、功能完整度、帖子材料充分度。若 Demo 截图证据显示这只是一个静态介绍/营销落地页而非真正可交互的产品功能（例如没有可操作的功能界面、无法演示核心 AI 能力），完成度不得评为高分，需在 dimensionComments.completion 中说明依据。
 - ${designDimension}
 
 合规/材料风险只作为评分解释参考，不做单独审核页面。重点识别：缺 Demo、缺 TRAE 实践过程、缺 3 张开发截图、缺 3 个 Session ID、作品与报名方向不一致、只有概念没有 Demo、赛道/标题/标签不一致、材料不足导致置信度降低。
@@ -103,7 +171,7 @@ ${complianceHints(topic, match)
 赛道：${topic.track ?? "未知"}
 标签：${topic.tags.join(", ") || "无"}
 Demo：${topic.demoUrl ?? "未检测到"}
-图片数量：${topic.imageUrls.length}
+${formatVisualEvidenceSection(topic, visualEvidence)}
 Session IDs：${topic.sessionIds.join(", ") || "未检测到"}
 正文：
 ${topic.contentText.slice(0, 12000)}
@@ -134,6 +202,79 @@ ${topic.contentText.slice(0, 12000)}
 }`;
 }
 
+function evidenceLimitations(topic: TraeTopic, visualEvidence: TopicVisualEvidence | null): string {
+  const lines = ["Evidence limitations for this automated run:"];
+
+  lines.push(
+    visualEvidence?.imageEvidence
+      ? `- image vision WAS performed on this topic's post images; treat the image vision summary above as real observed evidence, not speculation.`
+      : `- image URLs available: ${topic.imageUrls.length}; image vision was not performed successfully for this run.`
+  );
+
+  lines.push(
+    visualEvidence?.demoEvidence
+      ? "- an automatic screenshot of the demo URL WAS captured and inspected just now; treat the demo vision summary above as real observed evidence of the page's current rendered state."
+      : `- demo URL available: ${topic.demoUrl ? "yes" : "no"}; interactive demo browsing/screenshot was not performed successfully for this run.`
+  );
+
+  lines.push(
+    "- Do not claim you saw evidence beyond what is explicitly provided above (post text, or the vision summaries when present).",
+    "- Penalize confidence and completion when no real evidence proves a working product beyond marketing claims."
+  );
+
+  return lines.join("\n");
+}
+
+export function buildEvaluatorJudgePrompt(
+  topic: TraeTopic,
+  match: TraeMatch | null,
+  profile: JudgeEvaluatorProfile,
+  visualEvidence: TopicVisualEvidence | null = null
+): string {
+  return `${buildJudgePrompt(topic, match, visualEvidence)}
+
+Independent evaluator role:
+- id: ${profile.id}
+- label: ${profile.label}
+- focus: ${profile.focus}
+
+${evidenceLimitations(topic, visualEvidence)}
+
+Return your own strict JSON score. Do not average with other evaluators; the consensus referee will do that later.`;
+}
+
+export function buildConsensusJudgePrompt(
+  topic: TraeTopic,
+  match: TraeMatch | null,
+  evaluatorResults: readonly JudgeEvaluatorConsensusInput[],
+  visualEvidence: TopicVisualEvidence | null = null
+): string {
+  const evaluatorSummary = evaluatorResults.map((result) => ({
+    id: result.profile.id,
+    label: result.profile.label,
+    focus: result.profile.focus,
+    output: result.output
+  }));
+
+  return `${buildJudgePrompt(topic, match, visualEvidence)}
+
+Consensus referee task:
+You are the final scoring referee. Compare the four independent evaluator JSON outputs below, identify material disagreements, and produce ONE final strict JSON score using the same schema.
+
+Rules:
+- Do not blindly average. Prefer the score best supported by public evidence.
+- If a weak/static/demo-less project received a high score from any evaluator without evidence, reduce completion, design, and confidence.
+- If evaluators disagree by more than 8 total-score points, explain the resolved disagreement in summary or dimensionComments.
+- ${visualEvidence?.imageEvidence ? "image vision WAS performed in this run; weigh the image vision summary above as real evidence." : "image vision was not performed in this run."}
+- ${visualEvidence?.demoEvidence ? "interactive demo browsing (automatic screenshot + vision inspection) WAS performed in this run; weigh the demo vision summary above as real evidence of the page's current state." : "interactive demo browsing was not performed in this run."}
+- Do not claim screenshots or demo behavior were inspected unless that is present in the post text or the vision summaries above.
+
+Independent evaluator outputs:
+${JSON.stringify(evaluatorSummary, null, 2)}
+
+Return only the final strict JSON object.`;
+}
+
 const JUDGE_SYSTEM_PROMPT = "You return strict JSON only. Do not include Markdown fences or comments.";
 
 /** Tokens from the call that actually succeeded (errorReason === null), or the last attempt. */
@@ -145,9 +286,24 @@ function tokensFromLogs(callLogs: TraeLLMCallLog[]): { inputTokens: number; outp
   };
 }
 
-export async function judgeOneTopic(topic: TraeTopic, match: TraeMatch | null): Promise<TraeEvaluation> {
-  const config = getTraeConfig();
-  const prompt = buildJudgePrompt(topic, match);
+function totalTokensFromLogs(callLogs: TraeLLMCallLog[]): { inputTokens: number; outputTokens: number } {
+  return callLogs.reduce(
+    (totals, log) => ({
+      inputTokens: totals.inputTokens + (log.inputTokens ?? 0),
+      outputTokens: totals.outputTokens + (log.outputTokens ?? 0)
+    }),
+    { inputTokens: 0, outputTokens: 0 }
+  );
+}
+
+async function runEvaluator(
+  profile: JudgeEvaluatorProfile,
+  topic: TraeTopic,
+  match: TraeMatch | null,
+  config: ReturnType<typeof getTraeConfig>,
+  visualEvidence: TopicVisualEvidence | null
+): Promise<JudgeEvaluatorRun> {
+  const prompt = buildEvaluatorJudgePrompt(topic, match, profile, visualEvidence);
   const result = await callLLMWithFallback({
     config,
     messages: [
@@ -156,8 +312,123 @@ export async function judgeOneTopic(topic: TraeTopic, match: TraeMatch | null): 
     ],
     validateContent: parseEvaluationJson
   });
+
+  return {
+    profile,
+    output: result.parsed,
+    rawContent: result.content,
+    provider: result.provider,
+    model: result.model,
+    prompt,
+    callLogs: result.callLogs
+  };
+}
+
+async function runEvaluatorTeam(
+  topic: TraeTopic,
+  match: TraeMatch | null,
+  config: ReturnType<typeof getTraeConfig>,
+  visualEvidence: TopicVisualEvidence | null
+): Promise<JudgeEvaluatorRun[]> {
+  const settled = await Promise.allSettled(
+    JUDGE_EVALUATOR_PROFILES.map((profile) => runEvaluator(profile, topic, match, config, visualEvidence))
+  );
+  const runs: JudgeEvaluatorRun[] = [];
+  const failedLogs: TraeLLMCallLog[] = [];
+  const errors: string[] = [];
+
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      runs.push(result.value);
+      continue;
+    }
+
+    errors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+    if (result.reason instanceof LLMFallbackError) failedLogs.push(...result.reason.callLogs);
+  }
+
+  if (errors.length > 0) {
+    const completedLogs = runs.flatMap((run) => run.callLogs);
+    throw new LLMFallbackError(`One or more evaluator calls failed: ${errors.join("; ")}`, [
+      ...completedLogs,
+      ...failedLogs
+    ]);
+  }
+
+  return runs;
+}
+
+function buildStoredPromptText(
+  topic: TraeTopic,
+  match: TraeMatch | null,
+  consensusPrompt: string,
+  visualEvidence: TopicVisualEvidence | null
+): string {
+  return [
+    "MULTI-EVALUATOR CONSENSUS RUN",
+    "Base prompt shared by every evaluator:",
+    buildJudgePrompt(topic, match, visualEvidence),
+    "Evaluator profiles:",
+    JSON.stringify(JUDGE_EVALUATOR_PROFILES, null, 2),
+    "Consensus referee prompt:",
+    consensusPrompt
+  ].join("\n\n---\n\n");
+}
+
+function buildRawModelResponse(
+  evaluatorRuns: JudgeEvaluatorRun[],
+  consensusContent: string
+): string {
+  return JSON.stringify(
+    {
+      evaluators: evaluatorRuns.map((run) => ({
+        id: run.profile.id,
+        label: run.profile.label,
+        provider: run.provider,
+        model: run.model,
+        content: run.rawContent
+      })),
+      consensus: {
+        content: consensusContent
+      }
+    },
+    null,
+    2
+  );
+}
+
+export async function judgeOneTopic(topic: TraeTopic, match: TraeMatch | null): Promise<TraeEvaluation> {
+  const config = getTraeConfig();
+  const visualEvidence = await gatherVisualEvidence(topic, { config });
+  const evaluatorRuns = await runEvaluatorTeam(topic, match, config, visualEvidence);
+  const consensusPrompt = buildConsensusJudgePrompt(topic, match, evaluatorRuns, visualEvidence);
+  let result: Awaited<ReturnType<typeof callLLMWithFallback<EvaluationOutput>>>;
+
+  try {
+    result = await callLLMWithFallback({
+      config,
+      messages: [
+        { role: "system", content: JUDGE_SYSTEM_PROMPT },
+        { role: "user", content: consensusPrompt }
+      ],
+      validateContent: parseEvaluationJson
+    });
+  } catch (error) {
+    if (error instanceof LLMFallbackError) {
+      throw new LLMFallbackError(error.message, [
+        ...evaluatorRuns.flatMap((run) => run.callLogs),
+        ...error.callLogs
+      ]);
+    }
+    throw error;
+  }
+
   const createdAt = nowIso();
-  const { inputTokens, outputTokens } = tokensFromLogs(result.callLogs);
+  const allCallLogs = [
+    ...evaluatorRuns.flatMap((run) => run.callLogs),
+    ...result.callLogs
+  ];
+  const { inputTokens, outputTokens } = totalTokensFromLogs(allCallLogs);
   return {
     id: `${topic.id}_${Date.now()}`,
     topicId: topic.id,
@@ -166,12 +437,12 @@ export async function judgeOneTopic(topic: TraeTopic, match: TraeMatch | null): 
     model: result.model,
     promptVersion: PROMPT_VERSION,
     ...result.parsed,
-    promptText: prompt,
+    promptText: buildStoredPromptText(topic, match, consensusPrompt, visualEvidence),
     systemPrompt: JUDGE_SYSTEM_PROMPT,
     inputTokens,
     outputTokens,
-    rawModelResponse: result.content,
-    llmCallLogs: result.callLogs,
+    rawModelResponse: buildRawModelResponse(evaluatorRuns, result.content),
+    llmCallLogs: allCallLogs,
     error: null,
     createdAt
   };

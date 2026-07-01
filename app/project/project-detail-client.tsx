@@ -8,7 +8,7 @@ import { useContestTheme, type ContestTheme } from "../theme";
 import { NavMenu } from "../contest-client";
 import type { RankingItem } from "@/lib/trae/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
+const API_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "/trae-contest-2026";
 
 const COPY = {
   zh: {
@@ -135,10 +135,6 @@ const COPY = {
   }
 };
 
-const formatOption = (value: string, language: ContestLanguage) => {
-  return value;
-};
-
 function fmt(value: string | null | undefined, language: ContestLanguage): string {
   if (!value) return COPY[language].noDate;
   return new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en-US", {
@@ -215,7 +211,8 @@ function AiIoSection({ evaluation, t }: { evaluation: RankingItem["evaluation"];
   const systemPrompt = evaluation?.systemPrompt ?? "";
   const promptText = evaluation?.promptText ?? "";
   const rawOutput = evaluation?.rawModelResponse ?? "";
-  const hasIo = Boolean(rawOutput);
+  const hasInput = Boolean(systemPrompt || promptText);
+  const hasIo = Boolean(hasInput || rawOutput);
 
   return (
     <section className="surface-panel mt-5 p-6">
@@ -228,11 +225,20 @@ function AiIoSection({ evaluation, t }: { evaluation: RankingItem["evaluation"];
             <TokenStat label={t.outputTokens} value={outputTokens} />
             <TokenStat label={t.totalTokens} value={inputTokens + outputTokens} />
           </div>
-          <div className="mt-4 grid gap-4 lg:grid-cols-1">
-            <div className="space-y-3">
-              <div className="text-sm font-semibold text-white">{t.aiOutput}</div>
-              <CodeBlock label={t.rawOutputLabel} content={rawOutput} />
-            </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            {hasInput ? (
+              <div className="space-y-3">
+                <div className="text-sm font-semibold text-white">{t.aiInput}</div>
+                {systemPrompt ? <CodeBlock label={t.systemPromptLabel} content={systemPrompt} /> : null}
+                {promptText ? <CodeBlock label={t.userPromptLabel} content={promptText} /> : null}
+              </div>
+            ) : null}
+            {rawOutput ? (
+              <div className="space-y-3">
+                <div className="text-sm font-semibold text-white">{t.aiOutput}</div>
+                <CodeBlock label={t.rawOutputLabel} content={rawOutput} />
+              </div>
+            ) : null}
           </div>
         </>
       ) : (
@@ -310,7 +316,11 @@ export default function ProjectDetailClient({ id }: { id: string }) {
         </div>
 
         {loading ? <div className="skeleton-block mt-8 h-96 animate-pulse rounded-lg" /> : null}
-        {error ? <div className="mt-8 rounded-lg border border-rose-300/25 bg-rose-400/10 p-8 text-rose-100">{error}</div> : null}
+        {error ? (
+          <div role="alert" className="mt-8 rounded-lg border border-rose-300 bg-white p-8 font-semibold text-rose-900 shadow-sm dark:border-rose-300/25 dark:bg-rose-400/10 dark:text-rose-100">
+            {error}
+          </div>
+        ) : null}
 
         {!loading && item ? (
           <div className="mt-8">

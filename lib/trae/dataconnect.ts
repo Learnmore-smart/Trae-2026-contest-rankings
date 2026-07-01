@@ -18,14 +18,30 @@ type ServiceAccountEnv = ServiceAccount & {
   privateKey?: string;
 };
 
+/**
+ * A known-bad FIREBASE_SERVICE_ACCOUNT_KEY has a corrupted PEM footer
+ * ("-----END PRVATE Key-----" instead of "-----END PRIVATE KEY-----"), which makes
+ * every Data Connect/Firebase Admin call fail with "Failed to parse private key" —
+ * silently, since callers catch it and fall back to the local topics-cache.json
+ * snapshot instead of surfacing the real error. Repair only that exact typo so a
+ * malformed key can't be mistaken for a different, valid one.
+ */
+function repairPrivateKeyFooterTypo(privateKey: string): string {
+  return privateKey.replace("-----END PRVATE Key-----", "-----END PRIVATE KEY-----");
+}
+
 function serviceAccountFromEnv(): ServiceAccount | null {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
   if (!raw) return null;
   try {
     const decoded = raw.trim().startsWith("{") ? raw : Buffer.from(raw, "base64").toString("utf8");
     const account = JSON.parse(decoded) as ServiceAccountEnv;
+    // Fix the snake_case field first (not just a derived camelCase copy): firebase-admin's
+    // cert() accepts the raw downloaded service-account JSON shape and may read private_key
+    // directly, so leaving it uncorrected while only patching `privateKey` silently no-ops.
+    if (account.private_key) account.private_key = repairPrivateKeyFooterTypo(account.private_key);
     if (account.private_key && !account.privateKey) account.privateKey = account.private_key.replace(/\\n/g, "\n");
-    if (account.privateKey) account.privateKey = account.privateKey.replace(/\\n/g, "\n");
+    if (account.privateKey) account.privateKey = repairPrivateKeyFooterTypo(account.privateKey.replace(/\\n/g, "\n"));
     return account;
   } catch {
     throw new DataConnectUnavailableError("FIREBASE_SERVICE_ACCOUNT_KEY is not valid JSON or base64 JSON.");

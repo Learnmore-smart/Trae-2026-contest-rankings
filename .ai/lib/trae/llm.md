@@ -1,10 +1,10 @@
 # lib/trae/llm.ts
 
-> Last updated: 2026-06-29 | Protection: STANDARD
+> Last updated: 2026-06-30 | Protection: STANDARD
 
 ## Purpose
 
-Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat completions.
+Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat completions, including vision (image_url) calls.
 
 ## What It Does
 
@@ -15,13 +15,18 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 - Adds NVIDIA DeepSeek reasoning effort `max` for DeepSeek V4 fallback calls, leaving Kimi and GLM request bodies unchanged.
 - Records provider, model, latency, retry count, error reason, and raw response for every attempt.
 - Rejects paid provider fallbacks by construction.
+- `LLMMessage.content` accepts either a plain string or an array of `{type: "text"}` / `{type: "image_url"}` parts, so callers can send multimodal vision requests through the same request builder.
+- `responseFormat` option (default `"json_object"`) controls whether `response_format: {type: "json_object"}` is sent; vision calls use `"text"` since descriptions are prose, not schema-bound JSON.
+- `callVisionLLMWithFallback()` reuses the same retry/fallback loop but scopes the plan to `buildVisionLLMFallbackPlan()` (verified vision-capable NVIDIA models only) via the new `plan` override option on `callLLMWithFallback`.
 
 ## Public API
 
 | Name | Type | Description |
 |------|------|-------------|
-| `callLLMWithFallback` | function | Calls configured free models in provider order until one returns valid content. |
-| `buildLLMFallbackPlan` | function | Produces the ordered provider/model plan used by the client. |
+| `callLLMWithFallback` | function | Calls configured free models in provider order until one returns valid content. Accepts a `plan` override and `responseFormat`. |
+| `buildLLMFallbackPlan` | function | Produces the ordered text-model provider/model plan used by the client. |
+| `callVisionLLMWithFallback` | function | Same retry/fallback semantics, scoped to vision-capable models, text response format. |
+| `buildVisionLLMFallbackPlan` | function | Produces the ordered vision-model plan: `config.nvidiaImageModel` then `config.nvidiaImageFallbackModel` (deduped), NVIDIA only. |
 
 ## Dependencies
 
@@ -34,6 +39,8 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 - 2026-06-29 Codex: Treat invalid judge JSON as a model-call failure through a validator callback so fallback behavior stays centralized.
 - 2026-06-29 Codex: Parse OpenAI-compatible response `usage` into per-attempt input/output token fields so downstream code can persist token totals without exposing provider details publicly.
 - 2026-06-30 Codex: Apply `reasoning_effort: "max"` only for NVIDIA DeepSeek models so the final fallback uses max thinking while Kimi K2.6 and GLM 5.1 stay fast/default.
+- 2026-06-30 Claude: Verified live against the real NVIDIA endpoint that `moonshotai/kimi-k2.6` and `minimaxai/minimax-m3` both accept `image_url` content pointing at a remote HTTPS URL (no base64 upload needed) and return accurate descriptions — this is what makes `lib/trae/vision.ts` possible without adding a screenshot-hosting step.
+- 2026-06-30 Claude: Kept the vision plan NVIDIA-only (no OpenRouter fallback) since only two NVIDIA models are verified vision-capable; guessing at OpenRouter free-tier vision support risked a confusing silent failure instead of the clean "not performed" degradation.
 
 ## Important Notes / NEVER Change
 
@@ -50,3 +57,4 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 | 2026-06-29 | Implemented per-attempt token usage capture from response usage payloads. | Codex |
 | 2026-06-29 | Classify NVIDIA soft-throttle (HTTP 200, empty choices) as retryable `rate_limited`; raise rate-limit backoff base to 2s. | Claude |
 | 2026-06-30 | Planned NVIDIA DeepSeek request option to use max reasoning effort on the final fallback. | Codex |
+| 2026-06-30 | Implemented multimodal `LLMContentPart` message content, `responseFormat` option, plan override, `buildVisionLLMFallbackPlan`, and `callVisionLLMWithFallback`. | Claude |

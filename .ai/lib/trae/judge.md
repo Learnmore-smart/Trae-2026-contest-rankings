@@ -1,6 +1,6 @@
 # lib/trae/judge.ts
 
-> Last updated: 2026-06-29 | Protection: STANDARD
+> Last updated: 2026-06-30 | Protection: STANDARD
 
 ## Purpose
 
@@ -9,6 +9,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 ## What It Does
 
 - Builds strict JSON prompts from contest criteria.
+- Gathers real visual evidence once per topic via `gatherVisualEvidence()` (post-image vision + an automatic demo-URL screenshot vision pass) before building any prompt, and folds the resulting summaries into the shared base prompt.
 - Uses `callLLMWithFallback()` so all model calls share provider order, retries, timeout, and logging behavior.
 - Handles 429, timeout, invalid JSON, validation errors, and model fallbacks.
 - Writes SQL `evaluations`, updates denormalized topic scoring fields, and records token usage through Data Connect.
@@ -23,7 +24,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 
 ## Dependencies
 
-- Internal: `config`, `dataconnect`, `llm`, `runs`, `types`.
+- Internal: `config`, `dataconnect`, `llm`, `runs`, `types`, `vision`.
 - Generated SDK: `getBoardData`, `upsertEvaluation`, `updateTopicEvaluationState`, `upsertModelTokenUsage`.
 - External: `zod`.
 
@@ -58,3 +59,23 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | 2026-06-30 | Planned Data Connect judge persistence verification. | Codex |
 | 2026-06-30 | Verified offline LLM fallback tests; live judge run was blocked by escalation usage limits. | Codex |
 | 2026-06-30 | Planned fix for Data Connect judge failure caused by sending client-side `createdAt` to `UpsertEvaluation`. | Codex |
+| 2026-07-01 | Planned multi-evaluator consensus judging so each topic is scored by four independent requests plus one consensus request. | Codex |
+| 2026-07-01 | Implemented four-evaluator plus consensus judging and explicit evidence-limit prompts. | Codex |
+| 2026-06-30 | Planned real visual evidence (post-image vision + automatic demo screenshot vision) to replace the "not performed" disclaimers. | Claude |
+| 2026-06-30 | Implemented `gatherVisualEvidence()` wiring in `judgeOneTopic()`; bumped `PROMPT_VERSION` to `v3-visual-evidence`; added explicit static-page-must-not-score-high grading guidance to the completion/design dimensions. | Claude |
+
+## Scoring Fix Plan: Multi-Evaluator Consensus
+
+- 2026-07-01 Codex: Owner reported the current single-LLM score is too subjective and can over-rank weak/static demos. Current implementation confirms that concern: `judgeOneTopic()` makes one text-only LLM call, passes only image count and demo URL text, and does not browse the demo or inspect images.
+- Fix strategy: keep the zero-budget provider fallback path, but run four independent evaluator prompts for one topic: product value, technical/completion, UX/design, and risk/material evidence. Then run one consensus/referee prompt that compares the four JSON evaluations and returns the canonical `EvaluationOutput`.
+- Persistence strategy: store the final consensus score in the existing `evaluations` row, while preserving all evaluator/referee model attempts in `llmCallLogs` and saving a combined raw model response for audit.
+- Evidence honesty: until a browser/vision evidence pipeline is added, prompts must explicitly state that image vision and interactive demo browsing were not performed, so the model cannot claim it saw screenshots or used the demo.
+
+## Scoring Fix Plan: Real Visual Evidence (Image Vision + Demo Screenshot Vision)
+
+- 2026-06-30 Claude: Owner reported (a) scoring is still too subjective for a single evaluator's taste and wanted the existing 4-evaluator-plus-referee design confirmed as the answer, (b) the #1-ranked entry was "just a poor static webpage" scoring too high, (c) it was unclear whether post images were ever actually inspected, and (d) it was unclear whether the judge ever opened/rendered the demo link like a human would. Investigation confirmed (b)-(d): the multi-evaluator consensus mechanism already existed uncommitted, but every prompt explicitly disclaimed "image vision was not performed" / "interactive demo browsing was not performed" — the pipeline never looked at any image or demo page.
+- Verified live against the real NVIDIA endpoint before building anything: `moonshotai/kimi-k2.6` (config's `nvidiaImageModel`) and `minimaxai/minimax-m3` both correctly describe real remote `image_url` content (forum CDN screenshots and a thum.io-rendered page). This confirms the owner's instinct to use Kimi K2.6 for vision; MiniMax M3 works too but is kept as the fallback since `config.md`'s change history records it soft-throttling on the text path.
+- Demo browsing strategy: rather than adding a headless-browser dependency (Playwright/Chromium), which would need Docker/Cloud-Run-only support and wouldn't run in the lighter Vercel cron path, use `https://image.thum.io/get/width/1200/noanimate/<url>` — a free, no-API-key screenshot proxy. thum.io fetches the target URL server-side (we never connect to attacker-controlled demo URLs ourselves), then the vision model fetches thum.io's image server-side. Verified live: it correctly rendered a real Netlify-hosted contest demo and the vision model gave an accurate, useful "is this a real product or a static landing page" assessment.
+- No new Data Connect schema/persistence: visual evidence is recomputed on every `judgeOneTopic()` call (not cached on the topic row) to avoid a schema migration + generated-SDK regeneration in this pass. Acceptable at this scale; a future pass could cache it on `Topic.traeEvidence` (already a flexible `Any` column) keyed by `contentHash`/`demoUrl` if re-judge volume makes the repeated vision calls costly.
+- Both vision calls (`describeTopicImages`, `describeDemoScreenshot`) swallow their own failures and resolve to `null` — a throttled/broken vision model degrades gracefully back to the old honest "not performed" disclaimer instead of failing the whole judge run.
+- Known limitation, stated plainly rather than silently: this captures a single above-the-fold screenshot of the demo's homepage, not a multi-page click-through. It answers "is this obviously just a static/marketing page" but not "does every internal flow work." Real Playwright-based click-through automation remains a possible future upgrade, gated to the Cloud Run Job path only (see `Dockerfile`/README's Cloud Run Job section) since it cannot run in a Vercel serverless function.

@@ -8,6 +8,7 @@ const appDir = join(process.cwd(), "app");
 const landingPagePath = join(appDir, "page.tsx");
 const rankingPagePath = join(appDir, "ranking/page.tsx");
 const clientPath = join(appDir, "contest-client.tsx");
+const projectDetailClientPath = join(appDir, "project/project-detail-client.tsx");
 const nextConfigPath = join(process.cwd(), "next.config.mjs");
 const runRoutePath = join(process.cwd(), "app/api/trae-contest/run/route.ts");
 const dataConnectQueriesPath = join(process.cwd(), "dataconnect/connector/queries.gql");
@@ -15,6 +16,7 @@ const traeApiPath = join(process.cwd(), "lib/trae/api.ts");
 const topicsCachePath = join(process.cwd(), "lib/trae/topics-cache.json");
 
 const read = (path: string) => readFileSync(path, "utf8");
+const officialTracks = new Set(["生活娱乐", "学习工作", "社会服务", "硬件交互", "社会公益"]);
 
 test("contest home and ranking have separate app routes", () => {
   assert.ok(existsSync(landingPagePath), "landing route should exist");
@@ -46,6 +48,41 @@ test("client API requests default to configured Next base path", () => {
 
   assert.equal(basePath, "/trae-contest-2026");
   assert.match(client, /const API_BASE = process\.env\.NEXT_PUBLIC_BASE_PATH \?\? "\/trae-contest-2026";/);
+});
+
+test("project detail API requests default to configured Next base path", () => {
+  const detailClient = read(projectDetailClientPath);
+  const nextConfig = read(nextConfigPath);
+  const basePath = nextConfig.match(/basePath:\s*"([^"]+)"/)?.[1];
+
+  assert.equal(basePath, "/trae-contest-2026");
+  assert.match(detailClient, /const API_BASE = process\.env\.NEXT_PUBLIC_BASE_PATH \?\? "\/trae-contest-2026";/);
+  assert.match(detailClient, /fetch\(`\$\{API_BASE\}\/api\/trae-contest\/topics\/\$\{encodeURIComponent\(id\)\}`/);
+});
+
+test("project detail error panel is readable in light and dark themes", () => {
+  const detailClient = read(projectDetailClientPath);
+
+  assert.match(detailClient, /bg-white/);
+  assert.match(detailClient, /text-rose-900/);
+  assert.match(detailClient, /dark:bg-rose-400\/10/);
+  assert.match(detailClient, /dark:text-rose-100/);
+});
+
+test("ranking error panel is readable in light and dark themes", () => {
+  const client = read(clientPath);
+
+  assert.match(client, /role="alert" className="rounded-md border border-rose-300 bg-white p-6 font-semibold text-rose-900 shadow-sm dark:border-rose-300\/25 dark:bg-rose-400\/10 dark:text-rose-100"/);
+});
+
+test("project detail renders saved AI scoring input and output", () => {
+  const detailClient = read(projectDetailClientPath);
+
+  assert.match(detailClient, /const hasInput = Boolean\(systemPrompt \|\| promptText\);/);
+  assert.match(detailClient, /const hasIo = Boolean\(hasInput \|\| rawOutput\);/);
+  assert.match(detailClient, /<CodeBlock label=\{t\.systemPromptLabel\} content=\{systemPrompt\} \/>/);
+  assert.match(detailClient, /<CodeBlock label=\{t\.userPromptLabel\} content=\{promptText\} \/>/);
+  assert.match(detailClient, /<CodeBlock label=\{t\.rawOutputLabel\} content=\{rawOutput\} \/>/);
 });
 
 test("data connect nested topic reads stay below deadline-prone size", () => {
@@ -101,12 +138,57 @@ test("ranking topics fall back to local cache when Data Connect is unconfigured"
   }
 });
 
+test("ranking fallback rows are preliminary-only and use official track labels", async () => {
+  type CachedTopic = {
+    sourceType?: string;
+  };
+  const cachedTopics = JSON.parse(read(topicsCachePath)) as CachedTopic[];
+  const expectedPreliminaryCount = cachedTopics.filter((topic) => topic.sourceType === "PRELIMINARY").length;
+  const envKeys = [
+    "FIREBASE_SERVICE_ACCOUNT_KEY",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "FIREBASE_CONFIG",
+    "GCLOUD_PROJECT",
+    "GOOGLE_CLOUD_PROJECT",
+    "FIREBASE_PROJECT_ID"
+  ];
+  const previousEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
+  const originalConsoleError = console.error;
+  for (const key of envKeys) delete process.env[key];
+
+  try {
+    console.error = () => undefined;
+    const moduleUrl = `${pathToFileURL(traeApiPath).href}?official-track-fallback-test=${Date.now()}`;
+    const { listRankedTopics } = await import(moduleUrl) as typeof import("../lib/trae/api.ts");
+    const payload = await listRankedTopics({ page: 1, pageSize: 1000, sort: "total", bypassCache: true });
+
+    assert.equal(payload.total, expectedPreliminaryCount);
+    assert.equal(payload.items.length, expectedPreliminaryCount);
+    assert.deepEqual(
+      payload.items
+        .filter((item) => item.topic.sourceType !== "preliminary" || (item.topic.track !== null && !officialTracks.has(item.topic.track)))
+        .map((item) => ({ id: item.topic.id, sourceType: item.topic.sourceType, track: item.topic.track })),
+      []
+    );
+    assert.ok(payload.items.some((item) => item.topic.track === "学习工作"), "expected legacy education/work labels to normalize");
+    assert.ok(payload.items.some((item) => item.topic.track === "社会公益"), "expected legacy public-good labels to normalize");
+  } finally {
+    for (const [key, value] of previousEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    console.error = originalConsoleError;
+  }
+});
+
 test("ranking stats fall back to local cache when Data Connect is unconfigured", async () => {
   type CachedTopic = {
+    sourceType?: string;
     totalScore?: number | null;
   };
   const cachedTopics = JSON.parse(read(topicsCachePath)) as CachedTopic[];
-  const expectedEvaluatedCount = cachedTopics.filter((topic) => typeof topic.totalScore === "number" && topic.totalScore >= 0).length;
+  const expectedPreliminaryCount = cachedTopics.filter((topic) => topic.sourceType === "PRELIMINARY").length;
+  const expectedEvaluatedCount = cachedTopics.filter((topic) => topic.sourceType === "PRELIMINARY" && typeof topic.totalScore === "number" && topic.totalScore >= 0).length;
   const envKeys = [
     "FIREBASE_SERVICE_ACCOUNT_KEY",
     "GOOGLE_APPLICATION_CREDENTIALS",
@@ -126,7 +208,7 @@ test("ranking stats fall back to local cache when Data Connect is unconfigured",
     const stats = await getTraeStats();
 
     assert.equal(stats.sourceUnavailable, undefined);
-    assert.equal(stats.preliminaryCount, cachedTopics.length);
+    assert.equal(stats.preliminaryCount, expectedPreliminaryCount);
     assert.equal(stats.evaluatedCount, expectedEvaluatedCount);
   } finally {
     for (const [key, value] of previousEnv) {
@@ -137,6 +219,16 @@ test("ranking stats fall back to local cache when Data Connect is unconfigured",
   }
 });
 
+test("live board data uses Data Connect topics instead of bundled cache as base", () => {
+  const traeApi = read(traeApiPath);
+
+  assert.match(traeApi, /const sourceTopics = dbFailed \? preliminaryCacheTopics\(allTopics\) : topTopics;/);
+  assert.doesNotMatch(
+    traeApi,
+    /if \(dbFailed\) \{[\s\S]*?return \{ stats, baseItems \};[\s\S]*?const baseItems: RankingItem\[\] = allTopics\.map/
+  );
+});
+
 test("public run status reports bounded judging batch counts", () => {
   const route = read(runRoutePath);
   const client = read(clientPath);
@@ -145,4 +237,5 @@ test("public run status reports bounded judging batch counts", () => {
   assert.match(route, /judgeResult\.evaluatedCount/);
   assert.match(route, /judgeResult\.failedCount/);
   assert.match(client, /cooldown \? t\.cooldown : status\?\.message \?\? phaseMessage\(phase, language\)/);
+  assert.match(client, /phase === "error" && status\?\.error/);
 });

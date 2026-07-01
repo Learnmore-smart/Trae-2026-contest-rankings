@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Verifies the zero-budget provider-agnostic LLM fallback client.
+Verifies the zero-budget provider-agnostic LLM fallback client, including the vision-call path.
 
 ## What It Does
 
@@ -14,6 +14,8 @@ Verifies the zero-budget provider-agnostic LLM fallback client.
 - Tests invalid JSON/content validation fallback.
 - Tests missing provider keys are logged and never introduce paid providers.
 - Tests extraction of input/output token usage from OpenAI-compatible responses.
+- Tests `buildVisionLLMFallbackPlan` orders/dedupes the image model and its fallback, NVIDIA only.
+- Tests `callVisionLLMWithFallback` sends multimodal `image_url` content parts and omits `response_format` from the request body.
 
 ## Dependencies
 
@@ -42,3 +44,4 @@ Verifies the zero-budget provider-agnostic LLM fallback client.
 | 2026-06-30 | Planned default NVIDIA text/image model order coverage. | Codex |
 | 2026-06-30 | Added regression coverage for default NVIDIA text order and image/multimodal model config. | Codex |
 | 2026-06-30 | Planned Kimi-first NVIDIA order tests and DeepSeek max reasoning-effort request coverage. | Codex |
+| 2026-06-30 | Added vision plan ordering/dedup tests and multimodal `callVisionLLMWithFallback` request-shape coverage. | Claude |

@@ -60,6 +60,13 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 - Regression risk: fallback `lastUpdatedAt` and counts come from the snapshot file and may lag behind live DB, but they are consistent with the rows the page is displaying.
 - Implemented: extracted `readTopicsCache()` and `statsPayloadFromCacheTopics()`, reused the cache-derived stats in board fallback, and made `getTraeStats()` fall back to those counts before returning an unavailable 0/0 payload.
 
+## Bug Fix Plan: Ranking Must Use Official Tracks And Live Board Source
+
+- 2026-06-30 Codex: Owner reported ranking rows showing legacy categories such as `AI 应用` and `教育学习`, and the public board only showing 424 rows. Evidence: `topics-cache.json` contains 424 rows total, including 60 `SIGNUP` rows and legacy tracks; `buildBoardDataFromSource()` still used that file as the base item list even when Data Connect succeeded.
+- Fix strategy: normalize returned topic tracks to the five official tracks (`生活娱乐`, `学习工作`, `社会服务`, `硬件交互`, `社会公益`) by exact title/content match plus legacy aliases, filter local fallback rows to preliminary topics, and use Data Connect `GetBoardData` topics as the live board base when DB reads succeed. Keep the JSON file only as a DB-unavailable fallback.
+- Regression risk: local fallback remains limited by the bundled snapshot; live Data Connect is still capped by the query limit and needs a later pagination/snapshot-table change for true all-topic scale.
+- Implemented: added official-track normalization, preliminary-only local fallback filtering, preliminary-only fallback stats, shared record mappers, and switched successful DB board builds to `topTopics` as the ranking base.
+
 ## Important Notes / NEVER Change
 
 - Public APIs must not return `rawHtml` or unrestricted raw model internals.
@@ -78,3 +85,5 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 | 2026-06-30 | Planned local cache fallback fix for missing Data Connect credentials. | Codex |
 | 2026-06-30 | Planned stats fallback from local topic cache for 0/0 header fix. | Codex |
 | 2026-06-30 | Implemented stats fallback from local topic cache for 100/424 header recovery. | Codex |
+| 2026-06-30 | Planned official-track normalization and live board source fix for 424-row fallback leakage. | Codex |
+| 2026-06-30 | Implemented official-track normalization and live Data Connect board source usage. | Codex |

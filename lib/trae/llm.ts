@@ -2,9 +2,13 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { type AIProvider, getTraeConfig, type TraeConfig } from "./config.ts";
 import type { TraeAIProvider, TraeLLMCallLog } from "./types.ts";
 
+export type LLMContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface LLMMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | LLMContentPart[];
 }
 
 export interface LLMFallbackPlanEntry {
@@ -26,16 +30,20 @@ export interface CallLLMWithFallbackOptions<TParsed = string> {
   messages: LLMMessage[];
   config?: TraeConfig;
   temperature?: number;
+  /** "json_object" (default) matches the strict-JSON judge prompts; "text" is for free-form vision descriptions. */
+  responseFormat?: "json_object" | "text";
   validateContent?: (content: string) => TParsed;
   fetchFn?: typeof fetch;
   sleepFn?: (delayMs: number) => Promise<void>;
+  /** Override the provider/model plan (used by callVisionLLMWithFallback for vision-capable models only). */
+  plan?: LLMFallbackPlanEntry[];
 }
 
 interface ChatCompletionRequestBody {
   model: string;
   messages: LLMMessage[];
   temperature: number;
-  response_format: { type: "json_object" };
+  response_format?: { type: "json_object" };
   reasoning_effort?: "max";
 }
 
@@ -80,20 +88,43 @@ export function buildLLMFallbackPlan(config = getTraeConfig()): LLMFallbackPlanE
   });
 }
 
+/**
+ * Vision-capable models only. Kept separate from the text fallback plan because most
+ * NVIDIA text fallbacks (GLM 5.1, DeepSeek V4 Flash) are not verified vision models.
+ */
+export function buildVisionLLMFallbackPlan(config = getTraeConfig()): LLMFallbackPlanEntry[] {
+  const seen = new Set<string>();
+  return [config.nvidiaImageModel, config.nvidiaImageFallbackModel]
+    .filter((model): model is string => Boolean(model))
+    .filter((model) => {
+      if (seen.has(model)) return false;
+      seen.add(model);
+      return true;
+    })
+    .map((model) => ({
+      provider: "nvidia" as const,
+      apiKey: config.nvidiaApiKey,
+      baseUrl: config.nvidiaBaseUrl,
+      model
+    }));
+}
+
 export async function callLLMWithFallback<TParsed = string>({
   messages,
   config = getTraeConfig(),
   temperature = 0.2,
+  responseFormat = "json_object",
   validateContent,
   fetchFn = fetch,
   sleepFn = async (delayMs) => {
     await sleep(delayMs);
-  }
+  },
+  plan
 }: CallLLMWithFallbackOptions<TParsed>): Promise<LLMCallResult<TParsed>> {
   const callLogs: TraeLLMCallLog[] = [];
-  const plan = buildLLMFallbackPlan(config);
+  const resolvedPlan = plan ?? buildLLMFallbackPlan(config);
 
-  for (const entry of plan) {
+  for (const entry of resolvedPlan) {
     if (!entry.apiKey) {
       callLogs.push({
         provider: entry.provider,
@@ -113,6 +144,7 @@ export async function callLLMWithFallback<TParsed = string>({
         entry,
         messages,
         temperature,
+        responseFormat,
         timeoutMs: config.aiRequestTimeoutMs,
         openRouterSiteUrl: config.openRouterSiteUrl,
         openRouterAppName: config.openRouterAppName,
@@ -146,10 +178,28 @@ export async function callLLMWithFallback<TParsed = string>({
   throw new LLMFallbackError("All zero-budget LLM models failed.", callLogs);
 }
 
+/**
+ * Same retry/fallback machinery as callLLMWithFallback, but scoped to verified
+ * vision-capable models (see buildVisionLLMFallbackPlan) and free-form text output
+ * instead of strict JSON, since vision descriptions are prose, not schema-bound.
+ */
+export async function callVisionLLMWithFallback<TParsed = string>(
+  options: Omit<CallLLMWithFallbackOptions<TParsed>, "plan" | "responseFormat">
+): Promise<LLMCallResult<TParsed>> {
+  const config = options.config ?? getTraeConfig();
+  return callLLMWithFallback({
+    ...options,
+    config,
+    responseFormat: "text",
+    plan: buildVisionLLMFallbackPlan(config)
+  });
+}
+
 interface CallOneModelOptions<TParsed> {
   entry: LLMFallbackPlanEntry;
   messages: LLMMessage[];
   temperature: number;
+  responseFormat: "json_object" | "text";
   timeoutMs: number;
   openRouterSiteUrl: string;
   openRouterAppName: string;
@@ -174,6 +224,7 @@ async function callOneModel<TParsed>({
   entry,
   messages,
   temperature,
+  responseFormat,
   timeoutMs,
   openRouterSiteUrl,
   openRouterAppName,
@@ -191,7 +242,7 @@ async function callOneModel<TParsed>({
       method: "POST",
       signal: controller.signal,
       headers: buildHeaders(entry, openRouterSiteUrl, openRouterAppName),
-      body: JSON.stringify(buildChatCompletionRequestBody(entry, messages, temperature))
+      body: JSON.stringify(buildChatCompletionRequestBody(entry, messages, temperature, responseFormat))
     });
     rawResponse = await response.text();
 
@@ -236,14 +287,18 @@ async function callOneModel<TParsed>({
 function buildChatCompletionRequestBody(
   entry: LLMFallbackPlanEntry,
   messages: LLMMessage[],
-  temperature: number
+  temperature: number,
+  responseFormat: "json_object" | "text"
 ): ChatCompletionRequestBody {
   const body: ChatCompletionRequestBody = {
     model: entry.model,
     messages,
-    temperature,
-    response_format: { type: "json_object" }
+    temperature
   };
+
+  if (responseFormat === "json_object") {
+    body.response_format = { type: "json_object" };
+  }
 
   if (entry.provider === "nvidia" && isDeepSeekModel(entry.model)) {
     body.reasoning_effort = "max";
