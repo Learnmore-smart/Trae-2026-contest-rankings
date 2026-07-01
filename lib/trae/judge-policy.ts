@@ -1,2 +1,2 @@
-export const DEFAULT_JUDGE_BATCH_MAX = 24;
-export const DEFAULT_JUDGE_CONCURRENCY = 6;
+export const DEFAULT_JUDGE_BATCH_MAX = 48;
+export const DEFAULT_JUDGE_CONCURRENCY = 8;

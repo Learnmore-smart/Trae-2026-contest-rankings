@@ -28,6 +28,7 @@ Defines non-secret default throughput policy for TRAE judging.
 - 2026-07-01 Codex: Owner wants grading faster and does not want to repeatedly edit Cloud Run public env vars. Use code constants for non-secret throughput defaults.
 - 2026-07-01 Codex: Move from `12 / 3` to `24 / 6`. This doubles per-batch size and worker count without jumping straight to a high-risk rate-limit setting.
 - 2026-07-01 Codex: Implemented as pure constants so the file is safe to import from `app/admin/admin-client.tsx`.
+- 2026-07-01 Codex: Owner asked to increase further. Move defaults to `48 / 8`, a larger but still bounded setting.
 
 ## Important Notes / NEVER Change
 
@@ -40,3 +41,5 @@ Defines non-secret default throughput policy for TRAE judging.
 |------|--------|--------|
 | 2026-07-01 | Planned shared judge throughput policy constants. | Codex |
 | 2026-07-01 | Added `DEFAULT_JUDGE_BATCH_MAX = 24` and `DEFAULT_JUDGE_CONCURRENCY = 6`. | Codex |
+| 2026-07-01 | Planned throughput bump to `48 / 8`. | Codex |
+| 2026-07-01 | Updated constants to `DEFAULT_JUDGE_BATCH_MAX = 48` and `DEFAULT_JUDGE_CONCURRENCY = 8`. | Codex |

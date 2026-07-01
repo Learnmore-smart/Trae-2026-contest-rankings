@@ -61,6 +61,7 @@ Guards the admin console's compact running-status UI against leaking long action
 - 2026-07-01 Codex: Replace literal `12 / 3` expectations with assertions that admin actions use `DEFAULT_JUDGE_BATCH_MAX` and `DEFAULT_JUDGE_CONCURRENCY`.
 - Verify the shared policy file defines the aggressive defaults `24 / 6`.
 - Implemented in the admin judge policy source-level test.
+- 2026-07-01 Codex: Update the shared policy expectations to `48 / 8`.
 
 ## Planned Change: Admin Theme Shell Test
 

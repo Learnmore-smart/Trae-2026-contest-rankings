@@ -94,6 +94,7 @@ Guards public contest routing and workflow safety invariants.
 - 2026-07-01 Codex: Update the public route guard to reject route-local `12 / 3` constants and require shared `DEFAULT_JUDGE_BATCH_MAX` and `DEFAULT_JUDGE_CONCURRENCY` imports.
 - Add a static guard for `lib/trae/judge-policy.ts` values `24` and `6`.
 - Implemented in the public run workflow source-level test.
+- 2026-07-01 Codex: Update the guard to expect `48 / 8`.
 
 ## Bug Fix Plan: Detail Page Must Work Under Base Path
 
