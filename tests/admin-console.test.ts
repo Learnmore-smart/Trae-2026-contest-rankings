@@ -18,3 +18,13 @@ test("admin console busy badge stays generic while actions run", () => {
     "busy badge should not expose the raw action label"
   );
 });
+
+test("admin judge actions request twelve-topic batches with three workers", () => {
+  const judgeActions = [...adminClient.matchAll(/endpoint: "\/api\/trae-contest\/admin\/judge"[\s\S]*?batchMax: (\d+)[\s\S]*?concurrency: (\d+)/g)];
+
+  assert.equal(judgeActions.length, 3, "expected unjudged, changed, and low-confidence judge actions");
+  for (const action of judgeActions) {
+    assert.equal(action[1], "12");
+    assert.equal(action[2], "3");
+  }
+});

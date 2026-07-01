@@ -10,6 +10,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 
 - Builds strict JSON prompts from contest criteria.
 - Gathers real visual evidence once per topic via `gatherVisualEvidence()` (post-image vision + an automatic demo-URL screenshot vision pass) before building any prompt, and folds the resulting summaries into the shared base prompt.
+- Processes selected topic slices with bounded in-process concurrency via `runWithConcurrency()`.
 - Uses `callLLMWithFallback()` so all model calls share provider order, retries, timeout, and logging behavior.
 - Handles 429, timeout, invalid JSON, validation errors, and model fallbacks.
 - Writes SQL `evaluations`, updates denormalized topic scoring fields, and records token usage through Data Connect.
@@ -19,6 +20,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | Name | Type | Description |
 |------|------|-------------|
 | `judgeChangedTraeTopics` | function | Scores topics needing judging. |
+| `runWithConcurrency` | function | Runs local async work with a fixed maximum number of workers. |
 | `parseEvaluationJson` | function | Parses and repairs model JSON output. |
 | `buildJudgePrompt` | function | Creates the model prompt for one topic. |
 
@@ -63,6 +65,15 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | 2026-07-01 | Implemented four-evaluator plus consensus judging and explicit evidence-limit prompts. | Codex |
 | 2026-06-30 | Planned real visual evidence (post-image vision + automatic demo screenshot vision) to replace the "not performed" disclaimers. | Claude |
 | 2026-06-30 | Implemented `gatherVisualEvidence()` wiring in `judgeOneTopic()`; bumped `PROMPT_VERSION` to `v3-visual-evidence`; added explicit static-page-must-not-score-high grading guidance to the completion/design dimensions. | Claude |
+| 2026-07-01 | Added bounded judge topic concurrency and logs the applied concurrency per judge run. | Codex |
+
+## Planned Change: Bounded Judge Concurrency
+
+- 2026-07-01 Codex: Owner confirmed admin judging should run `max: 12` with `concurrency: 3`. The safe implementation is in-process bounded concurrency over one selected topic slice, not parallel admin requests, because separate requests can read the same unjudged backlog and duplicate work.
+- Add a small tested concurrency helper exported for offline tests.
+- Extend `JudgeOptions` with `concurrency`, defaulting to config, clamped to `1..max`, and keep each worker writing success/error state for its own topic.
+- Preserve zero-budget fallback and per-topic visual/evaluator/consensus behavior; only change how many selected topics are processed at once.
+- Implemented: `JudgeOptions.concurrency`, `runWithConcurrency()`, config fallback, and per-run completion log include the applied concurrency.
 
 ## Scoring Fix Plan: Multi-Evaluator Consensus
 

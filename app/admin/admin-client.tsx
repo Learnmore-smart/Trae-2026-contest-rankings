@@ -17,6 +17,7 @@ interface Action {
   // small batches client-side instead, so each request fits and progress is visible.
   loop?: boolean;
   batchMax?: number;
+  concurrency?: number;
 }
 
 const ACTIONS: Action[] = [
@@ -29,7 +30,8 @@ const ACTIONS: Action[] = [
     endpoint: "/api/trae-contest/admin/judge",
     body: { mode: "unjudged" },
     loop: true,
-    batchMax: 1
+    batchMax: 12,
+    concurrency: 3
   },
   {
     label: "重评内容变化作品",
@@ -37,7 +39,8 @@ const ACTIONS: Action[] = [
     endpoint: "/api/trae-contest/admin/judge",
     body: { mode: "changed" },
     loop: true,
-    batchMax: 1
+    batchMax: 12,
+    concurrency: 3
   },
   {
     label: "重评低置信度作品",
@@ -45,7 +48,8 @@ const ACTIONS: Action[] = [
     endpoint: "/api/trae-contest/admin/judge",
     body: { mode: "low-confidence" },
     loop: true,
-    batchMax: 1
+    batchMax: 12,
+    concurrency: 3
   }
 ];
 
@@ -137,7 +141,11 @@ export default function AdminClient() {
       let totalFailed = 0;
       const maxIterations = 500;
       for (let i = 0; i < maxIterations; i += 1) {
-        const text = await postAction(action, { ...(action.body ?? {}), max: action.batchMax ?? 3 });
+        const text = await postAction(action, {
+          ...(action.body ?? {}),
+          max: action.batchMax ?? 3,
+          concurrency: action.concurrency ?? 1
+        });
         const payload = JSON.parse(text) as { result?: { evaluatedCount?: number; failedCount?: number } };
         const evaluatedCount = payload.result?.evaluatedCount ?? 0;
         const failedCount = payload.result?.failedCount ?? 0;

@@ -29,3 +29,9 @@ Verifies model JSON parsing, repair, Zod validation behavior, and evidence-aware
 | 2026-06-29 | Planned judge tests to remain focused on parser behavior after LLM client extraction. | Codex |
 | 2026-07-01 | Added multi-evaluator consensus and evidence-limit prompt regression tests. | Codex |
 | 2026-06-30 | Added tests for real-vs-not-performed visual evidence disclosure in evaluator and consensus prompts. | Claude |
+| 2026-07-01 | Added a bounded concurrency helper regression test. | Codex |
+
+## Planned Change: Judge Concurrency Test
+
+- 2026-07-01 Codex: Add an offline unit test for the bounded concurrency helper so `max: 12` / `concurrency: 3` has a regression guard without hitting live Data Connect or AI providers.
+- Implemented: the test tracks peak active workers and verifies all queued items complete.

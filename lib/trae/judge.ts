@@ -1,4 +1,3 @@
-import { setTimeout as sleep } from "node:timers/promises";
 import { createHash } from "node:crypto";
 import { getTraeConfig } from "./config.ts";
 import { getDataConnectDb, nowIso } from "./dataconnect.ts";
@@ -544,12 +543,42 @@ async function recordTokenUsage(callLogs: TraeLLMCallLog[]): Promise<void> {
 export interface JudgeOptions {
   mode?: "unjudged" | "changed" | "low-confidence";
   max?: number;
+  concurrency?: number;
+}
+
+export async function runWithConcurrency<T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<void>
+): Promise<void> {
+  if (items.length === 0) return;
+
+  const workerCount = Math.min(items.length, Math.max(1, Math.floor(concurrency)));
+  let nextIndex = 0;
+
+  async function runWorker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      await worker(items[index], index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+}
+
+function normalizeJudgeConcurrency(value: number | undefined, max: number): number {
+  const parsed = Math.floor(value ?? 1);
+  const safeMax = Math.max(1, Math.floor(max));
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.min(safeMax, Math.max(1, parsed));
 }
 
 export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promise<{ evaluatedCount: number; failedCount: number }> {
   const config = getTraeConfig();
   const max = options.max ?? config.maxJudgePerRun;
   const mode = options.mode ?? "unjudged";
+  const concurrency = normalizeJudgeConcurrency(options.concurrency ?? config.judgeConcurrency, max);
   const run = await startRun("judge", "preliminary");
   const dc = getDataConnectDb();
   let evaluatedCount = 0;
@@ -600,9 +629,7 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
       })
       .slice(0, max);
 
-    for (const topicObj of topics) {
-      const delayMs = Math.ceil(60_000 / Math.max(1, config.aiRpmLimit));
-      if (evaluatedCount + failedCount > 0) await sleep(delayMs);
+    await runWithConcurrency(topics, concurrency, async (topicObj) => {
       try {
         const evaluation = await judgeOneTopic(topicObj.topic, topicObj.match);
         await recordTokenUsage(evaluation.llmCallLogs ?? []);
@@ -705,13 +732,13 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
           error: errorText
         } as any);
       }
-    }
+    });
 
     await finishRun(run.id, {
       status: failedCount > 0 ? "partial" : "success",
       evaluatedCount,
       failedCount,
-      logs: [`Evaluated ${evaluatedCount} topics; ${failedCount} failures.`]
+      logs: [`Evaluated ${evaluatedCount} topics; ${failedCount} failures; concurrency ${concurrency}.`]
     });
     return { evaluatedCount, failedCount };
   } catch (error) {

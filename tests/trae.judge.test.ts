@@ -4,7 +4,8 @@ import {
   buildConsensusJudgePrompt,
   buildJudgePrompt,
   getJudgeEvaluatorProfiles,
-  parseEvaluationJson
+  parseEvaluationJson,
+  runWithConcurrency
 } from "../lib/trae/judge.ts";
 import type { EvaluationOutput, TraeTopic } from "../lib/trae/types.ts";
 
@@ -165,5 +166,24 @@ describe("multi-evaluator judging", () => {
     assert.match(prompt, /interactive demo browsing \(automatic screenshot \+ vision inspection\) WAS performed/);
     assert.doesNotMatch(prompt, /image vision was not performed/);
     assert.doesNotMatch(prompt, /interactive demo browsing was not performed/);
+  });
+});
+
+describe("judge topic concurrency", () => {
+  it("runs queued work with no more than the requested concurrency", async () => {
+    let active = 0;
+    let peak = 0;
+    const completed: number[] = [];
+
+    await runWithConcurrency([1, 2, 3, 4, 5, 6, 7], 3, async (item) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      completed.push(item);
+      active -= 1;
+    });
+
+    assert.equal(peak, 3);
+    assert.deepEqual([...completed].sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7]);
   });
 });

@@ -45,3 +45,9 @@ Guards the admin console's compact running-status UI against leaking long action
 | 2026-06-30 | Planned admin console busy-badge regression test. | Codex |
 | 2026-06-30 | Added the admin console busy-badge regression test. | Codex |
 | 2026-06-30 | Updated source path after root-level route move. | Codex |
+| 2026-07-01 | Added a source-level regression test for judge `batchMax: 12` and `concurrency: 3`. | Codex |
+
+## Planned Change: Judge Batch Settings Test
+
+- 2026-07-01 Codex: Add a source-level assertion that the admin judge actions request `batchMax: 12` and `concurrency: 3`.
+- Implemented for all three judge actions: unjudged, changed, and low-confidence.

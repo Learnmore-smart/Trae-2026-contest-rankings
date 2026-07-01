@@ -14,7 +14,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body = (await request.json().catch(() => ({}))) as JudgeOptions;
     const mode = body.mode === "changed" || body.mode === "low-confidence" ? body.mode : "unjudged";
-    const result = await judgeChangedTraeTopics({ mode, max: body.max });
+    const result = await judgeChangedTraeTopics({ mode, max: body.max, concurrency: body.concurrency });
     await writeBoardSnapshot().catch((error) => console.error("[trae] writeBoardSnapshot failed:", error));
     return NextResponse.json({ ok: true, result });
   } catch (error) {

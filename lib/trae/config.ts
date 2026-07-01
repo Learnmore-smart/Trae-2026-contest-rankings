@@ -21,6 +21,7 @@ export interface TraeConfig {
   aiRpmLimit: number;
   aiMaxRetriesPerModel: number;
   aiRequestTimeoutMs: number;
+  judgeConcurrency: number;
   scraperUserAgent: string;
   adminToken: string | null;
   cronSecret: string | null;
@@ -102,6 +103,7 @@ export function getTraeConfig(): TraeConfig {
     aiRpmLimit,
     aiMaxRetriesPerModel,
     aiRequestTimeoutMs,
+    judgeConcurrency: Math.max(1, Math.floor(numberFromEnv("TRAE_JUDGE_CONCURRENCY", 1))),
     scraperUserAgent:
       process.env.TRAE_SCRAPER_USER_AGENT ??
       "RateMinistere TRAE Contest Rank Bot; contact: noahzh52@gmail.com",
