@@ -11,7 +11,12 @@ const TRACKS = [
 ];
 
 const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg"];
-const ATTACHMENT_EXTENSIONS = [".zip", ".rar", ".7z", ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"];
+const ATTACHMENT_EXTENSIONS = [
+  ".zip", ".rar", ".7z", ".tar", ".gz", ".tgz",
+  ".apk", ".ipa", ".exe", ".dmg", ".msi", ".pkg", ".deb", ".rpm",
+  ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"
+];
+const DEMO_DOWNLOAD_EXTENSIONS = [".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".apk", ".ipa", ".exe", ".dmg", ".msi", ".pkg", ".deb", ".rpm"];
 
 export interface TopicSignalInput {
   title: string;
@@ -25,6 +30,7 @@ export interface TopicSignals {
   contentText: string;
   excerpt: string;
   demoUrl: string | null;
+  demoUrls: string[];
   attachmentUrls: string[];
   imageUrls: string[];
   sessionIds: string[];
@@ -52,7 +58,7 @@ export function normalizeWhitespace(value: string): string {
 function normalizeUrl(raw: string | undefined, baseUrl: string): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
-  if (!trimmed || /^(mailto|tel|javascript):/i.test(trimmed)) return null;
+  if (!trimmed || /^(mailto|tel|javascript|data):/i.test(trimmed)) return null;
   try {
     return new URL(trimmed, baseUrl).toString();
   } catch {
@@ -74,7 +80,30 @@ function isAttachmentUrl(url: string): boolean {
   return ATTACHMENT_EXTENSIONS.some((extension) => pathname.endsWith(extension)) || pathname.includes("/uploads/");
 }
 
-function selectDemoUrl(links: Array<{ url: string; label: string }>, forumHost: string): string | null {
+function isPlaceholderImageUrl(url: string): boolean {
+  const pathname = new URL(url).pathname.toLowerCase();
+  return pathname.includes("/images/transparent") || pathname.includes("/assets/transparent");
+}
+
+function isDownloadDemoUrl(url: string): boolean {
+  const pathname = new URL(url).pathname.toLowerCase();
+  return DEMO_DOWNLOAD_EXTENSIONS.some((extension) => pathname.endsWith(extension));
+}
+
+function parseSrcsetUrls(srcset: string | undefined): string[] {
+  if (!srcset) return [];
+  return srcset
+    .split(",")
+    .map((candidate) => candidate.trim().split(/\s+/)[0])
+    .filter(Boolean);
+}
+
+function hasVisualDemoCue(title: string, text: string, tags: string[]): boolean {
+  const haystack = `${title} ${text} ${tags.join(" ")}`;
+  return /二维码|扫码|小程序|微信|体验码|QR\s*code|qrcode|wechat|mini\s*program|miniprogram|scan\s*(qr|code)/i.test(haystack);
+}
+
+function selectDemoUrls(links: Array<{ url: string; label: string }>, forumHost: string): string[] {
   const demoKeywords = ["demo", "体验", "演示", "在线", "预览", "访问", "试用", "vercel", "netlify"];
   const preferredHosts = ["vercel.app", "netlify.app", "github.io", "pages.dev", "huggingface.co", "replicate.com"];
   const candidates = links.filter(({ url }) => {
@@ -82,18 +111,36 @@ function selectDemoUrl(links: Array<{ url: string; label: string }>, forumHost: 
     return parsed.host !== forumHost && !isImageUrl(url) && !isAttachmentUrl(url);
   });
 
-  const keywordMatch = candidates.find(({ url, label }) => {
-    const haystack = `${url} ${label}`.toLowerCase();
-    return demoKeywords.some((keyword) => haystack.includes(keyword.toLowerCase()));
-  });
-  if (keywordMatch) return keywordMatch.url;
+  const ranked = candidates
+    .map((candidate, index) => {
+      const { url, label } = candidate;
+      const parsed = new URL(url);
+      const haystack = `${url} ${label}`.toLowerCase();
+      const keywordScore = demoKeywords.some((keyword) => haystack.includes(keyword.toLowerCase())) ? 3 : 0;
+      const hostScore = preferredHosts.some((host) => parsed.host.endsWith(host)) ? 2 : 0;
+      return { url, index, score: Math.max(keywordScore, hostScore) };
+    })
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index);
 
-  const hostMatch = candidates.find(({ url }) => preferredHosts.some((host) => new URL(url).host.endsWith(host)));
-  return hostMatch?.url ?? candidates[0]?.url ?? null;
+  const demoUrls = unique(ranked.map((candidate) => candidate.url));
+  if (demoUrls.length > 0) return demoUrls;
+  return candidates[0]?.url ? [candidates[0].url] : [];
+}
+
+function isExcludedSessionCandidate(value: string): boolean {
+  return /^(http|https|github|vercel|netlify|preview|detail|image|picture|avatar|active)/i.test(value);
 }
 
 function extractSessionIds(text: string): string[] {
   const ids = new Set<string>();
+
+  // Trae CN exports long conversation IDs as dotted/colon-prefixed strings that
+  // are not UUIDs and do not contain the word "session".
+  const traeConversation = /(?<![A-Za-z0-9_])((?:\.\d{10,}:)?[A-Za-z0-9_-]{16,}_[A-Za-z0-9_-]{12,}(?:\.[A-Za-z0-9_-]{12,}){2})(?=:Trae\b|[\s\]\|]|$)/g;
+  for (const match of text.matchAll(traeConversation)) {
+    ids.add(match[1]);
+  }
 
   // 1. Lenient labeled matching:
   // Match session/会话/uuid/id/编号, followed by optional numbers/letters/symbols, then a string of 8+ alphanumeric/dash/underscore characters
@@ -101,7 +148,7 @@ function extractSessionIds(text: string): string[] {
   for (const match of text.matchAll(labeled)) {
     const val = match[1].trim();
     // Exclude common false positives like HTML tags, vercel, etc.
-    if (!/^(http|https|github|vercel|netlify|preview|detail|image|picture|avatar|active)/i.test(val)) {
+    if (!isExcludedSessionCandidate(val)) {
       ids.add(val);
     }
   }
@@ -187,18 +234,44 @@ export function extractTopicSignals(input: TopicSignalInput): TopicSignals {
       label: normalizeWhitespace($(element).text())
     }))
     .filter((item): item is { url: string; label: string } => Boolean(item.url));
-  const imageUrls = unique(
-    $("img")
-      .toArray()
-      .map((element) => normalizeUrl($(element).attr("src") ?? $(element).attr("data-src"), baseUrl))
-  );
+  const imageAttributeUrls = $("img")
+    .toArray()
+    .flatMap((element) => {
+      const image = $(element);
+      return [
+        image.attr("src"),
+        image.attr("data-src"),
+        image.attr("data-original-src"),
+        image.attr("data-orig-src"),
+        image.attr("data-large-url"),
+        image.attr("data-canonical-src"),
+        ...parseSrcsetUrls(image.attr("srcset"))
+      ];
+    })
+    .map((url) => normalizeUrl(url, baseUrl));
+  const linkedImageUrls = links.filter(isImageUrl);
+  const imageUrls = unique([...imageAttributeUrls, ...linkedImageUrls]).filter((url) => !isPlaceholderImageUrl(url));
   const attachmentUrls = links.filter((url) => !isImageUrl(url) && isAttachmentUrl(url));
-  const demoUrl = selectDemoUrl(linkLabels, baseHost);
+  const demoUrls = selectDemoUrls(linkLabels, baseHost);
+  const demoUrl = demoUrls[0] ?? null;
+  const downloadDemoUrls = attachmentUrls.filter(isDownloadDemoUrl);
+  const visualDemoImageUrls = hasVisualDemoCue(input.title, contentText, tags) ? imageUrls : [];
+  const demoEvidenceTypes = [
+    ...(demoUrls.length > 0 ? ["web_url"] : []),
+    ...(downloadDemoUrls.length > 0 ? ["download"] : []),
+    ...(visualDemoImageUrls.length > 0 ? ["qr_or_image"] : [])
+  ];
   const sessionIds = extractSessionIds(`${contentText} ${html}`);
   const processKeywords = extractProcessKeywords(contentText);
 
   const traeEvidence: TraeEvidence = {
-    hasDemoUrl: Boolean(demoUrl),
+    hasDemoUrl: demoUrls.length > 0,
+    demoUrlCount: demoUrls.length,
+    detectedDemoUrls: demoUrls,
+    hasDemoEvidence: demoEvidenceTypes.length > 0,
+    demoEvidenceTypes,
+    downloadDemoUrls,
+    visualDemoImageUrls,
     hasTraeProcess: /trae/i.test(contentText) && processKeywords.length > 0,
     screenshotCount: imageUrls.length,
     sessionIdCount: sessionIds.length,
@@ -211,6 +284,7 @@ export function extractTopicSignals(input: TopicSignalInput): TopicSignals {
     contentText,
     excerpt: contentText.slice(0, 240),
     demoUrl,
+    demoUrls,
     attachmentUrls,
     imageUrls,
     sessionIds,

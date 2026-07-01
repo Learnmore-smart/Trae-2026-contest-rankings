@@ -67,6 +67,8 @@ const JUDGE_EVALUATOR_PROFILES: readonly JudgeEvaluatorProfile[] = [
   }
 ];
 
+const DEMO_DOWNLOAD_EXTENSIONS = [".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".apk", ".ipa", ".exe", ".dmg", ".msi", ".pkg", ".deb", ".rpm"];
+
 export function getJudgeEvaluatorProfiles(): JudgeEvaluatorProfile[] {
   return JUDGE_EVALUATOR_PROFILES.map((profile) => ({ ...profile }));
 }
@@ -108,9 +110,62 @@ function summarizeMatch(match: TraeMatch | null): string {
   ].join("\n");
 }
 
+function getDetectedDemoUrls(topic: TraeTopic): string[] {
+  const storedUrls = Array.isArray(topic.traeEvidence?.detectedDemoUrls)
+    ? topic.traeEvidence.detectedDemoUrls.filter((url): url is string => typeof url === "string" && url.length > 0)
+    : [];
+  return Array.from(new Set([topic.demoUrl, ...storedUrls].filter((url): url is string => Boolean(url))));
+}
+
+function isDownloadDemoUrl(url: string): boolean {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    return DEMO_DOWNLOAD_EXTENSIONS.some((extension) => pathname.endsWith(extension));
+  } catch {
+    return false;
+  }
+}
+
+function hasVisualDemoCue(topic: TraeTopic): boolean {
+  const haystack = `${topic.title} ${topic.contentText} ${topic.tags.join(" ")}`;
+  return /二维码|扫码|小程序|微信|体验码|QR\s*code|qrcode|wechat|mini\s*program|miniprogram|scan\s*(qr|code)/i.test(haystack);
+}
+
+function getDownloadDemoUrls(topic: TraeTopic): string[] {
+  const storedUrls = Array.isArray(topic.traeEvidence?.downloadDemoUrls)
+    ? topic.traeEvidence.downloadDemoUrls.filter((url): url is string => typeof url === "string" && url.length > 0)
+    : [];
+  const inferredUrls = topic.attachmentUrls.filter(isDownloadDemoUrl);
+  return Array.from(new Set([...storedUrls, ...inferredUrls]));
+}
+
+function getVisualDemoImageUrls(topic: TraeTopic): string[] {
+  const storedUrls = Array.isArray(topic.traeEvidence?.visualDemoImageUrls)
+    ? topic.traeEvidence.visualDemoImageUrls.filter((url): url is string => typeof url === "string" && url.length > 0)
+    : [];
+  const inferredUrls = hasVisualDemoCue(topic) ? topic.imageUrls : [];
+  return Array.from(new Set([...storedUrls, ...inferredUrls]));
+}
+
+function getDemoEvidenceTypes(topic: TraeTopic): string[] {
+  const storedTypes = Array.isArray(topic.traeEvidence?.demoEvidenceTypes)
+    ? topic.traeEvidence.demoEvidenceTypes.filter((type): type is string => typeof type === "string" && type.length > 0)
+    : [];
+  const inferredTypes = [
+    ...(getDetectedDemoUrls(topic).length > 0 ? ["web_url"] : []),
+    ...(getDownloadDemoUrls(topic).length > 0 ? ["download"] : []),
+    ...(getVisualDemoImageUrls(topic).length > 0 ? ["qr_or_image"] : [])
+  ];
+  return Array.from(new Set([...storedTypes, ...inferredTypes]));
+}
+
+function hasDemoEvidence(topic: TraeTopic): boolean {
+  return topic.traeEvidence?.hasDemoEvidence === true || getDemoEvidenceTypes(topic).length > 0;
+}
+
 function complianceHints(topic: TraeTopic, match: TraeMatch | null): string[] {
   const risks: string[] = [];
-  if (!topic.demoUrl) risks.push("缺少 Demo 体验地址");
+  if (!hasDemoEvidence(topic)) risks.push("缺少 Demo 体验证据");
   if (!topic.traeEvidence?.hasTraeProcess) risks.push("没有清晰 TRAE 实践过程");
   if ((topic.traeEvidence?.screenshotCount ?? 0) < 3) risks.push("开发截图少于 3 张");
   if ((topic.traeEvidence?.sessionIdCount ?? 0) < 3) risks.push("Session ID 少于 3 个");
@@ -121,17 +176,45 @@ function complianceHints(topic: TraeTopic, match: TraeMatch | null): string[] {
 }
 
 function formatVisualEvidenceSection(topic: TraeTopic, visualEvidence: TopicVisualEvidence | null): string {
+  const detectedDemoUrls = getDetectedDemoUrls(topic);
+  const downloadDemoUrls = getDownloadDemoUrls(topic);
+  const visualDemoImageUrls = getVisualDemoImageUrls(topic);
+  const demoEvidenceTypes = getDemoEvidenceTypes(topic);
   const demoSection = visualEvidence?.demoEvidence
     ? `Demo 自动截图与视觉识别（AI 已实际截图并查看该网页刚才的真实渲染效果，等同于人类打开链接第一眼看到的画面）：\n${visualEvidence.demoEvidence.summary}`
     : topic.demoUrl
       ? "Demo 自动浏览：本轮截图或视觉识别未成功，仅使用帖子公开文本与 URL，不要假设已实际查看该页面。"
-      : "Demo 自动浏览：未检测到 Demo 链接。";
+      : hasDemoEvidence(topic)
+        ? "Demo 自动浏览：未检测到网页 Demo URL；non-web demo evidence is available, so skip web screenshot and evaluate download/QR/image evidence instead."
+        : "Demo 自动浏览：未检测到 Demo 链接或其他体验证据。";
+
+  const demoEvidenceTypeSection = `Demo evidence types: ${demoEvidenceTypes.join(", ") || "none"}`;
+
+  const detectedDemoSection = detectedDemoUrls.length > 0
+    ? `Detected Demo-like URLs (${detectedDemoUrls.length}):\n${detectedDemoUrls.slice(0, 10).map((url) => `- ${url}`).join("\n")}`
+    : "Detected Demo-like URLs: none";
+
+  const downloadDemoSection = downloadDemoUrls.length > 0
+    ? `Download/packaged Demo evidence (${downloadDemoUrls.length}):\n${downloadDemoUrls.slice(0, 10).map((url) => `- ${url}`).join("\n")}`
+    : "Download/packaged Demo evidence: none";
+
+  const visualDemoSection = visualDemoImageUrls.length > 0
+    ? `QR/image Demo evidence (${visualDemoImageUrls.length}):\n${visualDemoImageUrls.slice(0, 10).map((url) => `- ${url}`).join("\n")}`
+    : "QR/image Demo evidence: none";
 
   const imageSection = visualEvidence?.imageEvidence
     ? `图片视觉识别（AI 已实际查看以下图片内容）：\n${visualEvidence.imageEvidence.summary}`
     : `图片链接（本轮未进行视觉识别）：\n${topic.imageUrls.slice(0, 20).map((url) => `- ${url}`).join("\n") || "未检测到"}`;
 
-  return [demoSection, `图片数量：${topic.imageUrls.length}`, imageSection].join("\n");
+  return [
+    demoSection,
+    demoEvidenceTypeSection,
+    detectedDemoSection,
+    downloadDemoSection,
+    visualDemoSection,
+    `图片数量：${topic.imageUrls.length}`,
+    imageSection
+  ].join("\n");
 }
 
 export function buildJudgePrompt(
@@ -203,6 +286,8 @@ ${topic.contentText.slice(0, 12000)}
 
 function evidenceLimitations(topic: TraeTopic, visualEvidence: TopicVisualEvidence | null): string {
   const lines = ["Evidence limitations for this automated run:"];
+  const detectedDemoUrls = getDetectedDemoUrls(topic);
+  const demoEvidenceTypes = getDemoEvidenceTypes(topic);
 
   lines.push(
     visualEvidence?.imageEvidence
@@ -213,11 +298,16 @@ function evidenceLimitations(topic: TraeTopic, visualEvidence: TopicVisualEviden
   lines.push(
     visualEvidence?.demoEvidence
       ? "- an automatic screenshot of the demo URL WAS captured and inspected just now; treat the demo vision summary above as real observed evidence of the page's current rendered state."
-      : `- demo URL available: ${topic.demoUrl ? "yes" : "no"}; interactive demo browsing/screenshot was not performed successfully for this run.`
+      : `- demo URL available: ${topic.demoUrl ? "yes" : "no"}; detected demo-like URLs: ${detectedDemoUrls.length}; interactive demo browsing/screenshot was not performed successfully for this run.`
+  );
+
+  lines.push(
+    `- demo evidence available: ${hasDemoEvidence(topic) ? "yes" : "no"}; demo evidence types: ${demoEvidenceTypes.join(", ") || "none"}.`
   );
 
   lines.push(
     "- Do not claim you saw evidence beyond what is explicitly provided above (post text, or the vision summaries when present).",
+    "- If public demo/image URLs are available but automation failed, do not describe that as missing contestant-provided materials; describe it only as an automation/evidence-verification limitation.",
     "- Penalize confidence and completion when no real evidence proves a working product beyond marketing claims."
   );
 
@@ -267,6 +357,8 @@ Rules:
 - ${visualEvidence?.imageEvidence ? "image vision WAS performed in this run; weigh the image vision summary above as real evidence." : "image vision was not performed in this run."}
 - ${visualEvidence?.demoEvidence ? "interactive demo browsing (automatic screenshot + vision inspection) WAS performed in this run; weigh the demo vision summary above as real evidence of the page's current state." : "interactive demo browsing was not performed in this run."}
 - Do not claim screenshots or demo behavior were inspected unless that is present in the post text or the vision summaries above.
+
+${evidenceLimitations(topic, visualEvidence)}
 
 Independent evaluator outputs:
 ${JSON.stringify(evaluatorSummary, null, 2)}

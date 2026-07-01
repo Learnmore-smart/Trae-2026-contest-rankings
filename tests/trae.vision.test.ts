@@ -176,6 +176,81 @@ describe("describeTopicImages", () => {
     });
   });
 
+  it("prioritizes QR or mini-program demo images before generic screenshots", async () => {
+    await withEnv(zeroBudgetEnv(), async () => {
+      const sentUrls: string[] = [];
+      const baseEvidence = baseTopic.traeEvidence;
+      assert.ok(baseEvidence);
+      const evidence = await describeTopicImages(
+        {
+          ...baseTopic,
+          imageUrls: [
+            "https://a.test/screenshot-1.png",
+            "https://a.test/screenshot-2.png",
+            "https://a.test/screenshot-3.png",
+            "https://a.test/screenshot-4.png",
+            "https://a.test/qr.png"
+          ],
+          traeEvidence: {
+            ...baseEvidence,
+            visualDemoImageUrls: ["https://a.test/qr.png"]
+          }
+        },
+        {
+          config: getTraeConfig(),
+          fetchFn: async (_url, init) => {
+            const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ type: string; image_url?: { url: string } }> }> };
+            for (const part of body.messages[0]?.content ?? []) {
+              if (part.type === "image_url" && part.image_url?.url) sentUrls.push(part.image_url.url);
+            }
+            return visionResponse("qr first");
+          },
+          sleepFn: async () => undefined
+        }
+      );
+
+      assert.equal(evidence?.summary, "qr first");
+      assert.equal(sentUrls[0], "https://a.test/qr.png");
+      assert.equal(sentUrls.length, 4);
+    });
+  });
+
+  it("infers QR priority from legacy topic text when visual demo fields are absent", async () => {
+    await withEnv(zeroBudgetEnv(), async () => {
+      const sentUrls: string[] = [];
+      const evidence = await describeTopicImages(
+        {
+          ...baseTopic,
+          title: "微信小程序 Demo",
+          contentText: "微信小程序扫码体验，二维码见下图。",
+          imageUrls: [
+            "https://a.test/screenshot-1.png",
+            "https://a.test/screenshot-2.png",
+            "https://a.test/screenshot-3.png",
+            "https://a.test/screenshot-4.png",
+            "https://a.test/miniprogram-qr.png"
+          ],
+          traeEvidence: baseTopic.traeEvidence
+        },
+        {
+          config: getTraeConfig(),
+          fetchFn: async (_url, init) => {
+            const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ type: string; image_url?: { url: string } }> }> };
+            for (const part of body.messages[0]?.content ?? []) {
+              if (part.type === "image_url" && part.image_url?.url) sentUrls.push(part.image_url.url);
+            }
+            return visionResponse("legacy qr first");
+          },
+          sleepFn: async () => undefined
+        }
+      );
+
+      assert.equal(evidence?.summary, "legacy qr first");
+      assert.equal(sentUrls[0], "https://a.test/miniprogram-qr.png");
+      assert.equal(sentUrls.length, 4);
+    });
+  });
+
   it("returns null without calling the model when there are no images", async () => {
     await withEnv(zeroBudgetEnv(), async () => {
       let called = false;

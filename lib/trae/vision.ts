@@ -31,6 +31,19 @@ function isHttpUrl(url: string): boolean {
   }
 }
 
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+function hasVisualDemoCue(topic: TraeTopic): boolean {
+  const haystack = `${topic.title} ${topic.contentText} ${topic.tags.join(" ")}`;
+  return /二维码|扫码|小程序|微信|体验码|QR\s*code|qrcode|wechat|mini\s*program|miniprogram|scan\s*(qr|code)/i.test(haystack);
+}
+
+function isLikelyVisualDemoImageUrl(url: string): boolean {
+  return /qr|qrcode|wechat|weixin|mini-?program|miniprogram/i.test(url);
+}
+
 /**
  * thum.io renders the target URL server-side and returns the screenshot image itself
  * (no API key, no signup). We never fetch the demo URL ourselves, so classic SSRF
@@ -47,7 +60,15 @@ export async function describeTopicImages(
   options: GatherVisualEvidenceOptions = {}
 ): Promise<VisualEvidence | null> {
   const config = options.config ?? getTraeConfig();
-  const imageUrls = topic.imageUrls.filter(isHttpUrl).slice(0, MAX_TOPIC_IMAGES);
+  const visualDemoImageUrls = Array.isArray(topic.traeEvidence?.visualDemoImageUrls)
+    ? topic.traeEvidence.visualDemoImageUrls.filter((url): url is string => typeof url === "string")
+    : [];
+  const legacyVisualDemoImageUrls = hasVisualDemoCue(topic)
+    ? [...topic.imageUrls.filter(isLikelyVisualDemoImageUrl), ...topic.imageUrls]
+    : [];
+  const imageUrls = unique([...visualDemoImageUrls, ...legacyVisualDemoImageUrls, ...topic.imageUrls])
+    .filter(isHttpUrl)
+    .slice(0, MAX_TOPIC_IMAGES);
   if (imageUrls.length === 0) return null;
 
   const content: LLMContentPart[] = [

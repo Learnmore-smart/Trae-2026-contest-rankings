@@ -34,6 +34,7 @@ Gathers real visual evidence for judging: describes a topic's post images and ca
 - 2026-06-30 Claude: Verified live (real API key, real forum CDN image, real thum.io screenshot of a real contest demo) that both `moonshotai/kimi-k2.6` and `minimaxai/minimax-m3` correctly describe remote `image_url` content before writing any of this module — see `.ai/lib/trae/judge.md`'s visual-evidence fix-plan section for the transcript summary.
 - 2026-06-30 Claude: Both public functions swallow every failure mode (missing images, missing demo URL, non-http scheme, all vision models throttled/erroring) and resolve to `null` rather than throwing, so a flaky vision model degrades the judge back to the pre-existing "not performed" disclaimer instead of failing the whole evaluation.
 - 2026-06-30 Claude: Deliberately did not persist evidence on the `Topic` row — recomputes on every `judgeOneTopic()` call. Adding a cache column means a Data Connect schema migration and generated-SDK regeneration, out of scope for this fix; acceptable given current judge volume.
+- 2026-07-01 Codex: Visual selection should also infer QR/miniprogram priority from legacy topic text and image filenames when `traeEvidence.visualDemoImageUrls` is absent, so old rows can be rejudged without losing the likely demo-access image under the 4-image cap.
 
 ## Important Notes / NEVER Change
 
@@ -46,3 +47,12 @@ Gathers real visual evidence for judging: describes a topic's post images and ca
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-06-30 | Implemented `describeTopicImages`, `describeDemoScreenshot`, `buildDemoScreenshotUrl`, `gatherVisualEvidence`. | Claude |
+| 2026-07-01 | Planned visual demo image prioritization for non-web submissions. | Codex |
+| 2026-07-01 | Implemented visual demo image prioritization so QR/miniprogram images are sent to vision before generic screenshots. | Codex |
+| 2026-07-01 | Implemented legacy text/filename fallback for QR/miniprogram image priority. | Codex |
+
+## Planned Change: Visual Demo Image Priority
+
+- 2026-07-01 Codex: Owner reported posts visibly containing images can still show "no images" or fail to use the right evidence for mini-program/app demos. The extractor will mark likely QR/demo-access images in `traeEvidence.visualDemoImageUrls`; `describeTopicImages()` should prioritize those before generic screenshots while keeping the existing cap.
+- Keep the existing no-throw behavior: if Kimi/vision fails, judging must still proceed with honest evidence-limit wording.
+- Implemented: `describeTopicImages()` prepends `visualDemoImageUrls`, then likely QR/miniprogram filenames inferred from legacy text cues, then `imageUrls`; it dedupes before applying the existing 4-image cap.

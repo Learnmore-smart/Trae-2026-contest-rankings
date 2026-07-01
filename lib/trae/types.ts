@@ -11,6 +11,12 @@ export type CompetitionLevel = "极具竞争力" | "有竞争力" | "竞争力�
 
 export interface TraeEvidence {
   hasDemoUrl: boolean;
+  demoUrlCount?: number;
+  detectedDemoUrls?: string[];
+  hasDemoEvidence?: boolean;
+  demoEvidenceTypes?: string[];
+  downloadDemoUrls?: string[];
+  visualDemoImageUrls?: string[];
   hasTraeProcess: boolean;
   screenshotCount: number;
   sessionIdCount: number;

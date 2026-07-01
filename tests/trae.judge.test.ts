@@ -108,9 +108,76 @@ describe("multi-evaluator judging", () => {
     assert.match(prompt, /截图或视觉识别未成功/);
   });
 
+  it("does not frame failed visual automation as missing contestant materials when URLs exist", () => {
+    const profiles = getJudgeEvaluatorProfiles();
+    const prompt = buildConsensusJudgePrompt(
+      topic,
+      null,
+      profiles.map((profile) => ({
+        profile,
+        output: validPayload,
+        rawContent: JSON.stringify(validPayload)
+      }))
+    );
+
+    assert.match(prompt, /demo URL available: yes/i);
+    assert.match(prompt, /image URLs available: 2/i);
+    assert.match(prompt, /do not describe that as missing contestant-provided materials/i);
+  });
+
   it("reports no demo URL distinctly from a failed screenshot attempt", () => {
     const prompt = buildJudgePrompt({ ...topic, demoUrl: null }, null);
     assert.match(prompt, /未检测到 Demo 链接/);
+  });
+
+  it("accepts download and QR evidence as Demo material for non-web submissions", () => {
+    const prompt = buildJudgePrompt(
+      {
+        ...topic,
+        title: "Mini program and Android app demo",
+        demoUrl: null,
+        attachmentUrls: ["https://forum.example.test/uploads/app-release.apk"],
+        imageUrls: ["https://forum.example.test/qr.png"],
+        traeEvidence: {
+          ...topic.traeEvidence,
+          hasDemoUrl: false,
+          hasDemoEvidence: true,
+          demoEvidenceTypes: ["download", "qr_or_image"],
+          downloadDemoUrls: ["https://forum.example.test/uploads/app-release.apk"],
+          visualDemoImageUrls: ["https://forum.example.test/qr.png"]
+        }
+      },
+      null
+    );
+
+    assert.doesNotMatch(prompt, /缺少 Demo 体验地址/);
+    assert.match(prompt, /Demo evidence types: download, qr_or_image/);
+    assert.match(prompt, /https:\/\/forum\.example\.test\/uploads\/app-release\.apk/);
+    assert.match(prompt, /https:\/\/forum\.example\.test\/qr\.png/);
+    assert.match(prompt, /non-web demo evidence is available/i);
+  });
+
+  it("infers non-web Demo evidence from legacy topic fields during rejudge", () => {
+    const prompt = buildJudgePrompt(
+      {
+        ...topic,
+        title: "Legacy WeChat mini-program",
+        demoUrl: null,
+        attachmentUrls: ["https://forum.example.test/uploads/app-release.apk"],
+        imageUrls: ["https://forum.example.test/miniprogram-qr.png"],
+        contentText: "微信小程序扫码体验，二维码见下图。",
+        traeEvidence: {
+          ...topic.traeEvidence,
+          hasDemoUrl: false
+        }
+      },
+      null
+    );
+
+    assert.doesNotMatch(prompt, /缺少 Demo 体验证据/);
+    assert.match(prompt, /Demo evidence types: download, qr_or_image/);
+    assert.match(prompt, /https:\/\/forum\.example\.test\/uploads\/app-release\.apk/);
+    assert.match(prompt, /https:\/\/forum\.example\.test\/miniprogram-qr\.png/);
   });
 
   it("surfaces real image and demo vision summaries in the prompt instead of the not-performed disclaimer", () => {

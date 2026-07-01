@@ -37,6 +37,10 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - 2026-06-29 Codex: Persist cumulative token usage in a model/provider keyed Firestore collection by incrementing input/output totals after each judged or failed model call.
 - 2026-06-30 Codex: AI scoring must stay on the zero-budget LLM fallback path while all persistence goes through Data Connect mutations.
 - 2026-06-30 Codex: Data Connect `UpsertEvaluation` owns `createdAt` through `createdAt_expr: "request.time"`; judge code must send only declared mutation variables and must not spread `TraeEvaluation` directly into the mutation payload.
+- 2026-07-01 Codex: Reported bug shows the judge can overstate "material risk" when automatic demo screenshot or image vision fails even though the post provides Demo/image evidence. Prompt wording should separate contestant-provided material absence from our automation verification limits. Automation failure may reduce confidence, but it must not be phrased as missing Demo/images by itself.
+- 2026-07-01 Codex: Implemented the guardrail in both evaluator and consensus prompts, because the final stored text comes from the consensus referee. The prompt now lists detected Demo-like URL count and tells the model not to describe automation failure as missing contestant materials when public URLs exist.
+- 2026-07-01 Codex: Update compliance hints to key off generalized Demo evidence (`web_url`, `download`, `qr_or_image`) rather than `topic.demoUrl` alone. Missing web screenshot is not a material defect for non-web apps.
+- 2026-07-01 Codex: Judge should infer non-web Demo evidence from legacy topic fields (`attachmentUrls`, QR/miniprogram text cues, `imageUrls`) so rejudging older scraped rows does not require a full re-scrape before avoiding false "missing Demo" risks.
 
 ## Planned Change: SQL Connect Runtime
 
@@ -66,6 +70,11 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | 2026-06-30 | Planned real visual evidence (post-image vision + automatic demo screenshot vision) to replace the "not performed" disclaimers. | Claude |
 | 2026-06-30 | Implemented `gatherVisualEvidence()` wiring in `judgeOneTopic()`; bumped `PROMPT_VERSION` to `v3-visual-evidence`; added explicit static-page-must-not-score-high grading guidance to the completion/design dimensions. | Claude |
 | 2026-07-01 | Added bounded judge topic concurrency and logs the applied concurrency per judge run. | Codex |
+| 2026-07-01 | Planned wording guardrail so visual automation failures are not misreported as contestant material absence. | Codex |
+| 2026-07-01 | Implemented Demo-like URL listing and automation-limit wording in base/evaluator/consensus prompts. | Codex |
+| 2026-07-01 | Planned non-web Demo evidence handling in judge prompts and risk hints. | Codex |
+| 2026-07-01 | Implemented generalized Demo evidence handling in prompt context, evidence limits, and compliance risk hints. | Codex |
+| 2026-07-01 | Implemented legacy-field fallback for non-web Demo evidence during rejudge. | Codex |
 
 ## Planned Change: Bounded Judge Concurrency
 
