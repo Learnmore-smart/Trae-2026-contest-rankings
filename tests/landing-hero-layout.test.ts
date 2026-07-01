@@ -73,6 +73,12 @@ test("ranking list uses row layout hooks and circular score rings", () => {
   assert.doesNotMatch(component, /className="ranking-result-strip"/);
 });
 
+test("ranking rows keep the text column from collapsing", () => {
+  assert.match(css, /\.rank-row\s*{[\s\S]*?grid-template-columns:\s*3\.7rem minmax\(18rem, 1fr\) minmax\(24rem, 34rem\) minmax\(9\.5rem, auto\);/);
+  assert.match(css, /\.rank-row__score-panel\s*{[\s\S]*?min-width:\s*0;/);
+  assert.match(css, /\.rank-row__summary\s*{[\s\S]*?overflow-wrap:\s*anywhere;/);
+});
+
 test("ranking controls stay compact and cards open details directly", () => {
   assert.match(component, /function NavMenu/);
   assert.match(component, /ariaLabel=\{t\.chooseLanguage\}/);

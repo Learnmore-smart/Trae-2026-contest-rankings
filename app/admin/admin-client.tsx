@@ -23,9 +23,30 @@ const ACTIONS: Action[] = [
   { label: "抓取报名专区", description: "更新报名帖，供后续方向匹配使用。", endpoint: "/api/trae-contest/admin/scrape", body: { sourceType: "signup" } },
   { label: "抓取初赛专区", description: "更新会进入榜单候选池的 Demo 帖。", endpoint: "/api/trae-contest/admin/scrape", body: { sourceType: "preliminary" } },
   { label: "执行报名/初赛匹配", description: "按作者和标题相似度关联报名帖。", endpoint: "/api/trae-contest/admin/match" },
-  { label: "评分未评分作品", description: "只评尚未生成结果的初赛作品。每批少量提交，自动循环直到评完。", endpoint: "/api/trae-contest/admin/judge", body: { mode: "unjudged" }, loop: true, batchMax: 3 },
-  { label: "重评内容变化作品", description: "内容 hash 变化后重新评分。每批少量提交，自动循环直到评完。", endpoint: "/api/trae-contest/admin/judge", body: { mode: "changed" }, loop: true, batchMax: 3 },
-  { label: "重评低置信度作品", description: "复跑低置信度模型输出。每批少量提交，自动循环直到评完。", endpoint: "/api/trae-contest/admin/judge", body: { mode: "low-confidence" }, loop: true, batchMax: 3 }
+  {
+    label: "评分未评分作品",
+    description: "只评尚未生成结果的初赛作品。每个作品含图片/截图识别+多评审共识，单个约需 60-150 秒，此页面仅适合少量补跑；大批量请用 Cloud Run Job 或本地 npm run trae:judge。",
+    endpoint: "/api/trae-contest/admin/judge",
+    body: { mode: "unjudged" },
+    loop: true,
+    batchMax: 1
+  },
+  {
+    label: "重评内容变化作品",
+    description: "内容 hash 变化后重新评分。单个约需 60-150 秒，大批量请用 Cloud Run Job 或本地脚本。",
+    endpoint: "/api/trae-contest/admin/judge",
+    body: { mode: "changed" },
+    loop: true,
+    batchMax: 1
+  },
+  {
+    label: "重评低置信度作品",
+    description: "复跑低置信度模型输出。单个约需 60-150 秒，大批量请用 Cloud Run Job 或本地脚本。",
+    endpoint: "/api/trae-contest/admin/judge",
+    body: { mode: "low-confidence" },
+    loop: true,
+    batchMax: 1
+  }
 ];
 
 function fmt(value: string | null): string {

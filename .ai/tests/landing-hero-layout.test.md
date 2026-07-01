@@ -1,6 +1,6 @@
 # tests/landing-hero-layout.test.ts
 
-> Last updated: 2026-06-29 | Protection: STANDARD
+> Last updated: 2026-07-01 | Protection: STANDARD
 
 ## Purpose
 
@@ -32,6 +32,7 @@ Guards the landing hero markup and CSS hooks used by the annotated container lay
 - 2026-06-29 Codex: Extend the guard for the full tech revamp by asserting stable command-center hooks rather than brittle color declarations.
 - 2026-06-30 Codex: The public contest source moved to root-level `app/*`; update visual guards to read the current client and detail client paths.
 - 2026-06-30 Codex: Contest-specific layout CSS now lives in `app/contest.css`, while global tokens and imports remain in `app/globals.css`; tests should combine both sources for layout assertions.
+- 2026-07-01 Codex: Add a focused source-level guard for the ranking row collapse. The browser symptom comes from CSS grid sizing, so the test should assert the score-panel has explicit bounded width constraints rather than snapshotting the full row.
 
 ## Mobile Layout Repair Note
 
@@ -60,6 +61,7 @@ Guards the landing hero markup and CSS hooks used by the annotated container lay
 
 | Date | Bug | Cause | Fix |
 |------|-----|-------|-----|
+| 2026-07-01 | Ranking row text collapsed vertically. | The score-panel auto grid column could grow to long summary max-content width. | Added CSS constraint assertions for `.rank-row` and `.rank-row__score-panel`. |
 
 ## Change History
 
@@ -70,3 +72,5 @@ Guards the landing hero markup and CSS hooks used by the annotated container lay
 | 2026-06-30 | Updated hero layout guard for removal of the side-panel progress container. | Codex |
 | 2026-06-30 | Updated source paths after root-level route move. | Codex |
 | 2026-06-30 | Updated CSS fixture input to include contest-specific stylesheet. | Codex |
+| 2026-07-01 | Planned ranking score-panel width regression guard. | Codex |
+| 2026-07-01 | Added regression guard for bounded ranking row desktop columns and summary wrapping. | Codex |

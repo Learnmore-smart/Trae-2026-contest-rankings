@@ -551,7 +551,7 @@
 
 .rank-row {
   display: grid;
-  grid-template-columns: 3.7rem minmax(0, 1fr) auto minmax(9.5rem, auto);
+  grid-template-columns: 3.7rem minmax(18rem, 1fr) minmax(24rem, 34rem) minmax(9.5rem, auto);
   grid-template-areas:
     "rank content score-panel actions";
   gap: 0.45rem 0.68rem;
@@ -689,6 +689,7 @@
 
 .rank-row__score-panel {
   grid-area: score-panel;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
@@ -708,6 +709,7 @@
   color: var(--ink-soft);
   display: -webkit-box;
   overflow: hidden;
+  overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   font-size: 0.78rem;
