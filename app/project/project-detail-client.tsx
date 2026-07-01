@@ -57,20 +57,7 @@ const COPY = {
     unmatched: "暂未匹配到报名帖，不代表未报名，可能是用户名或标题无法自动匹配。",
     model: "使用模型",
     promptVersion: "评分版本",
-    unofficial: "本站非 TRAE 官方评分。",
-    aiIoTitle: "AI 评分输入与输出",
-    aiIoHint: "完整展示发送给模型的输入与模型返回的原始输出，便于核对评分依据。",
-    aiInput: "模型输入",
-    aiOutput: "模型输出",
-    systemPromptLabel: "系统提示",
-    userPromptLabel: "评分提示词",
-    rawOutputLabel: "模型原始输出（JSON）",
-    expand: "展开",
-    tokensTitle: "词元用量",
-    inputTokens: "输入词元",
-    outputTokens: "输出词元",
-    totalTokens: "合计词元",
-    noAiIo: "本次评分暂无可展示的输入/输出记录。"
+    unofficial: "本站非 TRAE 官方评分。"
   },
   en: {
     settings: "Settings",
@@ -118,20 +105,7 @@ const COPY = {
     unmatched: "No signup post has been matched yet. This does not mean the project did not sign up; the username or title may not be automatically matchable.",
     model: "Model",
     promptVersion: "Scoring version",
-    unofficial: "This site is not official TRAE scoring.",
-    aiIoTitle: "AI scoring input & output",
-    aiIoHint: "Full view of the input sent to the model and the raw output it returned, so the scoring basis can be audited.",
-    aiInput: "Model input",
-    aiOutput: "Model output",
-    systemPromptLabel: "System prompt",
-    userPromptLabel: "Scoring prompt",
-    rawOutputLabel: "Raw model output (JSON)",
-    expand: "Expand",
-    tokensTitle: "Token usage",
-    inputTokens: "Input tokens",
-    outputTokens: "Output tokens",
-    totalTokens: "Total tokens",
-    noAiIo: "No input/output record is available for this evaluation yet."
+    unofficial: "This site is not official TRAE scoring."
   }
 };
 
@@ -175,74 +149,6 @@ function TextList({ title, items, emptyLabel }: { title: string; items?: string[
         </ul>
       ) : (
         <p className="mt-4 text-sm text-slate-500">{emptyLabel}</p>
-      )}
-    </section>
-  );
-}
-
-function TokenStat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="surface-panel-strong p-4 text-center">
-      <div className="text-xs text-slate-400">{label}</div>
-      <div className="mt-1 text-2xl font-black text-white">{value.toLocaleString()}</div>
-    </div>
-  );
-}
-
-function CodeBlock({ label, content }: { label: string; content: string }) {
-  return (
-    <details className="surface-panel rounded-md">
-      <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-amber-100">{label}</summary>
-      <pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap break-words border-t border-[var(--line)] px-4 py-3 text-xs leading-5 text-slate-300">
-        {contentPreProcess(content)}
-      </pre>
-    </details>
-  );
-}
-
-function contentPreProcess(val: string): string {
-  return val;
-}
-
-function AiIoSection({ evaluation, t }: { evaluation: RankingItem["evaluation"]; t: (typeof COPY)["zh"] }) {
-  const logs = evaluation?.llmCallLogs ?? [];
-  const inputTokens = evaluation?.inputTokens ?? logs.reduce((sum, log) => sum + (log.inputTokens ?? 0), 0);
-  const outputTokens = evaluation?.outputTokens ?? logs.reduce((sum, log) => sum + (log.outputTokens ?? 0), 0);
-  const systemPrompt = evaluation?.systemPrompt ?? "";
-  const promptText = evaluation?.promptText ?? "";
-  const rawOutput = evaluation?.rawModelResponse ?? "";
-  const hasInput = Boolean(systemPrompt || promptText);
-  const hasIo = Boolean(hasInput || rawOutput);
-
-  return (
-    <section className="surface-panel mt-5 p-6">
-      <h2 className="text-xl font-bold text-white">{t.aiIoTitle}</h2>
-      <p className="mt-2 text-sm leading-6 text-slate-400">{t.aiIoHint}</p>
-      {hasIo ? (
-        <>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <TokenStat label={t.inputTokens} value={inputTokens} />
-            <TokenStat label={t.outputTokens} value={outputTokens} />
-            <TokenStat label={t.totalTokens} value={inputTokens + outputTokens} />
-          </div>
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            {hasInput ? (
-              <div className="space-y-3">
-                <div className="text-sm font-semibold text-white">{t.aiInput}</div>
-                {systemPrompt ? <CodeBlock label={t.systemPromptLabel} content={systemPrompt} /> : null}
-                {promptText ? <CodeBlock label={t.userPromptLabel} content={promptText} /> : null}
-              </div>
-            ) : null}
-            {rawOutput ? (
-              <div className="space-y-3">
-                <div className="text-sm font-semibold text-white">{t.aiOutput}</div>
-                <CodeBlock label={t.rawOutputLabel} content={rawOutput} />
-              </div>
-            ) : null}
-          </div>
-        </>
-      ) : (
-        <p className="mt-4 text-sm text-slate-500">{t.noAiIo}</p>
       )}
     </section>
   );
@@ -431,8 +337,6 @@ export default function ProjectDetailClient({ id }: { id: string }) {
                 {item.evaluation?.matchComment ? <p className="mt-4 text-sm leading-6 text-amber-800 dark:text-amber-100">{item.evaluation.matchComment}</p> : null}
               </section>
             </div>
-
-            <AiIoSection evaluation={item.evaluation} t={t} />
 
             <footer className="surface-panel mt-6 p-4 text-sm text-slate-400">
               {t.model}: {item.evaluation?.model ?? t.unrated} · {t.promptVersion}: {item.evaluation?.promptVersion ?? "N/A"} · {t.unofficial}
