@@ -6,8 +6,8 @@ export const metadata: Metadata = {
   description: "由 AI 根据公开帖子内容生成的 TRAE AI 创造力大赛第三方模拟评分榜，仅供学习、观摩和参考。",
   metadataBase: new URL("https://rateministere.com"),
   icons: {
-    icon: "/icons/trae.ico",
-    shortcut: "/icons/trae.ico"
+    icon: "/trae-contest-2026/icons/trae.ico",
+    shortcut: "/trae-contest-2026/icons/trae.ico"
   }
 };
 

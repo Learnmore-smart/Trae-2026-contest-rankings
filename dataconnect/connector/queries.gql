@@ -198,13 +198,18 @@ query GetTopicDetail($id: String!) @auth(level: PUBLIC, insecureReason: "Topic d
 
 # ─── Stats ────────────────────────────────────────────────────────────────────
 # Powers the stats bar. Uses aliases to run multiple aggregations in one round
-# trip. evaluatedCount approximates "preliminary topics with a non-null
-# evaluatedAt" — the denormalized flag set by the judge pipeline.
+# trip. evaluatedCount counts topics with status JUDGED. NOT evaluatedAt: this
+# looked equivalent but isn't — UpdateTopicEvaluationState (the scraper's
+# "reset to needs_judging sentinel" call, run on every scrape, not just real
+# judging) unconditionally sets evaluatedAt_expr: "request.time", so evaluatedAt
+# goes non-null the moment a topic is scraped, long before it's actually judged.
+# status only flips to JUDGED inside judgeChangedTraeTopics, so it's the
+# unambiguous signal.
 query GetStats @auth(level: PUBLIC, insecureReason: "Stats are public.") {
   signupCount: topics(where: { sourceType: { eq: SIGNUP } }) { _count }
   preliminaryCount: topics(where: { sourceType: { eq: PRELIMINARY } }) { _count }
   evaluatedCount: topics(
-    where: { sourceType: { eq: PRELIMINARY }, evaluatedAt: { isNull: false } }
+    where: { sourceType: { eq: PRELIMINARY }, status: { eq: JUDGED } }
   ) { _count }
   matchedCount: matches(where: { signupTopicId: { isNull: false } }) { _count }
   modelTokenUsages {
