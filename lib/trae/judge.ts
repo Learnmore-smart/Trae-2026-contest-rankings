@@ -21,7 +21,7 @@ import {
   type TraeTopic
 } from "./types.ts";
 
-export const PROMPT_VERSION = "trae-contest-2026-v3-visual-evidence";
+export const PROMPT_VERSION = "trae-contest-2026-v4-official-screenshot-evidence";
 
 export type JudgeEvaluatorId = "product" | "technical" | "ux" | "risk";
 
@@ -634,10 +634,12 @@ async function recordTokenUsage(callLogs: TraeLLMCallLog[]): Promise<void> {
 }
 
 export interface JudgeOptions {
-  mode?: "unjudged" | "changed" | "low-confidence";
+  mode?: JudgeMode;
   max?: number;
   concurrency?: number;
 }
+
+export type JudgeMode = "unjudged" | "changed" | "low-confidence";
 
 export async function runWithConcurrency<T>(
   items: readonly T[],
@@ -665,6 +667,21 @@ function normalizeJudgeConcurrency(value: number | undefined, max: number): numb
   const safeMax = Math.max(1, Math.floor(max));
   if (!Number.isFinite(parsed)) return 1;
   return Math.min(safeMax, Math.max(1, parsed));
+}
+
+export function shouldJudgeTopicForMode(
+  topic: TraeTopic,
+  latestEvaluation: TraeEvaluation | undefined,
+  mode: JudgeMode
+): boolean {
+  if (mode === "low-confidence") return Boolean(latestEvaluation && latestEvaluation.confidenceScore < 55);
+  if (mode === "changed") return topic.status === "needs_judging" || topic.status === "judge_error";
+  return (
+    topic.status === "needs_judging" ||
+    topic.status === "judge_error" ||
+    !latestEvaluation ||
+    latestEvaluation.promptVersion !== PROMPT_VERSION
+  );
 }
 
 export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promise<{ evaluatedCount: number; failedCount: number }> {
@@ -715,11 +732,7 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
     });
 
     const topics = mapped
-      .filter(({ topic, latestEvaluation }) => {
-        if (mode === "low-confidence") return Boolean(latestEvaluation && latestEvaluation.confidenceScore < 55);
-        if (mode === "changed") return topic.status === "needs_judging" || topic.status === "judge_error";
-        return topic.status === "needs_judging" || topic.status === "judge_error" || !latestEvaluation;
-      })
+      .filter(({ topic, latestEvaluation }) => shouldJudgeTopicForMode(topic, latestEvaluation, mode))
       .slice(0, max);
 
     await runWithConcurrency(topics, concurrency, async (topicObj) => {

@@ -33,6 +33,7 @@ Regression tests for prompt construction, JSON parsing, evaluator orchestration,
 - 2026-07-01 Codex: Add legacy-row regression so rejudge can infer non-web Demo evidence from `attachmentUrls`, QR/miniprogram text, and `imageUrls` even when the newer evidence fields are absent.
 - 2026-07-01 Codex: Add prompt regression that final scoring treats uploaded screenshots as official material evidence and asks the judge to evaluate Trae usage/development screenshots plus finished Demo/product screenshots.
 - 2026-07-01 Codex: Implemented the uploaded screenshot evidence prompt regression in `buildJudgePrompt()` tests.
+- 2026-07-01 Codex: Add queue-selection regressions for stale prompt versions so automatic judging re-scores old evaluations after scoring logic changes, while avoiding endless rejudging of current prompt-version rows.
 
 ## Important Notes / NEVER Change
 
@@ -57,3 +58,5 @@ Regression tests for prompt construction, JSON parsing, evaluator orchestration,
 | 2026-07-01 | Planned regression for ordinary uploaded screenshot evidence guidance in judge prompts. | Codex |
 | 2026-07-01 | Added ordinary uploaded screenshot evidence guidance regression in judge prompt tests. | Codex |
 | 2026-07-01 | Added regression for ordinary uploaded screenshot evidence guidance in judge prompts. | Codex |
+| 2026-07-01 | Planned stale prompt-version queue-selection regressions. | Codex |
+| 2026-07-01 | Added stale prompt-version queue-selection regression using old `v3-visual-evidence` rows. | Codex |

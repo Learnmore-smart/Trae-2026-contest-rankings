@@ -43,6 +43,8 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - 2026-07-01 Codex: Judge should infer non-web Demo evidence from legacy topic fields (`attachmentUrls`, QR/miniprogram text cues, `imageUrls`) so rejudging older scraped rows does not require a full re-scrape before avoiding false "missing Demo" risks.
 - 2026-07-01 Codex: Final scoring prompt should explicitly treat uploaded ordinary screenshots as official material evidence. The model must evaluate whether image vision shows Trae usage/development process screenshots and finished Demo/product interface screenshots, not only whether a web Demo URL was opened.
 - 2026-07-01 Codex: Verified existing final scoring prompt already contains the uploaded screenshot evidence rule; added regression coverage without changing judge runtime code.
+- 2026-07-01 Codex: The automatic judge queue must include stale evaluations whose `promptVersion` differs from the current `PROMPT_VERSION`, otherwise fixes to extraction/vision/prompt wording will not repair old public scores. Keep already-current judged topics out of the queue to avoid infinite rejudging.
+- 2026-07-01 Codex: Bump `PROMPT_VERSION` after the screenshot-evidence fixes so already-judged v3 rows become stale and are automatically re-scored.
 
 ## Planned Change: SQL Connect Runtime
 
@@ -80,6 +82,9 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | 2026-07-01 | Planned explicit judge guidance for ordinary uploaded screenshot evidence categories. | Codex |
 | 2026-07-01 | Verified explicit judge guidance and added regression coverage for ordinary uploaded screenshot evidence categories. | Codex |
 | 2026-07-01 | Implemented explicit judge guidance that uploaded screenshots can satisfy official ordinary screenshot material requirements. | Codex |
+| 2026-07-01 | Planned stale prompt-version rejudge selection for automatic judging. | Codex |
+| 2026-07-01 | Planned prompt-version bump for automatic old-score rejudge. | Codex |
+| 2026-07-01 | Implemented stale prompt-version queue selection and bumped `PROMPT_VERSION` to `v4-official-screenshot-evidence`. | Codex |
 
 ## Planned Change: Bounded Judge Concurrency
 

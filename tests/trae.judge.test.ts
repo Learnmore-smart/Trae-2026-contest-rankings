@@ -4,10 +4,12 @@ import {
   buildConsensusJudgePrompt,
   buildJudgePrompt,
   getJudgeEvaluatorProfiles,
+  PROMPT_VERSION,
   parseEvaluationJson,
-  runWithConcurrency
+  runWithConcurrency,
+  shouldJudgeTopicForMode
 } from "../lib/trae/judge.ts";
-import type { EvaluationOutput, TraeTopic } from "../lib/trae/types.ts";
+import type { EvaluationOutput, TraeEvaluation, TraeTopic } from "../lib/trae/types.ts";
 
 const validPayload: EvaluationOutput = {
   totalScore: 82,
@@ -205,6 +207,30 @@ describe("multi-evaluator judging", () => {
     assert.match(prompt, /Uploaded screenshot evidence can satisfy official ordinary screenshot material requirements/i);
     assert.match(prompt, /Trae usage\/development process screenshot/i);
     assert.match(prompt, /finished Demo\/product interface screenshot/i);
+  });
+
+  it("queues stale prompt-version evaluations for automatic rejudge", () => {
+    const judgedTopic = { ...topic, status: "judged" as const };
+    const currentEvaluation = {
+      ...validPayload,
+      id: "eval-current",
+      topicId: judgedTopic.id,
+      sourceType: "preliminary",
+      provider: "nvidia",
+      model: "moonshotai/kimi-k2.6",
+      promptVersion: PROMPT_VERSION,
+      rawModelResponse: "{}",
+      error: null,
+      createdAt: "2026-07-01T00:00:00.000Z"
+    } satisfies TraeEvaluation;
+    const staleEvaluation = {
+      ...currentEvaluation,
+      id: "eval-stale",
+      promptVersion: "trae-contest-2026-v3-visual-evidence"
+    } satisfies TraeEvaluation;
+
+    assert.equal(shouldJudgeTopicForMode(judgedTopic, staleEvaluation, "unjudged"), true);
+    assert.equal(shouldJudgeTopicForMode(judgedTopic, currentEvaluation, "unjudged"), false);
   });
 
   it("builds a consensus prompt from all evaluator outputs and evidence limits", () => {
