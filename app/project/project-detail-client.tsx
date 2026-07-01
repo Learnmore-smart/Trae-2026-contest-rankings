@@ -57,11 +57,7 @@ const COPY = {
     unmatched: "暂未匹配到报名帖，不代表未报名，可能是用户名或标题无法自动匹配。",
     model: "使用模型",
     promptVersion: "评分版本",
-    unofficial: "本站非 TRAE 官方评分。",
-    aiIoTitle: "AI 评分审计",
-    systemPromptLabel: "System prompt",
-    userPromptLabel: "User prompt",
-    rawOutputLabel: "Raw model output"
+    unofficial: "本站非 TRAE 官方评分。"
   },
   en: {
     settings: "Settings",
@@ -109,11 +105,7 @@ const COPY = {
     unmatched: "No signup post has been matched yet. This does not mean the project did not sign up; the username or title may not be automatically matchable.",
     model: "Model",
     promptVersion: "Scoring version",
-    unofficial: "This site is not official TRAE scoring.",
-    aiIoTitle: "AI scoring audit",
-    systemPromptLabel: "System prompt",
-    userPromptLabel: "User prompt",
-    rawOutputLabel: "Raw model output"
+    unofficial: "This site is not official TRAE scoring."
   }
 };
 
@@ -162,18 +154,6 @@ function TextList({ title, items, emptyLabel }: { title: string; items?: string[
   );
 }
 
-function CodeBlock({ label, content }: { label: string; content?: string | null }) {
-  if (!content) return null;
-  return (
-    <div className="surface-panel p-4">
-      <h3 className="text-sm font-bold text-white">{label}</h3>
-      <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-slate-950/70 p-4 text-xs leading-5 text-slate-100">
-        {content}
-      </pre>
-    </div>
-  );
-}
-
 export default function ProjectDetailClient({ id }: { id: string }) {
   const { language, setLanguage } = useContestLanguage();
   const { theme, setTheme } = useContestTheme();
@@ -205,11 +185,6 @@ export default function ProjectDetailClient({ id }: { id: string }) {
   }, [id, t.loadError, t.notFound, t.unknownError]);
 
   const themeIcon = theme === "dark" ? <Moon className="h-4 w-4" /> : theme === "light" ? <Sun className="h-4 w-4" /> : <Monitor className="h-4 w-4" />;
-  const systemPrompt = item?.evaluation?.systemPrompt ?? "";
-  const promptText = item?.evaluation?.promptText ?? "";
-  const rawOutput = item?.evaluation?.rawModelResponse ?? "";
-  const hasInput = Boolean(systemPrompt || promptText);
-  const hasIo = Boolean(hasInput || rawOutput);
 
   return (
     <main className="score-grid tech-shell min-h-screen px-4 py-6 text-slate-100 sm:px-6 lg:px-10">
@@ -366,17 +341,6 @@ export default function ProjectDetailClient({ id }: { id: string }) {
             <footer className="surface-panel mt-6 p-4 text-sm text-slate-400">
               {t.model}: {item.evaluation?.model ?? t.unrated} · {t.promptVersion}: {item.evaluation?.promptVersion ?? "N/A"} · {t.unofficial}
             </footer>
-
-            {hasIo ? (
-              <section className="surface-panel mt-5 p-6">
-                <h2 className="text-xl font-bold text-white">{t.aiIoTitle}</h2>
-                <div className="mt-4 grid gap-4">
-                  <CodeBlock label={t.systemPromptLabel} content={systemPrompt} />
-                  <CodeBlock label={t.userPromptLabel} content={promptText} />
-                  <CodeBlock label={t.rawOutputLabel} content={rawOutput} />
-                </div>
-              </section>
-            ) : null}
           </div>
         ) : null}
       </div>

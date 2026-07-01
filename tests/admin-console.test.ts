@@ -4,7 +4,9 @@ import { join } from "node:path";
 import test from "node:test";
 
 const adminClientPath = join(process.cwd(), "app/admin/admin-client.tsx");
+const judgePolicyPath = join(process.cwd(), "lib/trae/judge-policy.ts");
 const adminClient = readFileSync(adminClientPath, "utf8");
+const judgePolicy = readFileSync(judgePolicyPath, "utf8");
 
 test("admin console busy badge stays generic while actions run", () => {
   assert.match(
@@ -19,14 +21,13 @@ test("admin console busy badge stays generic while actions run", () => {
   );
 });
 
-test("admin judge actions request twelve-topic batches with three workers", () => {
-  const judgeActions = [...adminClient.matchAll(/endpoint: "\/api\/trae-contest\/admin\/judge"[\s\S]*?batchMax: (\d+)[\s\S]*?concurrency: (\d+)/g)];
+test("admin judge actions use the shared aggressive judge policy", () => {
+  const judgeActions = [...adminClient.matchAll(/endpoint: "\/api\/trae-contest\/admin\/judge"[\s\S]*?batchMax: DEFAULT_JUDGE_BATCH_MAX[\s\S]*?concurrency: DEFAULT_JUDGE_CONCURRENCY/g)];
 
+  assert.match(judgePolicy, /export const DEFAULT_JUDGE_BATCH_MAX = 24;/);
+  assert.match(judgePolicy, /export const DEFAULT_JUDGE_CONCURRENCY = 6;/);
+  assert.match(adminClient, /import \{ DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY \} from "@\/lib\/trae\/judge-policy";/);
   assert.equal(judgeActions.length, 3, "expected unjudged, changed, and low-confidence judge actions");
-  for (const action of judgeActions) {
-    assert.equal(action[1], "12");
-    assert.equal(action[2], "3");
-  }
 });
 
 test("admin console opts into the shared theme shell", () => {

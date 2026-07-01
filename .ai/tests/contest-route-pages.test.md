@@ -21,6 +21,7 @@ Guards public contest routing and workflow safety invariants.
 - Verifies stats fall back to local topic-cache counts when Data Connect is unavailable.
 - Verifies fallback ranking rows are preliminary-only and expose only official track labels after normalization.
 - Verifies the live Data Connect board path uses live query topics as the ranking base rather than the bundled JSON cache.
+- Verifies the public project detail page does not expose raw AI scoring input/output records.
 
 ## Public API
 
@@ -88,8 +89,20 @@ Guards public contest routing and workflow safety invariants.
 - Guard the public run optimistic client status so users see scoring started immediately.
 - Implemented source-level assertions for public judge constants, scrape/match preservation, immediate and post-match judge calls, and optimistic judge status.
 
+## Change Plan: Shared Judge Policy Guard
+
+- 2026-07-01 Codex: Update the public route guard to reject route-local `12 / 3` constants and require shared `DEFAULT_JUDGE_BATCH_MAX` and `DEFAULT_JUDGE_CONCURRENCY` imports.
+- Add a static guard for `lib/trae/judge-policy.ts` values `24` and `6`.
+- Implemented in the public run workflow source-level test.
+
 ## Bug Fix Plan: Detail Page Must Work Under Base Path
 
 - 2026-07-01 Codex: Owner reported every ranking row opens a detail page that says the work does not exist or is not a preliminary entry. Root cause: `app/project/project-detail-client.tsx` defaults `API_BASE` to an empty string, while this deployment is served under Next.js `basePath: "/trae-contest-2026"`. The browser fetches `/api/trae-contest/topics/...` instead of `/trae-contest-2026/api/trae-contest/topics/...`.
 - Fix strategy: add a static guard requiring the detail client to use the same configured base-path fallback as the ranking client.
 - 2026-07-01 Codex: Also guard the detail error panel contrast and AI input/output rendering so the user can read errors and audit scoring prompts.
+
+## Change Plan: Remove Public AI Scoring Audit Guard
+
+- 2026-07-01 Codex: Replace the existing source-level assertion that requires rendering `systemPrompt`, `promptText`, and `rawModelResponse` with a regression guard that rejects the public AI audit section and its `CodeBlock` rendering.
+- Keep the test scoped to the detail client source because the current suite uses static route/component checks rather than a browser-rendered React harness.
+- Implemented the negative source-level guard for public raw AI I/O exposure.

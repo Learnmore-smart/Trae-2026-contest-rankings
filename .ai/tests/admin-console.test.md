@@ -56,6 +56,12 @@ Guards the admin console's compact running-status UI against leaking long action
 - 2026-07-01 Codex: Add a source-level assertion that the admin judge actions request `batchMax: 12` and `concurrency: 3`.
 - Implemented for all three judge actions: unjudged, changed, and low-confidence.
 
+## Change Plan: Shared Judge Policy Test
+
+- 2026-07-01 Codex: Replace literal `12 / 3` expectations with assertions that admin actions use `DEFAULT_JUDGE_BATCH_MAX` and `DEFAULT_JUDGE_CONCURRENCY`.
+- Verify the shared policy file defines the aggressive defaults `24 / 6`.
+- Implemented in the admin judge policy source-level test.
+
 ## Planned Change: Admin Theme Shell Test
 
 - 2026-07-01 Codex: Add a source-level assertion that the admin root `<main>` uses `tech-shell`, matching the public pages' theme wrapper.

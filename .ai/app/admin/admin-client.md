@@ -52,3 +52,9 @@ Implements the token-based admin panel for manual scraper, matcher, and judge ac
 - 2026-07-01 Codex: Replace the admin run empty-state reference to Firestore with SQL/Data Connect.
 - Verify through `tests/admin-console.test.ts` so the UI does not regress back to Firestore wording.
 - Implemented by replacing the empty-state storage label with `SQL/Data Connect`.
+
+## Change Plan: Shared Aggressive Judge Defaults
+
+- 2026-07-01 Codex: Replace hard-coded admin action `batchMax: 12` and `concurrency: 3` with shared defaults from `lib/trae/judge-policy.ts`.
+- Use `DEFAULT_JUDGE_BATCH_MAX = 24` and `DEFAULT_JUDGE_CONCURRENCY = 6` so admin and public judging stay in sync.
+- Implemented for all three judge actions: unjudged, changed, and low-confidence.

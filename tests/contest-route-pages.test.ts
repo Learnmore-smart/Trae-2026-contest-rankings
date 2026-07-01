@@ -11,6 +11,7 @@ const clientPath = join(appDir, "contest-client.tsx");
 const projectDetailClientPath = join(appDir, "project/project-detail-client.tsx");
 const nextConfigPath = join(process.cwd(), "next.config.mjs");
 const runRoutePath = join(process.cwd(), "app/api/trae-contest/run/route.ts");
+const judgePolicyPath = join(process.cwd(), "lib/trae/judge-policy.ts");
 const dataConnectQueriesPath = join(process.cwd(), "dataconnect/connector/queries.gql");
 const traeApiPath = join(process.cwd(), "lib/trae/api.ts");
 const topicsCachePath = join(process.cwd(), "lib/trae/topics-cache.json");
@@ -75,14 +76,14 @@ test("ranking error panel is readable in light and dark themes", () => {
   assert.match(client, /role="alert" className="rounded-md border border-rose-300 bg-white p-6 font-semibold text-rose-900 shadow-sm dark:border-rose-300\/25 dark:bg-rose-400\/10 dark:text-rose-100"/);
 });
 
-test("project detail renders saved AI scoring input and output", () => {
+test("project detail does not expose saved AI scoring input and output", () => {
   const detailClient = read(projectDetailClientPath);
 
-  assert.match(detailClient, /const hasInput = Boolean\(systemPrompt \|\| promptText\);/);
-  assert.match(detailClient, /const hasIo = Boolean\(hasInput \|\| rawOutput\);/);
-  assert.match(detailClient, /<CodeBlock label=\{t\.systemPromptLabel\} content=\{systemPrompt\} \/>/);
-  assert.match(detailClient, /<CodeBlock label=\{t\.userPromptLabel\} content=\{promptText\} \/>/);
-  assert.match(detailClient, /<CodeBlock label=\{t\.rawOutputLabel\} content=\{rawOutput\} \/>/);
+  assert.doesNotMatch(detailClient, /const hasInput = Boolean\(systemPrompt \|\| promptText\);/);
+  assert.doesNotMatch(detailClient, /const hasIo = Boolean\(hasInput \|\| rawOutput\);/);
+  assert.doesNotMatch(detailClient, /function CodeBlock/);
+  assert.doesNotMatch(detailClient, /systemPromptLabel|userPromptLabel|rawOutputLabel|aiIoTitle/);
+  assert.doesNotMatch(detailClient, /rawModelResponse/);
 });
 
 test("data connect nested topic reads stay below deadline-prone size", () => {
@@ -232,12 +233,16 @@ test("live board data uses Data Connect topics instead of bundled cache as base"
 test("public run status reports bounded judging batch counts", () => {
   const route = read(runRoutePath);
   const client = read(clientPath);
+  const judgePolicy = read(judgePolicyPath);
 
-  assert.match(route, /const PUBLIC_JUDGE_MAX = 12;/);
-  assert.match(route, /const PUBLIC_JUDGE_CONCURRENCY = 3;/);
+  assert.match(judgePolicy, /export const DEFAULT_JUDGE_BATCH_MAX = 24;/);
+  assert.match(judgePolicy, /export const DEFAULT_JUDGE_CONCURRENCY = 6;/);
+  assert.match(route, /import \{ DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY \} from "@\/lib\/trae\/judge-policy";/);
+  assert.doesNotMatch(route, /const PUBLIC_JUDGE_MAX =/);
+  assert.doesNotMatch(route, /const PUBLIC_JUDGE_CONCURRENCY =/);
   assert.match(route, /await scrapeAllTraeSources\(\);/);
   assert.match(route, /await runTraeMatching\(\);/);
-  assert.match(route, /return judgeChangedTraeTopics\(\{\s*mode: "unjudged",\s*max: PUBLIC_JUDGE_MAX,\s*concurrency: PUBLIC_JUDGE_CONCURRENCY\s*\}\);/);
+  assert.match(route, /return judgeChangedTraeTopics\(\{\s*mode: "unjudged",\s*max: DEFAULT_JUDGE_BATCH_MAX,\s*concurrency: DEFAULT_JUDGE_CONCURRENCY\s*\}\);/);
   assert.match(route, /const immediateJudge = judgeUnjudgedBatch\(\);/);
   assert.match(route, /const postMatchJudgeResult = await judgeUnjudgedBatch\(\);/);
   assert.match(route, /await Promise\.all\(\[scrapeAndMatch, immediateJudge\]\);/);

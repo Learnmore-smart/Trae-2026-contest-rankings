@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { writeBoardSnapshot } from "@/lib/trae/api";
 import { judgeChangedTraeTopics } from "@/lib/trae/judge";
+import { DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY } from "@/lib/trae/judge-policy";
 import { runTraeMatching } from "@/lib/trae/matcher";
 import { scrapeAllTraeSources } from "@/lib/trae/scraper";
 
@@ -23,8 +24,6 @@ export interface PipelineStatus {
 }
 
 const COOLDOWN_MS = 30_000;
-const PUBLIC_JUDGE_MAX = 12;
-const PUBLIC_JUDGE_CONCURRENCY = 3;
 
 interface PipelineState {
   status: PipelineStatus;
@@ -54,8 +53,8 @@ function getState(): PipelineState {
 function judgeUnjudgedBatch(): Promise<JudgeBatchResult> {
   return judgeChangedTraeTopics({
     mode: "unjudged",
-    max: PUBLIC_JUDGE_MAX,
-    concurrency: PUBLIC_JUDGE_CONCURRENCY
+    max: DEFAULT_JUDGE_BATCH_MAX,
+    concurrency: DEFAULT_JUDGE_CONCURRENCY
   });
 }
 

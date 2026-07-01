@@ -59,3 +59,10 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 - 2026-07-01 Codex: Add `judgeConcurrency` from `TRAE_JUDGE_CONCURRENCY`, default `1`, so CLI/job/admin callers can opt into bounded parallel topic judging without changing model/provider settings.
 - Keep the default conservative for cron/serverless paths; the admin client will explicitly request concurrency `3` for the approved manual run.
 - Implemented in `getTraeConfig()` and documented in `.env.example`.
+
+## Change Plan: Code Defaults For Judge Throughput
+
+- 2026-07-01 Codex: Owner wants faster grading without repeatedly editing Cloud Run public env vars.
+- Use shared code constants as fallbacks for `TRAE_JUDGE_CONCURRENCY` and `TRAE_MAX_JUDGE_PER_RUN`: `6` workers and `24` topics per batch.
+- Env vars remain optional overrides for local scripts/jobs, not required Cloud Run setup.
+- Implemented by importing `DEFAULT_JUDGE_CONCURRENCY` and `DEFAULT_JUDGE_BATCH_MAX` as config fallbacks.

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, KeyRound, Play, RefreshCw, ShieldCheck } from "lucide-react";
+import { DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY } from "@/lib/trae/judge-policy";
 import type { TraeRun } from "@/lib/trae/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
@@ -30,8 +31,8 @@ const ACTIONS: Action[] = [
     endpoint: "/api/trae-contest/admin/judge",
     body: { mode: "unjudged" },
     loop: true,
-    batchMax: 12,
-    concurrency: 3
+    batchMax: DEFAULT_JUDGE_BATCH_MAX,
+    concurrency: DEFAULT_JUDGE_CONCURRENCY
   },
   {
     label: "重评内容变化作品",
@@ -39,8 +40,8 @@ const ACTIONS: Action[] = [
     endpoint: "/api/trae-contest/admin/judge",
     body: { mode: "changed" },
     loop: true,
-    batchMax: 12,
-    concurrency: 3
+    batchMax: DEFAULT_JUDGE_BATCH_MAX,
+    concurrency: DEFAULT_JUDGE_CONCURRENCY
   },
   {
     label: "重评低置信度作品",
@@ -48,8 +49,8 @@ const ACTIONS: Action[] = [
     endpoint: "/api/trae-contest/admin/judge",
     body: { mode: "low-confidence" },
     loop: true,
-    batchMax: 12,
-    concurrency: 3
+    batchMax: DEFAULT_JUDGE_BATCH_MAX,
+    concurrency: DEFAULT_JUDGE_CONCURRENCY
   }
 ];
 

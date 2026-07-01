@@ -1,4 +1,5 @@
 import type { TraeSourceType } from "./types.ts";
+import { DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY } from "./judge-policy.ts";
 
 export type AIProvider = "nvidia" | "openrouter";
 
@@ -103,7 +104,7 @@ export function getTraeConfig(): TraeConfig {
     aiRpmLimit,
     aiMaxRetriesPerModel,
     aiRequestTimeoutMs,
-    judgeConcurrency: Math.max(1, Math.floor(numberFromEnv("TRAE_JUDGE_CONCURRENCY", 1))),
+    judgeConcurrency: Math.max(1, Math.floor(numberFromEnv("TRAE_JUDGE_CONCURRENCY", DEFAULT_JUDGE_CONCURRENCY))),
     scraperUserAgent:
       process.env.TRAE_SCRAPER_USER_AGENT ??
       "RateMinistere TRAE Contest Rank Bot; contact: noahzh52@gmail.com",
@@ -111,7 +112,7 @@ export function getTraeConfig(): TraeConfig {
     cronSecret: process.env.TRAE_CRON_SECRET ?? null,
     maxScrapePagesPerRun: numberFromEnv("TRAE_MAX_SCRAPE_PAGES_PER_RUN", 10),
     maxTopicDetailsPerRun: numberFromEnv("TRAE_MAX_TOPIC_DETAILS_PER_RUN", 100),
-    maxJudgePerRun: numberFromEnv("TRAE_MAX_JUDGE_PER_RUN", 50),
+    maxJudgePerRun: Math.max(1, Math.floor(numberFromEnv("TRAE_MAX_JUDGE_PER_RUN", DEFAULT_JUDGE_BATCH_MAX))),
     // Default unlimited: SQL is fixed-cost and the AI API is free, so the matcher
     // resolves every author's 报名帖 in one pass. The forum host is the only limiter,
     // governed by forumMinRequestMs + the fetch backoff.
