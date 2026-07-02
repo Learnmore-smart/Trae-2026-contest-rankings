@@ -13,6 +13,7 @@ import {
   Crown,
   ExternalLink,
   Globe,
+  Home,
   LayoutGrid,
   Loader2,
   Lock,
@@ -1269,6 +1270,15 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
             ]}
             onSelect={(value) => setTheme(value as ContestTheme)}
           />
+          <a
+            href="https://www.rateministere.com"
+            className="nav-control focus-ring"
+            aria-label="Open RateMinistere home"
+          >
+            <span className="inline-flex text-cyan-300">
+              <Home className="h-4 w-4" />
+            </span>
+          </a>
         </div>
       </nav>
 

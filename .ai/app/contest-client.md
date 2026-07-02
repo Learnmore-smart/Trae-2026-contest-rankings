@@ -34,6 +34,7 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 - 2026-07-02 Codex: Implemented the visible page switch in the ranking metadata row. It keeps the existing page state/query behavior and only changes the control presentation.
 - 2026-07-02 Codex: Implemented `UserTopicSubmit` on both the landing side rail and ranking page. It validates empty input client-side, surfaces server validation errors, clears on success, and calls `load()` so stats/ranking refresh after a crawl.
 - 2026-07-02 Codex: Updated `UserTopicSubmit` to read `GET /api/trae-contest/submit` on mount and poll while `running`, so refreshing the page during a submitted-topic crawl still shows the crawler state.
+- 2026-07-02 Codex: Add a rightmost navbar home anchor to `https://www.rateministere.com` using the existing compact `nav-control` visual style and a lucide `Home` icon only. Keep it after language/theme controls so it is the far-right control.
 
 ## Bug Fix Plan: Stats Request Must Survive Topic Deadline
 
@@ -88,6 +89,8 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 | 2026-07-02 | Implemented refresh-surviving submitted-topic crawl status polling. | Codex |
 | 2026-07-02 | Planned page-size and sort-direction controls for ranking. | Codex |
 | 2026-07-02 | Implemented page-size and sort-direction dropdowns with query-string wiring. | Codex |
+| 2026-07-02 | Planned rightmost RateMinistere home link in navbar with icon-only label. | Codex |
+| 2026-07-02 | Implemented rightmost RateMinistere home link in navbar with icon-only label. | Codex |
 
 ## Change Plan: Public Run Starts Scoring Immediately
 
