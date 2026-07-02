@@ -1129,6 +1129,7 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
   const [pageSize, setPageSize] = useState(DEFAULT_RANKING_PAGE_SIZE);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [loading, setLoading] = useState(true);
+  const [loadedQueryString, setLoadedQueryString] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("prelim");
   const [now, setNow] = useState<number>(() => SEMIFINAL_START.getTime());
@@ -1172,6 +1173,7 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
       const topicsPayload = (await topicsResponse.json()) as { items: RankingItem[]; total: number; message?: string };
       setItems(topicsPayload.items ?? []);
       setTotal(topicsPayload.total ?? 0);
+      setLoadedQueryString(queryString);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : language === "zh" ? "未知错误" : "Unknown error");
     } finally {
@@ -1221,6 +1223,7 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
   ];
   const runControl = <RunButton language={language} onCompleted={load} />;
   const themeIcon = theme === "dark" ? <Moon className="h-4 w-4" /> : theme === "light" ? <Sun className="h-4 w-4" /> : <Monitor className="h-4 w-4" />;
+  const showQueryChangeSkeleton = loading && queryString !== loadedQueryString;
 
   return (
     <main className="score-grid tech-shell min-h-screen text-slate-100">
@@ -1485,6 +1488,8 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
                 ) : null}
 
                 {loading && items.length === 0 ? (
+                  <LoadingGrid viewMode={viewMode} />
+                ) : showQueryChangeSkeleton ? (
                   <LoadingGrid viewMode={viewMode} />
                 ) : items.length === 0 ? (
                   <EmptyState language={language} onRun={runControl} />

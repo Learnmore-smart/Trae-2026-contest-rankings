@@ -17,6 +17,7 @@ Verifies model JSON parsing, repair, Zod validation behavior, and evidence-aware
 - Tests that no single-evaluator fast judge strategy remains in the judge/config/env surface.
 - Tests that default judge throughput policy matches the 40 rpm quota math: 8 topic teams and 4000 topics per run.
 - Tests that deleted/empty topics are filtered before judge mode selection.
+- Tests that changed-mode judging includes topics whose scraped content update happened after their latest evaluation, while default unjudged mode still preserves public scored-count stability.
 
 ## Dependencies
 
@@ -39,6 +40,15 @@ Verifies model JSON parsing, repair, Zod validation behavior, and evidence-aware
 | 2026-07-02 | Added throughput default assertions for 40 rpm overnight judging. | Codex |
 | 2026-07-02 | Planned deleted/empty judge candidate source guard. | Codex |
 | 2026-07-02 | Implemented deleted/empty judge candidate source guard. | Codex |
+| 2026-07-02 | Planned regression coverage for edited posts being picked up by changed-mode rejudging. | Codex |
+| 2026-07-02 | Implemented edited-post changed-mode regression coverage and verified red-to-green. | Codex |
+
+## Implemented Change: Edited Post Rejudge Selection
+
+- Added a focused `shouldJudgeTopicForMode` test where a topic remains `judged`, but `topic.updatedAt` is later than `latestEvaluation.createdAt`.
+- Red state verified: `node --experimental-strip-types --test tests/trae.judge.test.ts` failed with `false !== true` before the production change.
+- Green state verified: the same command passed after the `judge.ts` timestamp comparison change.
+- The full `npm.cmd test` suite still has one unrelated existing failure in `tests/landing-hero-layout.test.ts` for contest navigation markup; the new judge test passes inside that run.
 
 ## Planned Change: Judge Concurrency Test
 

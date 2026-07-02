@@ -687,6 +687,12 @@ function normalizeJudgeConcurrency(value: number | undefined, max: number): numb
   return Math.min(safeMax, Math.max(1, parsed));
 }
 
+function isTopicNewerThanEvaluation(topic: TraeTopic, latestEvaluation: TraeEvaluation): boolean {
+  const topicUpdatedAt = Date.parse(topic.updatedAt);
+  const evaluationCreatedAt = Date.parse(latestEvaluation.createdAt);
+  return Number.isFinite(topicUpdatedAt) && Number.isFinite(evaluationCreatedAt) && topicUpdatedAt > evaluationCreatedAt;
+}
+
 async function fetchJudgeBoardPage(dc: unknown, offset: number): Promise<GetBoardPageData["topics"]> {
   const res = await getBoardPageQuery(dc as any, { limit: JUDGE_BOARD_PAGE_SIZE, offset } as any);
   return res.data.topics ?? [];
@@ -728,7 +734,8 @@ export function shouldJudgeTopicForMode(
       topic.status === "needs_judging" ||
       topic.status === "judge_error" ||
       !latestEvaluation ||
-      latestEvaluation.promptVersion !== PROMPT_VERSION
+      latestEvaluation.promptVersion !== PROMPT_VERSION ||
+      isTopicNewerThanEvaluation(topic, latestEvaluation)
     );
   }
   return (

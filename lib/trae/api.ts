@@ -382,6 +382,17 @@ function sortValue(item: RankingItem, sort: string): number | string {
   }
 }
 
+function isGradedRankingItem(item: RankingItem): boolean {
+  return typeof item.evaluation?.totalScore === "number" && item.evaluation.totalScore >= 0;
+}
+
+function compareSortValueDescending(left: RankingItem, right: RankingItem, sort: string): number {
+  const a = sortValue(left, sort);
+  const b = sortValue(right, sort);
+  if (typeof a === "string" || typeof b === "string") return String(b).localeCompare(String(a));
+  return Number(b) - Number(a);
+}
+
 export async function listRankedTopics(params: TopicListParams = {}): Promise<{
   items: RankingItem[];
   total: number;
@@ -416,16 +427,20 @@ export async function listRankedTopics(params: TopicListParams = {}): Promise<{
   }
 
   items.sort((left, right) => {
-    const a = sortValue(left, sort);
-    const b = sortValue(right, sort);
-    if (typeof a === "string" || typeof b === "string") return String(b).localeCompare(String(a));
-    return Number(b) - Number(a);
+    const leftGraded = isGradedRankingItem(left);
+    const rightGraded = isGradedRankingItem(right);
+    if (leftGraded !== rightGraded) return leftGraded ? -1 : 1;
+    return compareSortValueDescending(left, right, sort);
   });
   items = dedupeByTopicTitle(items);
-  // Assign the true rank in canonical best-first order first, then (for "asc") reverse only
+  // Assign rank in canonical best-first order first, then reverse each partition
   // the display order — so rank always means leaderboard position, not row number.
   items = items.map((item, index) => ({ ...item, rank: index + 1 }));
-  if (dir === "asc") items.reverse();
+  if (dir === "asc") {
+    const gradedItems = items.filter(isGradedRankingItem).reverse();
+    const ungradedItems = items.filter((item) => !isGradedRankingItem(item)).reverse();
+    items = [...gradedItems, ...ungradedItems];
+  }
 
   const total = items.length;
   return {
@@ -436,12 +451,65 @@ export async function listRankedTopics(params: TopicListParams = {}): Promise<{
   };
 }
 
+/**
+ * Resolve a preliminary's detail from the committed JSON snapshot. This is the same
+ * source the board falls back to, so any work that lists on the board must also open
+ * here. Records already carry uppercase enums (PRELIMINARY / NEEDS_JUDGING / ...), so
+ * we lowercase them to match the DB-sourced shape. Returns null for unknown ids or
+ * non-preliminary posts (a signup id ⇒ "not a preliminary entry").
+ */
+async function getTopicDetailFromCache(id: string): Promise<RankingItem | null> {
+  try {
+    const allTopics = await readTopicsCache();
+    const t = allTopics.find((item) => item.id === id);
+    if (!t || sourceTypeValue(t.sourceType) !== "preliminary") return null;
+
+    const latestEval = t.evaluations_on_topic?.[0];
+    const match = t.match_on_preliminaryTopic;
+
+    const mappedTopic: TraeTopic = {
+      ...t,
+      sourceType: sourceTypeValue(t.sourceType) as any,
+      status: sourceTypeValue(t.status) as any,
+      competitionLevel: t.competitionLevel ? (competitionLevelRevMap[t.competitionLevel as keyof typeof competitionLevelRevMap] ?? t.competitionLevel) : null,
+      evaluatedAt: t.evaluatedAt ?? null,
+      createdAtExternal: t.createdAtExternal ?? null,
+      lastActivityAtExternal: t.lastActivityAtExternal ?? null
+    } as any;
+
+    const mappedEval: TraeEvaluation | null = latestEval ? {
+      ...latestEval,
+      provider: latestEval.provider ? (providerRevMap[latestEval.provider as keyof typeof providerRevMap] ?? latestEval.provider) : null,
+      competitionLevel: competitionLevelRevMap[latestEval.competitionLevel as keyof typeof competitionLevelRevMap] ?? latestEval.competitionLevel
+    } as any : null;
+
+    const mappedMatch: TraeMatch | null = match ? {
+      ...match,
+      matchMethod: match.matchMethod ? (match.matchMethod.toLowerCase() as any) : "none",
+      mismatchRisk: match.mismatchRisk ? (match.mismatchRisk.toLowerCase() as any) : "unknown"
+    } as any : null;
+
+    return {
+      rank: 0,
+      topic: sanitizeTopic(mappedTopic),
+      evaluation: mappedEval,
+      match: mappedMatch
+    };
+  } catch (cacheErr) {
+    console.error("Failed to read topics-cache.json for detail:", cacheErr);
+    return null;
+  }
+}
+
 export async function getTopicDetail(id: string): Promise<RankingItem | null> {
   try {
     const dc = getDataConnectDb();
     const res = await getTopicDetailQuery(dc as any, { id });
     const t = res.data.topic;
-    if (!t || t.sourceType !== "PRELIMINARY") return null;
+    // DB reachable but this id isn't a stored preliminary — e.g. Data Connect is empty
+    // or only partially deployed while the board is served from the JSON snapshot. Fall
+    // back to that same snapshot instead of hard-404ing, so a listed work still opens.
+    if (!t || t.sourceType !== "PRELIMINARY") return await getTopicDetailFromCache(id);
 
     const latestEval = t.evaluations_on_topic?.[0];
     const match = t.match_on_preliminaryTopic;
@@ -476,48 +544,7 @@ export async function getTopicDetail(id: string): Promise<RankingItem | null> {
     };
   } catch (error) {
     console.error(`Failed to get topic detail for ${id} from DB, checking cache:`, error);
-    try {
-      const cachePath = path.join(process.cwd(), "lib", "trae", "topics-cache.json");
-      const content = await fs.readFile(cachePath, "utf8");
-      const allTopics: any[] = JSON.parse(content);
-      const t = allTopics.find((item) => item.id === id);
-      if (!t) return null;
-
-      const latestEval = t.evaluations_on_topic?.[0];
-      const match = t.match_on_preliminaryTopic;
-
-      const mappedTopic: TraeTopic = {
-        ...t,
-        sourceType: t.sourceType.toLowerCase() as any,
-        status: t.status.toLowerCase() as any,
-        competitionLevel: t.competitionLevel ? (competitionLevelRevMap[t.competitionLevel as keyof typeof competitionLevelRevMap] ?? t.competitionLevel) : null,
-        evaluatedAt: t.evaluatedAt ?? null,
-        createdAtExternal: t.createdAtExternal ?? null,
-        lastActivityAtExternal: t.lastActivityAtExternal ?? null
-      } as any;
-
-      const mappedEval: TraeEvaluation | null = latestEval ? {
-        ...latestEval,
-        provider: latestEval.provider ? (providerRevMap[latestEval.provider as keyof typeof providerRevMap] ?? latestEval.provider) : null,
-        competitionLevel: competitionLevelRevMap[latestEval.competitionLevel as keyof typeof competitionLevelRevMap] ?? latestEval.competitionLevel
-      } as any : null;
-
-      const mappedMatch: TraeMatch | null = match ? {
-        ...match,
-        matchMethod: match.matchMethod ? (match.matchMethod.toLowerCase() as any) : "none",
-        mismatchRisk: match.mismatchRisk ? (match.mismatchRisk.toLowerCase() as any) : "unknown"
-      } as any : null;
-
-      return {
-        rank: 0,
-        topic: sanitizeTopic(mappedTopic),
-        evaluation: mappedEval,
-        match: mappedMatch
-      };
-    } catch (cacheErr) {
-      console.error("Failed to read topics-cache.json for detail:", cacheErr);
-      return null;
-    }
+    return await getTopicDetailFromCache(id);
   }
 }
 

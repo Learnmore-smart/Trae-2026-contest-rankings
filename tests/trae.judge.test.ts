@@ -238,6 +238,35 @@ describe("multi-evaluator judging", () => {
     assert.equal(shouldJudgeTopicForMode(judgedTopic, currentEvaluation, "unjudged"), false);
   });
 
+  it("rejudges edited posts only in changed mode", () => {
+    const editedTopic = {
+      ...topic,
+      status: "judged" as const,
+      updatedAt: "2026-07-02T12:00:00.000Z"
+    };
+    const olderEvaluation = {
+      ...validPayload,
+      id: "eval-before-edit",
+      topicId: editedTopic.id,
+      sourceType: "preliminary",
+      provider: "nvidia",
+      model: "moonshotai/kimi-k2.6",
+      promptVersion: PROMPT_VERSION,
+      rawModelResponse: "{}",
+      error: null,
+      createdAt: "2026-07-02T11:59:00.000Z"
+    } satisfies TraeEvaluation;
+    const newerEvaluation = {
+      ...olderEvaluation,
+      id: "eval-after-edit",
+      createdAt: "2026-07-02T12:01:00.000Z"
+    } satisfies TraeEvaluation;
+
+    assert.equal(shouldJudgeTopicForMode(editedTopic, olderEvaluation, "unjudged"), false);
+    assert.equal(shouldJudgeTopicForMode(editedTopic, olderEvaluation, "changed"), true);
+    assert.equal(shouldJudgeTopicForMode(editedTopic, newerEvaluation, "changed"), false);
+  });
+
   it("builds a consensus prompt from all evaluator outputs and evidence limits", () => {
     const profiles = getJudgeEvaluatorProfiles();
     const prompt = buildConsensusJudgePrompt(

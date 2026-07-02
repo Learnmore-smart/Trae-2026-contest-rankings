@@ -48,6 +48,15 @@ test("ranking reload keeps existing rows visible while refreshing", () => {
   assert.match(client, /loading && items\.length === 0 \? \([\s\S]*?<LoadingGrid viewMode={viewMode} \/>/);
 });
 
+test("ranking filter changes show skeleton rows while the replacement query loads", () => {
+  const client = read(clientPath);
+
+  assert.match(client, /const \[loadedQueryString, setLoadedQueryString\] = useState\(""\);/);
+  assert.match(client, /setLoadedQueryString\(queryString\);/);
+  assert.match(client, /const showQueryChangeSkeleton = loading && queryString !== loadedQueryString;/);
+  assert.match(client, /loading && items\.length === 0 \? \([\s\S]*?<LoadingGrid viewMode=\{viewMode\} \/>[\s\S]*?\) : showQueryChangeSkeleton \? \(/);
+});
+
 test("client API requests default to configured Next base path", () => {
   const client = read(clientPath);
   const nextConfig = read(nextConfigPath);
@@ -230,6 +239,40 @@ test("ranking topics fall back to local cache when Data Connect is unconfigured"
   }
 });
 
+test("ranking ascending score order keeps ungraded rows after graded rows", async () => {
+  const envKeys = [
+    "FIREBASE_SERVICE_ACCOUNT_KEY",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "FIREBASE_CONFIG",
+    "GCLOUD_PROJECT",
+    "GOOGLE_CLOUD_PROJECT",
+    "FIREBASE_PROJECT_ID"
+  ];
+  const previousEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
+  const originalConsoleError = console.error;
+  for (const key of envKeys) delete process.env[key];
+
+  try {
+    console.error = () => undefined;
+    const moduleUrl = `${pathToFileURL(traeApiPath).href}?graded-first-asc-test=${Date.now()}`;
+    const { listRankedTopics } = await import(moduleUrl) as typeof import("../lib/trae/api.ts");
+    const payload = await listRankedTopics({ page: 1, pageSize: 1000, sort: "total", dir: "asc", bypassCache: true });
+    const isGraded = (item: (typeof payload.items)[number]) => typeof item.evaluation?.totalScore === "number" && item.evaluation.totalScore >= 0;
+    const firstUngradedIndex = payload.items.findIndex((item) => !isGraded(item));
+    const lastGradedIndex = payload.items.findLastIndex(isGraded);
+
+    assert.ok(lastGradedIndex >= 0, "expected ascending page to include graded rows before pending rows");
+    assert.ok(firstUngradedIndex >= 0, "expected ascending page to include pending rows after graded rows");
+    assert.ok(lastGradedIndex < firstUngradedIndex, "graded rows should come before ungraded rows even in ascending order");
+  } finally {
+    for (const [key, value] of previousEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    console.error = originalConsoleError;
+  }
+});
+
 test("ranking fallback rows are preliminary-only and use official track labels", async () => {
   type CachedTopic = {
     sourceType?: string;
@@ -353,6 +396,47 @@ test("public run status reports bounded judging batch counts", () => {
   assert.match(client, /setStatus\(\{ running: true, phase: "judge", startedAt: null, finishedAt: null, message: t\.judging, error: null \}\);/);
   assert.match(client, /cooldown \? t\.cooldown : status\?\.message \?\? phaseMessage\(phase, language\)/);
   assert.match(client, /phase === "error" && status\?\.error/);
+});
+
+test("topic detail falls back to local cache when Data Connect returns no row", async () => {
+  type CachedTopic = { id?: string; sourceType?: string };
+  const cachedTopics = JSON.parse(read(topicsCachePath)) as CachedTopic[];
+  const preliminaryId = cachedTopics.find((topic) => topic.sourceType === "PRELIMINARY")?.id;
+  const signupId = cachedTopics.find((topic) => topic.sourceType === "SIGNUP")?.id;
+  assert.ok(preliminaryId, "expected a cached preliminary topic to exercise the fallback");
+  assert.ok(signupId, "expected a cached signup topic to exercise the non-preliminary guard");
+
+  const envKeys = [
+    "FIREBASE_SERVICE_ACCOUNT_KEY",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "FIREBASE_CONFIG",
+    "GCLOUD_PROJECT",
+    "GOOGLE_CLOUD_PROJECT",
+    "FIREBASE_PROJECT_ID"
+  ];
+  const previousEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
+  const originalConsoleError = console.error;
+  for (const key of envKeys) delete process.env[key];
+
+  try {
+    console.error = () => undefined;
+    const moduleUrl = `${pathToFileURL(traeApiPath).href}?detail-fallback-test=${Date.now()}`;
+    const { getTopicDetail } = await import(moduleUrl) as typeof import("../lib/trae/api.ts");
+
+    const detail = await getTopicDetail(preliminaryId!);
+    assert.ok(detail, "cached preliminary should resolve to a detail payload, not 404");
+    assert.equal(detail!.topic.id, preliminaryId);
+    assert.equal(detail!.topic.sourceType, "preliminary");
+
+    assert.equal(await getTopicDetail(signupId!), null, "a signup id is not a preliminary entry");
+    assert.equal(await getTopicDetail("does-not-exist"), null, "unknown ids stay 404");
+  } finally {
+    for (const [key, value] of previousEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    console.error = originalConsoleError;
+  }
 });
 
 test("public user topic submit only accepts TRAE forum links and refreshes the board", () => {

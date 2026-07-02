@@ -23,6 +23,8 @@ Guards public contest routing and workflow safety invariants.
 - Verifies the live Data Connect board path uses live query topics as the ranking base rather than the bundled JSON cache.
 - Verifies `GetBoardPage` has a narrow `operation not found` fallback to the legacy deployed board query.
 - Verifies public ranking and judge candidate reads call the shared duplicate-title filter server-side.
+- Verifies filter-changing ranking reloads show skeleton rows while same-query background refresh behavior remains protected by source-level guards.
+- Verifies ascending ranking order keeps graded rows before ungraded rows.
 - Verifies the public project detail page does not expose raw AI scoring input/output records.
 - Verifies the public user-topic submit route exists, validates TRAE links through the scraper helper, crawls as preliminary, refreshes the board, and is wired from the client form.
 
@@ -61,6 +63,7 @@ Guards public contest routing and workflow safety invariants.
 - 2026-07-02 Codex: Tighten the source guard so `/submit` must call `fetchTopic` with `requirePreliminaryCategory: true` and expose `GET` status for refresh-surviving background crawls.
 - 2026-07-02 Codex: Implemented the guard for `__traeTopicSubmit`, `GET`, background `runSubmittedTopic`, strict fetch options, and client-side status `GET` polling.
 - 2026-07-02 Codex: Add source-level guard requiring normalized-title dedupe to be wired into both public ranking and judge candidate selection.
+- 2026-07-02 Codex: Add guards for query-change skeleton state and graded-first ordering, covering the specific regression where low-to-high sort can put pending rows first.
 
 ## Important Notes / NEVER Change
 
@@ -106,6 +109,8 @@ Guards public contest routing and workflow safety invariants.
 | 2026-07-02 | Updated fallback count expectation to use unique titles after server-side dedupe. | Codex |
 | 2026-07-02 | Planned deleted/empty suppression, selectable page size, and selectable sort direction guards. | Codex |
 | 2026-07-02 | Implemented deleted/empty suppression, selectable page size, and selectable sort direction guards. | Codex |
+| 2026-07-02 | Planned filter-change skeleton and graded-first ordering guards. | Codex |
+| 2026-07-02 | Implemented filter-change skeleton and ascending graded-first ordering regression guards. | Codex |
 
 ## Planned Change: Public Run Workflow Guard
 

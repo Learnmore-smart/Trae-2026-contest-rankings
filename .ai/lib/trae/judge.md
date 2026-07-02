@@ -53,6 +53,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - 2026-07-02 Codex: Owner rejected keeping any single-LLM/fast path at all. Remove the fast strategy, its env switch, and its stored prompt/raw-response helpers.
 - 2026-07-02 Codex: Owner hit `operation "GetBoardPage" not found` when starting a run. Root cause is connector deployment skew, not model judging. Add a narrow fallback to the deployed legacy board query so the run button does not fail immediately; full >1000 coverage still requires deploying `GetBoardPage`.
 - 2026-07-02 Codex: Duplicate preliminary posts with identical titles should not both enter the judge queue. Prefer already-scored or higher-scored duplicates before title dedupe, then apply the normal mode filter and max slice.
+- 2026-07-02 Codex: Owner relayed feedback that edited forum posts are not re-scored. Root cause is cross-module: `scraper.ts` preserves `JUDGED` on content updates to keep public scored counts stable, but `shouldJudgeTopicForMode(..., "changed")` does not compare the topic's current `updatedAt` with the latest evaluation's `createdAt`. Fix changed mode to treat a topic update newer than the latest evaluation as stale, without resetting public scores during scrape.
 
 ## Planned Change: SQL Connect Runtime
 
@@ -102,6 +103,16 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | 2026-07-02 | Implemented judge candidate dedupe before mode filtering and run slicing. | Codex |
 | 2026-07-02 | Planned skip logic for deleted/empty judge candidates. | Codex |
 | 2026-07-02 | Implemented deleted/empty judge candidate filtering before mode selection. | Codex |
+| 2026-07-02 | Planned changed-mode rejudge detection for edited posts whose topic update is newer than the latest evaluation. | Codex |
+| 2026-07-02 | Implemented changed-mode timestamp comparison without resetting public judged status during scrape. | Codex |
+
+## Bug Fix: Edited Posts Not Rejudged
+
+- Bug: the admin/CLI `changed` judge mode says it re-scores content changes, but edited posts can stay `judged` forever after scrape updates.
+- Cause: scrape updates preserve `JUDGED` status by design; changed-mode queue selection only checks status, missing evaluation, or stale prompt version.
+- Fix: `shouldJudgeTopicForMode(..., "changed")` now queues a topic when `topic.updatedAt` parses later than `latestEvaluation.createdAt`.
+- Regression test: `tests/trae.judge.test.ts` proves default `unjudged` still skips already-scored updated rows, while `changed` includes rows updated after their latest evaluation and skips rows evaluated after the latest topic update.
+- Risk handling: invalid or missing timestamps do not cause surprise rejudges because the helper returns false unless both dates parse to finite times.
 
 ## Change Plan: Consensus Only With Parallel Evaluator Teams
 

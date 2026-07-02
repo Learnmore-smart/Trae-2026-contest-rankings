@@ -35,6 +35,7 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 - 2026-07-02 Codex: Implemented `UserTopicSubmit` on both the landing side rail and ranking page. It validates empty input client-side, surfaces server validation errors, clears on success, and calls `load()` so stats/ranking refresh after a crawl.
 - 2026-07-02 Codex: Updated `UserTopicSubmit` to read `GET /api/trae-contest/submit` on mount and poll while `running`, so refreshing the page during a submitted-topic crawl still shows the crawler state.
 - 2026-07-02 Codex: Add a rightmost navbar home anchor to `https://www.rateministere.com` using the existing compact `nav-control` visual style and a lucide `Home` icon only. Keep it after language/theme controls so it is the far-right control.
+- 2026-07-02 Codex: Filter/sort/page-size query changes should show ranking skeleton rows while the replacement page loads, but same-query refreshes from run completion or submitted-topic reloads should keep current rows visible.
 
 ## Bug Fix Plan: Stats Request Must Survive Topic Deadline
 
@@ -66,6 +67,7 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 
 - Keep the public disclaimer visible.
 - Do not clear existing ranking rows during background reloads unless a successful payload replaces them.
+- Query-changing filter/sort/page-size reloads are allowed to cover stale rows with skeletons so users do not read the old ordering as current.
 - Ranking page size must default to 50 while allowing explicit user choices.
 - Ranking sort direction must be user-selectable and must reset pagination to page 1 when changed.
 
@@ -91,6 +93,8 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 | 2026-07-02 | Implemented page-size and sort-direction dropdowns with query-string wiring. | Codex |
 | 2026-07-02 | Planned rightmost RateMinistere home link in navbar with icon-only label. | Codex |
 | 2026-07-02 | Implemented rightmost RateMinistere home link in navbar with icon-only label. | Codex |
+| 2026-07-02 | Planned filter-change skeleton state while preserving same-query background row refreshes. | Codex |
+| 2026-07-02 | Implemented last-loaded query tracking so filter/query changes show skeleton rows while same-query refreshes keep rows visible. | Codex |
 
 ## Change Plan: Public Run Starts Scoring Immediately
 

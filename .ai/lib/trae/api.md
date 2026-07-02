@@ -39,6 +39,7 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 - 2026-07-01 Codex: Implemented `fetchBoardPages()` using `GetBoardPage` chunks of 1000 rows based on the live preliminary count.
 - 2026-07-02 Codex: Owner hit `operation "GetBoardPage" not found`; production connector can lag generated code. Add a narrow fallback to legacy `GetBoardData` only for that exact missing-operation case.
 - 2026-07-02 Codex: Owner reported duplicate public ranking posts with the same title. Public sorting should happen first, then normalized-title dedupe should keep only the highest visible row for the active sort before ranks and pagination are assigned.
+- 2026-07-02 Codex: Public ranking ordering must partition graded rows ahead of ungraded rows for every display direction, so low-to-high sorting never pulls pending items to the top.
 
 ## Planned Change: Lint And SQL Adapter Boundary
 
@@ -73,12 +74,21 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 - Regression risk: local fallback remains limited by the bundled snapshot; live Data Connect is still capped by the query limit and needs a later pagination/snapshot-table change for true all-topic scale.
 - Implemented: added official-track normalization, preliminary-only local fallback filtering, preliminary-only fallback stats, shared record mappers, and switched successful DB board builds to `topTopics` as the ranking base.
 
+## Bug Fix Plan: Topic Detail Must Fall Back To Cache Like The Board
+
+- 2026-07-02 Codex: Owner reported every project — from a list click and from the detail page — showing `作品不存在或不是初赛作品` (404), while the ranking list still rendered works. Root cause: `getTopicDetail()` only consulted `topics-cache.json` inside its `catch` (i.e. when the Data Connect query *threw*). When Data Connect was reachable but returned no matching preliminary row (empty/partial DB, or only some operations deployed while the board fell back to the snapshot), `if (!t || t.sourceType !== "PRELIMINARY") return null` hard-404ed instead of checking the same snapshot the board serves from. Result: works listed from cache but none of them opened.
+- Fix strategy: extract the snapshot lookup into `getTopicDetailFromCache(id)` (reusing `readTopicsCache()`), call it from both the "DB returned no preliminary" branch and the `catch`, and gate the cache path on a case-insensitive `preliminary` check so a signup id correctly resolves to "not a preliminary entry" rather than serving signup content.
+- Regression risk: detail may show snapshot-lagged evaluation/match data when Data Connect is empty, but that is consistent with the rows the board is already displaying.
+- Implemented: added `getTopicDetailFromCache()`, made both no-row and thrown paths fall back to it, and added a `contest-route-pages` regression test asserting a cached preliminary id resolves while signup/unknown ids stay null.
+
 ## Important Notes / NEVER Change
 
 - Public APIs must not return `rawHtml` or unrestricted raw model internals.
 - Do not reintroduce one huge nested board query for all topics; use bounded page chunks.
 - Board data must filter deleted/empty preliminary topics before public ranking rows are built.
 - Sort direction changes display order only; rank numbers must remain canonical best-first leaderboard positions.
+- Ungraded ranking rows must remain after all graded rows before pagination, even when the selected sort direction is low-to-high.
+- `getTopicDetail()` must fall back to `topics-cache.json` whenever Data Connect yields no matching preliminary — on an empty/non-preliminary result as well as a thrown error — so any work that lists on the board also opens in detail.
 
 ## Change History
 
@@ -103,3 +113,6 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 | 2026-07-02 | Implemented public ranking dedupe after sorting and before rank pagination. | Codex |
 | 2026-07-02 | Planned deleted/empty board filtering and selectable display sort direction. | Codex |
 | 2026-07-02 | Implemented deleted/empty board filtering and `dir=asc|desc` display ordering. | Codex |
+| 2026-07-02 | Planned graded-first public ranking order for all sort directions. | Codex |
+| 2026-07-02 | Implemented graded-first ranking partitioning before rank assignment and pagination. | Codex |
+| 2026-07-02 | Fixed topic detail 404s: `getTopicDetail()` now falls back to the local snapshot on empty/non-preliminary DB results, not only on thrown errors. | Codex |
