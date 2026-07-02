@@ -111,6 +111,27 @@ describe("isSubmittedPreliminaryTopicPayload", () => {
     );
   });
 
+  it("accepts the real crawler HTML category title shape without trusting body text", () => {
+    const html = `
+      <html>
+        <head>
+          <title>社会服务 - 「书在架上」图书馆实时排架核查系统 - 【大赛初赛专区】 - TRAE 官方中文社区</title>
+          <meta property="og:article:section" content="TRAE AI 创造力大赛" />
+          <meta property="og:article:section" content="【大赛初赛专区】" />
+        </head>
+        <body>
+          <div class="topic-category">
+            <span class="category-name">TRAE AI 创造力大赛</span>
+            <span class="category-name">【大赛初赛专区】</span>
+          </div>
+          <div class="post">正文不作为初赛 verdict。</div>
+        </body>
+      </html>
+    `;
+
+    assert.equal(isSubmittedPreliminaryTopicPayload(html), true);
+  });
+
   it("accepts only category-named JSON fields, not user-controlled topic content", () => {
     assert.equal(isSubmittedPreliminaryTopicPayload({ category_name: "【大赛初赛专区】" }), true);
     assert.equal(isSubmittedPreliminaryTopicPayload({ cooked: "我写了【大赛初赛专区】这几个字" }), false);

@@ -51,6 +51,10 @@ Scrapes public TRAE Discourse category and topic data for signup and preliminary
 - 2026-07-02 Codex: Tighten submitted-topic crawling so it only accepts actual preliminary posts. Root cause: `/submit` validated the topic URL host/path, then called `fetchTopic("preliminary", ref)` without checking the Discourse topic category. Fix by adding a fetch option that requires the real forum category text to include `大赛初赛专区`; do not rely on URL slugs or numeric category ids.
 - 2026-07-02 Codex: Implemented `isSubmittedPreliminaryTopicPayload()` and `FetchTopicOptions.requirePreliminaryCategory`. JSON category-named fields may pass directly; otherwise the submitted-topic path fetches the HTML topic page and checks the page title/category text before upserting.
 
+## Planned Fix: Submitted Topic Category HTML
+
+- 2026-07-02 Codex: User-submitted preliminary topic 66965 still failed validation. Root cause evidence: Discourse JSON only exposes `category_id: 40`, while the public crawler HTML title uses `... - 【大赛初赛专区】 - ...` and meta/category elements expose the category text. Fix plan: keep the verdict text-based, but read explicit HTML category/title/meta signals instead of requiring a slash before the category segment.
+
 ## Planned Change: SQL Connect Runtime
 
 - 2026-06-30 Codex: Rename the raw JSON sanitizer away from Firestore terminology, update tests, and replace the legacy helper import with `dataconnect.ts`.
@@ -71,6 +75,7 @@ Scrapes public TRAE Discourse category and topic data for signup and preliminary
 | 2026-06-29 | Preliminary ranking could include pinned guide posts. | Category parser accepted every Discourse topic ref with an id. | Filter pinned/global-pinned/non-visible topic refs before detail fetches. |
 | 2026-06-30 | SQL scrape wrote zero topics. | `UpsertTopic` variables omitted required `contentText` and `excerpt`. | Include `contentText`, `contentHtml`, and `excerpt` in `topicToVariables()`. |
 | 2026-07-02 | Public scored count decreased during scraping. | Content updates reset already judged topics to `needs_judging` before new scores were ready. | Preserve `judged` status for already judged preliminary topics on scrape updates. |
+| 2026-07-02 | A real preliminary submitted link returned "only supports preliminary posts". | The fallback HTML title matcher only accepted `/ 【大赛初赛专区】 -`, but the forum crawler page emits `- 【大赛初赛专区】 -`; JSON had no category name string. | Implemented explicit HTML title/meta/category-name extraction and segment matching; verified topic 66965 helper result is `true`. |
 
 ## Change History
 
@@ -90,3 +95,5 @@ Scrapes public TRAE Discourse category and topic data for signup and preliminary
 | 2026-07-02 | Implemented user-submitted TRAE topic URL validation helpers. | Codex |
 | 2026-07-02 | Planned preliminary-category text validation for user-submitted topic crawls. | Codex |
 | 2026-07-02 | Implemented preliminary-category text validation for user-submitted topic crawls. | Codex |
+| 2026-07-02 | Planned robust HTML category text validation for real submitted topic pages. | Codex |
+| 2026-07-02 | Implemented robust HTML category text validation for real submitted topic pages. | Codex |

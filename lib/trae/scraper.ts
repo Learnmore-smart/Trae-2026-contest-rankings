@@ -233,10 +233,32 @@ function includesPreliminaryCategoryText(value: string): boolean {
   return normalizeWhitespace(value).includes(PRELIMINARY_CATEGORY_TEXT);
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasPreliminaryCategorySegment(value: string): boolean {
+  const normalized = normalizeWhitespace(value);
+  if (!includesPreliminaryCategoryText(normalized)) return false;
+  const label = escapeRegExp(PRELIMINARY_CATEGORY_TEXT);
+  return new RegExp(`(?:^|[\\s/|\\-｜])【?${label}】?(?:$|[\\s/|\\-｜])`).test(normalized);
+}
+
 function pageTitleHasPreliminaryCategory(html: string): boolean {
   const $ = cheerio.load(html);
-  const title = normalizeWhitespace($("title").first().text() || html);
-  return new RegExp(`/\\s*【?${PRELIMINARY_CATEGORY_TEXT}】?\\s*-`).test(title);
+  const candidates = [
+    $("title").first().text(),
+    ...$("meta[property='og:article:section'], meta[property='article:section'], meta[itemprop='articleSection']")
+      .map((_, element) => $(element).attr("content") ?? "")
+      .get(),
+    ...$(".topic-category .category-name, .category-name[itemprop='name']")
+      .map((_, element) => $(element).text())
+      .get()
+  ].map(normalizeWhitespace).filter(Boolean);
+
+  if (candidates.some(hasPreliminaryCategorySegment)) return true;
+  if (!/<[a-z][\s\S]*>/i.test(html)) return hasPreliminaryCategorySegment(html);
+  return false;
 }
 
 function collectCategoryStrings(value: unknown, insideCategoryField = false, depth = 0): string[] {

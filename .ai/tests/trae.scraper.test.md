@@ -38,6 +38,7 @@ Regression coverage for TRAE scraper normalization behavior.
 - 2026-07-02 Codex: Implemented category-text tests that accept a forum title containing `TRAE AI 创造力大赛 / 【大赛初赛专区】` and reject报名专区; also reject user-controlled `cooked` content containing the same words.
 
  - 2026-07-02 Codex: Add parser coverage for short Discourse topic URLs like `https://forum.trae.cn/t/topic/66965`; the preliminary verdict still comes from category text, not URL/category ids.
+ - 2026-07-02 Codex: Add a regression test for the real forum crawler HTML shape where the title is `project - 【大赛初赛专区】 - TRAE 官方中文社区` and the category also appears in `og:article:section` / `.category-name`; this previously failed because the matcher required a slash before the category.
 
 ## Important Notes / NEVER Change
 
@@ -57,3 +58,5 @@ Regression coverage for TRAE scraper normalization behavior.
 | 2026-07-02 | Planned user-submitted preliminary-category text validation coverage. | Codex |
 | 2026-07-02 | Implemented user-submitted preliminary-category text validation coverage. | Codex |
 | 2026-07-02 | Planned short TRAE topic URL parser coverage for user-submitted crawls. | Codex |
+| 2026-07-02 | Planned real crawler HTML category-title regression coverage. | Codex |
+| 2026-07-02 | Implemented real crawler HTML category-title regression coverage. | Codex |
