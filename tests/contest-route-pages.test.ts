@@ -302,8 +302,8 @@ test("public run status reports bounded judging batch counts", () => {
   const client = read(clientPath);
   const judgePolicy = read(judgePolicyPath);
 
-  assert.match(judgePolicy, /export const DEFAULT_JUDGE_BATCH_MAX = 100;/);
-  assert.match(judgePolicy, /export const DEFAULT_JUDGE_CONCURRENCY = 100;/);
+  assert.match(judgePolicy, /export const DEFAULT_JUDGE_BATCH_MAX = 4000;/);
+  assert.match(judgePolicy, /export const DEFAULT_JUDGE_CONCURRENCY = 8;/);
   assert.match(route, /import \{ DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY \} from "@\/lib\/trae\/judge-policy";/);
   assert.doesNotMatch(route, /const PUBLIC_JUDGE_MAX =/);
   assert.doesNotMatch(route, /const PUBLIC_JUDGE_CONCURRENCY =/);

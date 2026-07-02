@@ -1,9 +1,21 @@
 import type { TraeSourceType } from "./types.ts";
 import { DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY } from "./judge-policy.ts";
 
-export type AIProvider = "nvidia" | "openrouter";
+export type AIProvider = "friend" | "nvidia" | "openrouter";
 
 export interface TraeConfig {
+  /**
+   * "Friend" endpoint: a new-api (OpenAI-compatible) gateway that serves the same
+   * NVIDIA-family model IDs but with much higher rate limits than the direct NVIDIA
+   * integrate API. Used as the primary provider; NVIDIA direct is the fallback.
+   */
+  friendApiKey: string | null;
+  friendBaseUrl: string;
+  friendPrimaryModel: string;
+  friendFallbackModels: string[];
+  /** Vision-capable model on the friend endpoint (used before falling back to NVIDIA vision). */
+  friendImageModel: string;
+  friendImageFallbackModel: string;
   nvidiaApiKey: string | null;
   nvidiaBaseUrl: string;
   nvidiaPrimaryModel: string;
@@ -64,29 +76,42 @@ function booleanFromEnv(name: string, fallback: boolean): boolean {
 
 function providerOrderFromEnv(): AIProvider[] {
   const seen = new Set<AIProvider>();
-  const providers = listFromEnv("AI_PROVIDER_ORDER", ["nvidia", "openrouter"]).filter(
-    (provider): provider is AIProvider => provider === "nvidia" || provider === "openrouter"
+  const providers = listFromEnv("AI_PROVIDER_ORDER", ["friend", "nvidia"]).filter(
+    (provider): provider is AIProvider =>
+      provider === "friend" || provider === "nvidia" || provider === "openrouter"
   );
   const deduped = providers.filter((provider) => {
     if (seen.has(provider)) return false;
     seen.add(provider);
     return true;
   });
-  return deduped.length > 0 ? deduped : ["nvidia", "openrouter"];
+  return deduped.length > 0 ? deduped : ["friend", "nvidia"];
 }
 
 export function getTraeConfig(): TraeConfig {
   const aiMaxRetriesPerModel = Math.max(0, Math.floor(numberFromEnv("AI_MAX_RETRIES_PER_MODEL", 2)));
   const aiRequestTimeoutMs = Math.max(1, Math.floor(numberFromEnv("AI_REQUEST_TIMEOUT_MS", 120_000)));
-  const aiRpmLimit = Math.max(1, Math.floor(numberFromEnv("AI_RPM_LIMIT", 30)));
+  const aiRpmLimit = Math.max(1, Math.floor(numberFromEnv("AI_RPM_LIMIT", 40)));
 
   return {
+    friendApiKey: process.env.TRAE_FRIEND_API ?? null,
+    friendBaseUrl: process.env.TRAE_FRIEND_BASE_URL ?? "http://47.93.17.237:8889/v1",
+    friendPrimaryModel: process.env.FRIEND_PRIMARY_MODEL ?? "deepseek-ai/deepseek-v4-pro",
+    // deepseek-v4-flash (hangs past timeout) and glm-5.1 (410 EOL 2026-07-02) are
+    // deliberately excluded — both fail on this backend and only burn wall-clock.
+    friendFallbackModels: listFromEnv("FRIEND_FALLBACK_MODELS", [
+      "minimaxai/minimax-m3",
+      "moonshotai/kimi-k2.6"
+    ]),
+    friendImageModel: process.env.FRIEND_IMAGE_MODEL ?? "moonshotai/kimi-k2.6",
+    friendImageFallbackModel: process.env.FRIEND_IMAGE_FALLBACK_MODEL ?? "minimaxai/minimax-m3",
     nvidiaApiKey: process.env.NVIDIA_API_KEY ?? null,
     nvidiaBaseUrl: process.env.NVIDIA_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
-    nvidiaPrimaryModel: process.env.NVIDIA_PRIMARY_MODEL ?? "moonshotai/kimi-k2.6",
+    nvidiaPrimaryModel: process.env.NVIDIA_PRIMARY_MODEL ?? "deepseek-ai/deepseek-v4-pro",
+    // Same exclusions as the friend chain: flash hangs, glm-5.1 is 410 EOL.
     nvidiaFallbackModels: listFromEnv("NVIDIA_FALLBACK_MODELS", [
-      "z-ai/glm-5.1",
-      "deepseek-ai/deepseek-v4-flash"
+      "minimaxai/minimax-m3",
+      "moonshotai/kimi-k2.6"
     ]),
     nvidiaImageModel: process.env.NVIDIA_IMAGE_MODEL ?? "moonshotai/kimi-k2.6",
     nvidiaImageFallbackModel: process.env.NVIDIA_IMAGE_FALLBACK_MODEL ?? "minimaxai/minimax-m3",

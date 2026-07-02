@@ -119,6 +119,7 @@ Guards public contest routing and workflow safety invariants.
 - 2026-07-01 Codex: Update the guard to expect `100 / 20`, and add a source guard that the judge worker also uses paged board reads rather than first-1000 `GetBoardData`.
 - 2026-07-02 Codex: Update the guard to expect `100 / 100` so public runs can start 100 consensus evaluator teams concurrently.
 - Implemented the `100 / 100` public route policy guard.
+- 2026-07-02 Codex: Updated the guard to expect `4000 / 8` after enforcing the 40 rpm provider quota in the shared LLM client.
 - 2026-07-02 Codex: Revise the paged-read guards so `GetBoardData` is allowed only as a fallback for `operation "GetBoardPage" not found`.
 
 ## Bug Fix Plan: Detail Page Must Work Under Base Path

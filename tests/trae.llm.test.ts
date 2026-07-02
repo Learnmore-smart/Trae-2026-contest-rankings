@@ -59,7 +59,7 @@ function zeroBudgetEnv(overrides: EnvPatch = {}): EnvPatch {
       "nvidia/nemotron-3-ultra-550b-a55b:free,google/gemma-4-31b-it:free",
     AI_PROVIDER_ORDER: "nvidia,openrouter",
     AI_ZERO_BUDGET_ONLY: "true",
-    AI_RPM_LIMIT: "30",
+    AI_RPM_LIMIT: "60000",
     AI_MAX_RETRIES_PER_MODEL: "1",
     AI_REQUEST_TIMEOUT_MS: "120000",
     ...overrides
@@ -67,7 +67,13 @@ function zeroBudgetEnv(overrides: EnvPatch = {}): EnvPatch {
 }
 
 describe("LLM zero-budget fallback client", () => {
-  it("defaults NVIDIA text order to Kimi K2.6, GLM 5.1, then DeepSeek Flash", () => {
+  it("defaults the shared AI rate limit to 40 rpm", () => {
+    withEnv(zeroBudgetEnv({ AI_RPM_LIMIT: undefined }), () => {
+      assert.equal(getTraeConfig().aiRpmLimit, 40);
+    });
+  });
+
+  it("defaults NVIDIA text order to DeepSeek V4 Pro, MiniMax M3, then Kimi K2.6", () => {
     withEnv(
       zeroBudgetEnv({
         NVIDIA_PRIMARY_MODEL: undefined,
@@ -76,11 +82,13 @@ describe("LLM zero-budget fallback client", () => {
       () => {
         const config = getTraeConfig();
         const plan = buildLLMFallbackPlan(config);
+        // DeepSeek V4 Flash (hangs) and GLM 5.1 (410 EOL 2026-07-02) are intentionally
+        // excluded from the defaults; only verified-live models remain.
         assert.deepEqual(
           plan
             .filter((entry) => entry.provider === "nvidia")
             .map((entry) => entry.model),
-          ["moonshotai/kimi-k2.6", "z-ai/glm-5.1", "deepseek-ai/deepseek-v4-flash"]
+          ["deepseek-ai/deepseek-v4-pro", "minimaxai/minimax-m3", "moonshotai/kimi-k2.6"]
         );
         assert.equal(config.nvidiaImageModel, "moonshotai/kimi-k2.6");
       }
@@ -241,6 +249,36 @@ describe("LLM zero-budget fallback client", () => {
     });
   });
 
+  it("paces consecutive model attempts by AI_RPM_LIMIT", async () => {
+    await withEnv(zeroBudgetEnv({ AI_RPM_LIMIT: "40", AI_MAX_RETRIES_PER_MODEL: "0" }), async () => {
+      const sleeps: number[] = [];
+      const startedModels: string[] = [];
+
+      const fetchFn: typeof fetch = async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as { model: string };
+        startedModels.push(body.model);
+        return Response.json({ choices: [{ message: { content: JSON.stringify({ ok: true }) } }] });
+      };
+
+      const options = {
+        messages: [{ role: "user" as const, content: "score this" }],
+        config: getTraeConfig(),
+        validateContent: (content: string) => JSON.parse(content) as { ok: boolean },
+        fetchFn,
+        sleepFn: async (delayMs: number) => {
+          sleeps.push(delayMs);
+        }
+      };
+
+      await callLLMWithFallback(options);
+      await callLLMWithFallback(options);
+
+      assert.deepEqual(startedModels, ["moonshotai/kimi-k2.6", "moonshotai/kimi-k2.6"]);
+      assert.equal(sleeps.length, 1);
+      assert.ok(sleeps[0] >= 1400 && sleeps[0] <= 1500, `expected about 1500ms, got ${sleeps[0]}`);
+    });
+  });
+
   it("treats an HTTP 200 empty-choices reply as a retryable rate limit", async () => {
     await withEnv(zeroBudgetEnv({ AI_MAX_RETRIES_PER_MODEL: "1" }), async () => {
       let primaryCalls = 0;
@@ -273,21 +311,37 @@ describe("LLM zero-budget fallback client", () => {
     });
   });
 
-  it("builds the vision plan from the image model then the image fallback model, nvidia only", () => {
+  it("builds the vision plan friend-first, then nvidia, from the image + fallback models", () => {
     withEnv(zeroBudgetEnv(), () => {
       const plan = buildVisionLLMFallbackPlan(getTraeConfig());
       assert.deepEqual(
         plan.map((entry) => `${entry.provider}:${entry.model}`),
-        ["nvidia:moonshotai/kimi-k2.6", "nvidia:minimaxai/minimax-m3"]
+        [
+          "friend:moonshotai/kimi-k2.6",
+          "friend:minimaxai/minimax-m3",
+          "nvidia:moonshotai/kimi-k2.6",
+          "nvidia:minimaxai/minimax-m3"
+        ]
       );
     });
   });
 
-  it("deduplicates the vision plan when the image model and its fallback are the same", () => {
-    withEnv(zeroBudgetEnv({ NVIDIA_IMAGE_FALLBACK_MODEL: "moonshotai/kimi-k2.6" }), () => {
-      const plan = buildVisionLLMFallbackPlan(getTraeConfig());
-      assert.deepEqual(plan.map((entry) => entry.model), ["moonshotai/kimi-k2.6"]);
-    });
+  it("deduplicates the vision plan per provider when a model and its fallback are the same", () => {
+    withEnv(
+      zeroBudgetEnv({
+        FRIEND_IMAGE_MODEL: "moonshotai/kimi-k2.6",
+        FRIEND_IMAGE_FALLBACK_MODEL: "moonshotai/kimi-k2.6",
+        NVIDIA_IMAGE_FALLBACK_MODEL: "moonshotai/kimi-k2.6"
+      }),
+      () => {
+        const plan = buildVisionLLMFallbackPlan(getTraeConfig());
+        // Dedup is keyed by provider:model, so the same model on friend and nvidia is kept once each.
+        assert.deepEqual(
+          plan.map((entry) => `${entry.provider}:${entry.model}`),
+          ["friend:moonshotai/kimi-k2.6", "nvidia:moonshotai/kimi-k2.6"]
+        );
+      }
+    );
   });
 
   it("sends multimodal image_url content and omits response_format for vision calls", async () => {

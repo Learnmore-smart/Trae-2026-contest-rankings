@@ -10,6 +10,7 @@ import {
   runWithConcurrency,
   shouldJudgeTopicForMode
 } from "../lib/trae/judge.ts";
+import { DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY } from "../lib/trae/judge-policy.ts";
 import type { EvaluationOutput, TraeEvaluation, TraeTopic } from "../lib/trae/types.ts";
 
 const validPayload: EvaluationOutput = {
@@ -282,6 +283,11 @@ describe("multi-evaluator judging", () => {
 });
 
 describe("judge topic concurrency", () => {
+  it("defaults to 8 teams and an overnight-sized judge batch for a 40 rpm quota", () => {
+    assert.equal(DEFAULT_JUDGE_CONCURRENCY, 8);
+    assert.equal(DEFAULT_JUDGE_BATCH_MAX, 4000);
+  });
+
   it("runs queued work with no more than the requested concurrency", async () => {
     let active = 0;
     let peak = 0;

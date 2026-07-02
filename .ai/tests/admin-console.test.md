@@ -65,6 +65,7 @@ Guards the admin console's compact running-status UI against leaking long action
 - 2026-07-01 Codex: Update the shared policy expectations to `100 / 20` after the owner requested max concurrency.
 - 2026-07-02 Codex: Update the shared policy expectation to `100 / 100` so the admin can run 100 consensus evaluator teams concurrently.
 - Implemented the `100 / 100` source-level expectation.
+- 2026-07-02 Codex: Updated the shared policy expectation to `4000 / 8` after enforcing the 40 rpm provider quota and moving throughput to the shared LLM limiter.
 
 ## Planned Change: Admin Theme Shell Test
 

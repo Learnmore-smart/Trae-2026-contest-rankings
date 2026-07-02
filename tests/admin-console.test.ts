@@ -24,8 +24,8 @@ test("admin console busy badge stays generic while actions run", () => {
 test("admin judge actions use the shared aggressive judge policy", () => {
   const judgeActions = [...adminClient.matchAll(/endpoint: "\/api\/trae-contest\/admin\/judge"[\s\S]*?batchMax: DEFAULT_JUDGE_BATCH_MAX[\s\S]*?concurrency: DEFAULT_JUDGE_CONCURRENCY/g)];
 
-  assert.match(judgePolicy, /export const DEFAULT_JUDGE_BATCH_MAX = 100;/);
-  assert.match(judgePolicy, /export const DEFAULT_JUDGE_CONCURRENCY = 100;/);
+  assert.match(judgePolicy, /export const DEFAULT_JUDGE_BATCH_MAX = 4000;/);
+  assert.match(judgePolicy, /export const DEFAULT_JUDGE_CONCURRENCY = 8;/);
   assert.match(adminClient, /import \{ DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY \} from "@\/lib\/trae\/judge-policy";/);
   assert.equal(judgeActions.length, 3, "expected unjudged, changed, and low-confidence judge actions");
 });

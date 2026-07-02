@@ -39,6 +39,11 @@ export interface CallLLMWithFallbackOptions<TParsed = string> {
   plan?: LLMFallbackPlanEntry[];
 }
 
+interface LLMRateLimiterState {
+  nextStartAtMs: number;
+  queue: Promise<void>;
+}
+
 interface ChatCompletionRequestBody {
   model: string;
   messages: LLMMessage[];
@@ -57,12 +62,23 @@ export class LLMFallbackError extends Error {
   }
 }
 
+const sharedLLMRateLimiter: LLMRateLimiterState = {
+  nextStartAtMs: 0,
+  queue: Promise.resolve()
+};
+
 export function buildLLMFallbackPlan(config = getTraeConfig()): LLMFallbackPlanEntry[] {
   if (!config.aiZeroBudgetOnly) {
     throw new Error("AI_ZERO_BUDGET_ONLY must be true; paid AI providers are not supported.");
   }
 
   const providerConfigs: Record<AIProvider, Omit<LLMFallbackPlanEntry, "model"> & { models: string[] }> = {
+    friend: {
+      provider: "friend",
+      apiKey: config.friendApiKey,
+      baseUrl: config.friendBaseUrl,
+      models: [config.friendPrimaryModel, ...config.friendFallbackModels]
+    },
     nvidia: {
       provider: "nvidia",
       apiKey: config.nvidiaApiKey,
@@ -90,23 +106,25 @@ export function buildLLMFallbackPlan(config = getTraeConfig()): LLMFallbackPlanE
 
 /**
  * Vision-capable models only. Kept separate from the text fallback plan because most
- * NVIDIA text fallbacks (GLM 5.1, DeepSeek V4 Flash) are not verified vision models.
+ * text fallbacks (DeepSeek V4, GLM 5.1) are not verified vision models. Tries the
+ * friend endpoint first (same models, higher limits), then NVIDIA direct. Vision is
+ * best-effort, so a friend-endpoint miss simply falls through to NVIDIA / null.
  */
 export function buildVisionLLMFallbackPlan(config = getTraeConfig()): LLMFallbackPlanEntry[] {
+  const candidates: LLMFallbackPlanEntry[] = [
+    { provider: "friend", apiKey: config.friendApiKey, baseUrl: config.friendBaseUrl, model: config.friendImageModel },
+    { provider: "friend", apiKey: config.friendApiKey, baseUrl: config.friendBaseUrl, model: config.friendImageFallbackModel },
+    { provider: "nvidia", apiKey: config.nvidiaApiKey, baseUrl: config.nvidiaBaseUrl, model: config.nvidiaImageModel },
+    { provider: "nvidia", apiKey: config.nvidiaApiKey, baseUrl: config.nvidiaBaseUrl, model: config.nvidiaImageFallbackModel }
+  ];
   const seen = new Set<string>();
-  return [config.nvidiaImageModel, config.nvidiaImageFallbackModel]
-    .filter((model): model is string => Boolean(model))
-    .filter((model) => {
-      if (seen.has(model)) return false;
-      seen.add(model);
-      return true;
-    })
-    .map((model) => ({
-      provider: "nvidia" as const,
-      apiKey: config.nvidiaApiKey,
-      baseUrl: config.nvidiaBaseUrl,
-      model
-    }));
+  return candidates.filter((entry) => {
+    if (!entry.model) return false;
+    const key = `${entry.provider}:${entry.model}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export async function callLLMWithFallback<TParsed = string>({
@@ -140,6 +158,7 @@ export async function callLLMWithFallback<TParsed = string>({
     }
 
     for (let retryCount = 0; retryCount <= config.aiMaxRetriesPerModel; retryCount += 1) {
+      await waitForLLMRateLimit(config.aiRpmLimit, sleepFn);
       const attempt = await callOneModel({
         entry,
         messages,
@@ -176,6 +195,28 @@ export async function callLLMWithFallback<TParsed = string>({
   }
 
   throw new LLMFallbackError("All zero-budget LLM models failed.", callLogs);
+}
+
+async function waitForLLMRateLimit(
+  rpmLimit: number,
+  sleepFn: (delayMs: number) => Promise<void>,
+  state = sharedLLMRateLimiter
+): Promise<void> {
+  const intervalMs = 60_000 / Math.max(1, Math.floor(rpmLimit));
+  if (intervalMs <= 1) return;
+
+  const previousQueue = state.queue.catch(() => undefined);
+  const currentQueue = previousQueue.then(async () => {
+    const now = Date.now();
+    const waitMs = Math.max(0, state.nextStartAtMs - now);
+    if (waitMs > 0) {
+      await sleepFn(waitMs);
+    }
+    state.nextStartAtMs = Math.max(Date.now(), state.nextStartAtMs) + intervalMs;
+  });
+
+  state.queue = currentQueue.catch(() => undefined);
+  await currentQueue;
 }
 
 /**
