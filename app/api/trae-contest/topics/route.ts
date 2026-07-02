@@ -14,6 +14,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       track: searchParams.get("track"),
       q: searchParams.get("q"),
       sort: searchParams.get("sort"),
+      dir: searchParams.get("dir"),
       page: Number.isFinite(page) ? page : 1,
       pageSize: Number.isFinite(pageSize) ? pageSize : 12,
       minConfidence: minConfidenceRaw ? Number(minConfidenceRaw) : null,

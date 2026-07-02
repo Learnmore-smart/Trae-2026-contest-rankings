@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { extractTopicSignals, getContentHash } from "../lib/trae/extractors.ts";
+import { extractTopicSignals, getContentHash, isDeletedOrEmptyTopic } from "../lib/trae/extractors.ts";
 
 describe("extractTopicSignals", () => {
   it("extracts demo urls, images, session ids, track hints, and evidence", () => {
@@ -151,5 +151,26 @@ describe("extractTopicSignals", () => {
   it("generates stable content hashes", () => {
     assert.equal(getContentHash("A", "B"), getContentHash("A", "B"));
     assert.notEqual(getContentHash("A", "B"), getContentHash("A", "C"));
+  });
+});
+
+describe("isDeletedOrEmptyTopic", () => {
+  it("treats topics with no material signals as deleted or empty", () => {
+    assert.equal(
+      isDeletedOrEmptyTopic({
+        contentText: "   ",
+        demoUrl: null,
+        imageUrls: [],
+        sessionIds: []
+      }),
+      true
+    );
+  });
+
+  it("keeps sparse topics when any material signal remains", () => {
+    assert.equal(isDeletedOrEmptyTopic({ contentText: "Project summary", demoUrl: null, imageUrls: [], sessionIds: [] }), false);
+    assert.equal(isDeletedOrEmptyTopic({ contentText: "", demoUrl: "https://demo.example.test", imageUrls: [], sessionIds: [] }), false);
+    assert.equal(isDeletedOrEmptyTopic({ contentText: "", demoUrl: null, imageUrls: ["https://forum.example.test/a.png"], sessionIds: [] }), false);
+    assert.equal(isDeletedOrEmptyTopic({ contentText: "", demoUrl: null, imageUrls: [], sessionIds: ["s1"] }), false);
   });
 });

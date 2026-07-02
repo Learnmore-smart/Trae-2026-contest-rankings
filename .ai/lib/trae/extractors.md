@@ -35,6 +35,7 @@ Extracts normalized text, links, images, attachments, Demo URLs, Session IDs, tr
 ## Important Notes / NEVER Change
 
 - Do not sanitize by rendering raw HTML to clients; raw HTML is storage-only.
+- Deleted/empty topic detection must stay conservative: only hide a topic when it has no body text, no Demo URL, no images, and no Session IDs.
 
 ## Change History
 
@@ -45,3 +46,5 @@ Extracts normalized text, links, images, attachments, Demo URLs, Session IDs, tr
 | 2026-07-01 | Implemented long Trae conversation ID extraction and Demo-like URL evidence metadata. | Codex |
 | 2026-07-01 | Planned multi-shape Demo evidence and Discourse image-source extraction. | Codex |
 | 2026-07-01 | Implemented multi-shape Demo evidence (`web_url`, `download`, `qr_or_image`) and Discourse lightbox/lazy/srcset image extraction. | Codex |
+| 2026-07-02 | Planned deleted/empty topic predicate for board filtering and judge skipping. | Codex |
+| 2026-07-02 | Implemented `isDeletedOrEmptyTopic` with conservative material-signal checks. | Codex |

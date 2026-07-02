@@ -65,6 +65,8 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 
 - Keep the public disclaimer visible.
 - Do not clear existing ranking rows during background reloads unless a successful payload replaces them.
+- Ranking page size must default to 50 while allowing explicit user choices.
+- Ranking sort direction must be user-selectable and must reset pagination to page 1 when changed.
 
 ## Change History
 
@@ -84,6 +86,8 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 | 2026-07-02 | Implemented explicit text page-switch controls. | Codex |
 | 2026-07-02 | Implemented public user-submitted TRAE topic crawl form. | Codex |
 | 2026-07-02 | Implemented refresh-surviving submitted-topic crawl status polling. | Codex |
+| 2026-07-02 | Planned page-size and sort-direction controls for ranking. | Codex |
+| 2026-07-02 | Implemented page-size and sort-direction dropdowns with query-string wiring. | Codex |
 
 ## Change Plan: Public Run Starts Scoring Immediately
 

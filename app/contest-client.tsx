@@ -32,7 +32,8 @@ import { useContestTheme, type ContestTheme } from "./theme";
 import type { RankingItem, StatsPayload } from "@/lib/trae/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "/trae-contest-2026";
-const RANKING_PAGE_SIZE = 50;
+const DEFAULT_RANKING_PAGE_SIZE = 50;
+const RANKING_PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 
 const TRACKS = ["全部赛道", "生活娱乐", "学习工作", "社会服务", "硬件交互", "社会公益"];
 const SORTS = ["total", "innovation", "practicality", "completion", "design", "confidence", "views", "replies", "updated"] as const;
@@ -41,6 +42,7 @@ type Phase = "prelim" | "semi" | "final";
 type MainTab = "landing" | "ranking";
 type RunPhase = "idle" | "scrape" | "match" | "judge" | "done" | "error";
 type SortValue = (typeof SORTS)[number];
+type SortDirection = "desc" | "asc";
 type RingTone = "cyan" | "green" | "amber" | "violet" | "red";
 type ViewMode = "list" | "grid";
 
@@ -165,6 +167,10 @@ const COPY = {
     clearSearch: "清除搜索",
     track: "赛道",
     sort: "排序",
+    pageSize: "每页",
+    sortDirection: "顺序",
+    sortDesc: "高到低",
+    sortAsc: "低到高",
     totalResults: "个作品",
     previousPage: "上一页",
     nextPage: "下一页",
@@ -267,6 +273,10 @@ const COPY = {
     clearSearch: "Clear search",
     track: "Track",
     sort: "Sort",
+    pageSize: "Rows",
+    sortDirection: "Order",
+    sortDesc: "High to low",
+    sortAsc: "Low to high",
     totalResults: "projects",
     previousPage: "Previous page",
     nextPage: "Next page",
@@ -1113,7 +1123,9 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
   const [q, setQ] = useState("");
   const [track, setTrack] = useState("全部赛道");
   const [sort, setSort] = useState<SortValue>("total");
+  const [sortDir, setSortDir] = useState<SortDirection>("desc");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_RANKING_PAGE_SIZE);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1130,14 +1142,14 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
   const totalTokens = (stats?.totalInputTokens ?? 0) + (stats?.totalOutputTokens ?? 0);
   const progressTotal = stats?.preliminaryCount ?? 0;
   const progressDone = stats?.evaluatedCount ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / RANKING_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const queryString = useMemo(() => {
-    const params = new URLSearchParams({ page: String(page), pageSize: String(RANKING_PAGE_SIZE), sort });
+    const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), sort, dir: sortDir });
     if (q.trim()) params.set("q", q.trim());
     if (track !== "全部赛道") params.set("track", track);
     return params.toString();
-  }, [page, q, sort, track]);
+  }, [page, pageSize, q, sort, sortDir, track]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1201,6 +1213,11 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
 
   const trackOptions = TRACKS.map((item) => ({ value: item, label: TRACK_LABELS[item]?.[language] ?? item }));
   const sortOptions = SORTS.map((item) => ({ value: item, label: t.sortLabels[item] }));
+  const pageSizeOptions = RANKING_PAGE_SIZE_OPTIONS.map((value) => ({ value: String(value), label: `${fmtInteger(value, language)}` }));
+  const sortDirectionOptions = [
+    { value: "desc", label: t.sortDesc },
+    { value: "asc", label: t.sortAsc }
+  ];
   const runControl = <RunButton language={language} onCompleted={load} />;
   const themeIcon = theme === "dark" ? <Moon className="h-4 w-4" /> : theme === "light" ? <Sun className="h-4 w-4" /> : <Monitor className="h-4 w-4" />;
 
@@ -1389,6 +1406,26 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
                     onChange={(value) => {
                       setPage(1);
                       setSort(value as SortValue);
+                    }}
+                  />
+                  <Dropdown
+                    icon={<Rows3 className="h-4 w-4" />}
+                    label={t.pageSize}
+                    value={String(pageSize)}
+                    options={pageSizeOptions}
+                    onChange={(value) => {
+                      setPage(1);
+                      setPageSize(Number(value));
+                    }}
+                  />
+                  <Dropdown
+                    icon={<ArrowDownWideNarrow className="h-4 w-4" />}
+                    label={t.sortDirection}
+                    value={sortDir}
+                    options={sortDirectionOptions}
+                    onChange={(value) => {
+                      setPage(1);
+                      setSortDir(value as SortDirection);
                     }}
                   />
                   <ViewToggle value={viewMode} onChange={setViewMode} labels={{ list: t.viewListLabel, grid: t.viewGridLabel }} />

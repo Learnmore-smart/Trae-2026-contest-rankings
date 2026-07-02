@@ -65,6 +65,7 @@ Guards public contest routing and workflow safety invariants.
 ## Important Notes / NEVER Change
 
 - Keep this focused on route ownership and stable navigation intent, not decorative layout details.
+- Keep selectable page-size and sort-direction assertions source-level unless a browser harness is introduced.
 
 ## Bug Fixes
 
@@ -103,6 +104,8 @@ Guards public contest routing and workflow safety invariants.
 | 2026-07-02 | Implemented preliminary-only and refresh-surviving submit route guard. | Codex |
 | 2026-07-02 | Added duplicate-title server-side integration guard. | Codex |
 | 2026-07-02 | Updated fallback count expectation to use unique titles after server-side dedupe. | Codex |
+| 2026-07-02 | Planned deleted/empty suppression, selectable page size, and selectable sort direction guards. | Codex |
+| 2026-07-02 | Implemented deleted/empty suppression, selectable page size, and selectable sort direction guards. | Codex |
 
 ## Planned Change: Public Run Workflow Guard
 

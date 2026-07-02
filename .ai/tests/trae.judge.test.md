@@ -16,6 +16,7 @@ Verifies model JSON parsing, repair, Zod validation behavior, and evidence-aware
 - Tests that the consensus referee prompt's own evidence rules flip from "was not performed" to "WAS performed" when visual evidence is present.
 - Tests that no single-evaluator fast judge strategy remains in the judge/config/env surface.
 - Tests that default judge throughput policy matches the 40 rpm quota math: 8 topic teams and 4000 topics per run.
+- Tests that deleted/empty topics are filtered before judge mode selection.
 
 ## Dependencies
 
@@ -36,6 +37,8 @@ Verifies model JSON parsing, repair, Zod validation behavior, and evidence-aware
 | 2026-07-02 | Implemented fast default judge strategy regression coverage, then revised to consensus default per owner direction. | Codex |
 | 2026-07-02 | Added regression coverage that deletes `TRAE_JUDGE_STRATEGY`, `JudgeStrategy`, `judgeStrategy`, and `judgeOneTopicFast`. | Codex |
 | 2026-07-02 | Added throughput default assertions for 40 rpm overnight judging. | Codex |
+| 2026-07-02 | Planned deleted/empty judge candidate source guard. | Codex |
+| 2026-07-02 | Implemented deleted/empty judge candidate source guard. | Codex |
 
 ## Planned Change: Judge Concurrency Test
 

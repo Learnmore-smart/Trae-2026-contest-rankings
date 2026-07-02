@@ -39,6 +39,26 @@ export interface TopicSignals {
   links: string[];
 }
 
+/**
+ * A topic with no body text, no demo link, no images, and no session IDs has nothing
+ * to grade or show. This is exactly how a forum post the author later deleted comes
+ * back on a re-scrape (empty/removed first post), so we treat it as deleted: hide it
+ * from the board and skip judging it, instead of rendering an "author deleted this
+ * post" 0-score card. Conservative on purpose — a post with any one of these stays.
+ */
+export function isDeletedOrEmptyTopic(topic: {
+  contentText?: string | null;
+  demoUrl?: string | null;
+  imageUrls?: unknown;
+  sessionIds?: unknown;
+}): boolean {
+  const content = typeof topic.contentText === "string" ? topic.contentText.trim() : "";
+  const demo = typeof topic.demoUrl === "string" ? topic.demoUrl.trim() : "";
+  const images = Array.isArray(topic.imageUrls) ? topic.imageUrls : [];
+  const sessions = Array.isArray(topic.sessionIds) ? topic.sessionIds : [];
+  return content.length === 0 && demo.length === 0 && images.length === 0 && sessions.length === 0;
+}
+
 export function getContentHash(...parts: Array<string | null | undefined>): string {
   return createHash("sha256")
     .update(parts.filter(Boolean).join("\n\n"))

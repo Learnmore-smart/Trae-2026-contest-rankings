@@ -317,4 +317,14 @@ describe("judge strategy surface", () => {
     assert.doesNotMatch(configSource, /TRAE_JUDGE_STRATEGY|JudgeStrategy|judgeStrategy/);
     assert.doesNotMatch(envExample, /TRAE_JUDGE_STRATEGY/);
   });
+
+  it("filters deleted or empty topics before judge mode selection", () => {
+    const judgeSource = readFileSync("lib/trae/judge.ts", "utf8");
+
+    assert.match(judgeSource, /import \{ isDeletedOrEmptyTopic \} from "\.\/extractors\.ts";/);
+    assert.match(
+      judgeSource,
+      /dedupeByTopicTitle\(mapped\)[\s\S]*?\.filter\(\(\{ topic \}\) => !isDeletedOrEmptyTopic\(topic\)\)[\s\S]*?\.filter\(\(\{ topic, latestEvaluation \}\) => shouldJudgeTopicForMode/
+    );
+  });
 });

@@ -5,6 +5,7 @@ import { callLLMWithFallback, LLMFallbackError } from "./llm.ts";
 import { finishRun, startRun } from "./runs.ts";
 import { gatherVisualEvidence, type TopicVisualEvidence } from "./vision.ts";
 import { dedupeByTopicTitle } from "./dedupe.ts";
+import { isDeletedOrEmptyTopic } from "./extractors.ts";
 import {
   getBoardData as getBoardDataQuery,
   getBoardPage as getBoardPageQuery,
@@ -784,6 +785,8 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
     });
 
     const topics = dedupeByTopicTitle(mapped)
+      // Never spend LLM calls on deleted/empty posts (no content, demo, images, or session IDs).
+      .filter(({ topic }) => !isDeletedOrEmptyTopic(topic))
       .filter(({ topic, latestEvaluation }) => shouldJudgeTopicForMode(topic, latestEvaluation, mode))
       .slice(0, max);
 

@@ -13,6 +13,7 @@ import {
   listRuns as listRunsQuery
 } from "@trae-contest/dataconnect-generated";
 import { dedupeByTopicTitle } from "./dedupe.ts";
+import { isDeletedOrEmptyTopic } from "./extractors.ts";
 import type {
   RankingItem,
   StatsPayload,
@@ -26,6 +27,8 @@ export interface TopicListParams {
   track?: string | null;
   q?: string | null;
   sort?: string | null;
+  /** Display order for the chosen sort. "desc" (default) = best first; "asc" flips the list. Ranks stay true positions either way. */
+  dir?: string | null;
   page?: number;
   pageSize?: number;
   minConfidence?: number | null;
@@ -301,7 +304,11 @@ async function buildBoardDataFromSource(): Promise<BoardData> {
     }
   }
 
-  const sourceTopics = dbFailed ? preliminaryCacheTopics(allTopics) : topTopics;
+  // Hide deleted/empty posts (author removed the post -> re-scrape returns no content):
+  // they should not appear on the board at all, graded or not.
+  const sourceTopics = (dbFailed ? preliminaryCacheTopics(allTopics) : topTopics).filter(
+    (topic) => !isDeletedOrEmptyTopic(topic)
+  );
   const stats = dbFailed ? statsPayloadFromCacheTopics(allTopics, 1) : statsPayloadFromResponse(statsRes, onlineCount);
   const baseItems: RankingItem[] = sourceTopics.map((topic) => rankingItemFromRecord(topic));
 
@@ -386,6 +393,7 @@ export async function listRankedTopics(params: TopicListParams = {}): Promise<{
   const pageSize = Math.min(1000, Math.max(1, params.pageSize ?? 12));
   const page = Math.max(1, params.page ?? 1);
   const sort = params.sort ?? "total";
+  const dir = params.dir === "asc" ? "asc" : "desc";
   const query = params.q?.trim().toLowerCase() ?? "";
 
   let items: RankingItem[];
@@ -414,7 +422,10 @@ export async function listRankedTopics(params: TopicListParams = {}): Promise<{
     return Number(b) - Number(a);
   });
   items = dedupeByTopicTitle(items);
+  // Assign the true rank in canonical best-first order first, then (for "asc") reverse only
+  // the display order — so rank always means leaderboard position, not row number.
   items = items.map((item, index) => ({ ...item, rank: index + 1 }));
+  if (dir === "asc") items.reverse();
 
   const total = items.length;
   return {

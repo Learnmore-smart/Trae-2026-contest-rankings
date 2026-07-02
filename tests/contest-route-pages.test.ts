@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import test from "node:test";
 
 import { dedupeByTopicTitle } from "../lib/trae/dedupe.ts";
+import { isDeletedOrEmptyTopic } from "../lib/trae/extractors.ts";
 
 const appDir = join(process.cwd(), "app");
 const landingPagePath = join(appDir, "page.tsx");
@@ -12,6 +13,7 @@ const rankingPagePath = join(appDir, "ranking/page.tsx");
 const clientPath = join(appDir, "contest-client.tsx");
 const projectDetailClientPath = join(appDir, "project/project-detail-client.tsx");
 const nextConfigPath = join(process.cwd(), "next.config.mjs");
+const topicsRoutePath = join(process.cwd(), "app/api/trae-contest/topics/route.ts");
 const runRoutePath = join(process.cwd(), "app/api/trae-contest/run/route.ts");
 const submitRoutePath = join(process.cwd(), "app/api/trae-contest/submit/route.ts");
 const judgePolicyPath = join(process.cwd(), "lib/trae/judge-policy.ts");
@@ -104,12 +106,28 @@ test("data connect nested topic reads stay below deadline-prone size", () => {
 test("public ranking uses bounded server pages instead of a 1000-row client page", () => {
   const client = read(clientPath);
 
-  assert.match(client, /const RANKING_PAGE_SIZE = 50;/);
+  assert.match(client, /const DEFAULT_RANKING_PAGE_SIZE = 50;/);
   assert.match(client, /const \[page, setPage\] = useState\(1\);/);
-  assert.match(client, /new URLSearchParams\(\{ page: String\(page\), pageSize: String\(RANKING_PAGE_SIZE\), sort \}\)/);
+  assert.match(client, /const \[pageSize, setPageSize\] = useState\(DEFAULT_RANKING_PAGE_SIZE\);/);
+  assert.match(client, /new URLSearchParams\(\{ page: String\(page\), pageSize: String\(pageSize\), sort, dir: sortDir \}\)/);
   assert.doesNotMatch(client, /pageSize: "1000"/);
   assert.match(client, /aria-label=\{t\.previousPage\}/);
   assert.match(client, /aria-label=\{t\.nextPage\}/);
+});
+
+test("public ranking exposes selectable page size and sort direction", () => {
+  const client = read(clientPath);
+  const route = read(topicsRoutePath);
+
+  assert.match(client, /const RANKING_PAGE_SIZE_OPTIONS = \[25, 50, 100, 200\] as const;/);
+  assert.match(client, /type SortDirection = "desc" \| "asc";/);
+  assert.match(client, /const \[sortDir, setSortDir\] = useState<SortDirection>\("desc"\);/);
+  assert.match(client, /const pageSizeOptions = RANKING_PAGE_SIZE_OPTIONS\.map\(\(value\) => \(\{ value: String\(value\), label: `\$\{fmtInteger\(value, language\)\}` \}\)\);/);
+  assert.match(client, /label=\{t\.pageSize\}/);
+  assert.match(client, /label=\{t\.sortDirection\}/);
+  assert.match(client, /onChange=\{\(value\) => \{\s*setPage\(1\);\s*setPageSize\(Number\(value\)\);\s*\}\}/);
+  assert.match(client, /onChange=\{\(value\) => \{\s*setPage\(1\);\s*setSortDir\(value as SortDirection\);\s*\}\}/);
+  assert.match(route, /dir: searchParams\.get\("dir"\),/);
 });
 
 test("public ranking page switch is visible text, not icon-only", () => {
@@ -154,9 +172,20 @@ test("ranking and judge candidates filter duplicate topic titles server-side", (
   const judge = read(judgePath);
 
   assert.match(traeApi, /import \{ dedupeByTopicTitle \} from "\.\/dedupe\.ts";/);
-  assert.match(traeApi, /items = dedupeByTopicTitle\(items\);\s*items = items\.map/);
+  assert.match(traeApi, /items = dedupeByTopicTitle\(items\);[\s\S]*?items = items\.map/);
   assert.match(judge, /import \{ dedupeByTopicTitle \} from "\.\/dedupe\.ts";/);
-  assert.match(judge, /const topics = dedupeByTopicTitle\(mapped\)\s*\.filter/);
+  assert.match(judge, /const topics = dedupeByTopicTitle\(mapped\)[\s\S]*?\.filter/);
+});
+
+test("deleted or empty topics are hidden from ranking and skipped by judge", () => {
+  const traeApi = read(traeApiPath);
+  const judge = read(judgePath);
+
+  assert.match(traeApi, /import \{ isDeletedOrEmptyTopic \} from "\.\/extractors\.ts";/);
+  assert.match(traeApi, /const sourceTopics = \(dbFailed \? preliminaryCacheTopics\(allTopics\) : topTopics\)\.filter\(/);
+  assert.match(traeApi, /!isDeletedOrEmptyTopic\(topic\)/);
+  assert.match(judge, /import \{ isDeletedOrEmptyTopic \} from "\.\/extractors\.ts";/);
+  assert.match(judge, /dedupeByTopicTitle\(mapped\)[\s\S]*?\.filter\(\(\{ topic \}\) => !isDeletedOrEmptyTopic\(topic\)\)/);
 });
 
 test("stats load path is independent from ranking topic list", () => {
@@ -205,11 +234,16 @@ test("ranking fallback rows are preliminary-only and use official track labels",
   type CachedTopic = {
     sourceType?: string;
     title?: string;
+    contentText?: string | null;
+    demoUrl?: string | null;
+    imageUrls?: unknown;
+    sessionIds?: unknown;
   };
   const cachedTopics = JSON.parse(read(topicsCachePath)) as CachedTopic[];
   const expectedPreliminaryCount = dedupeByTopicTitle(
     cachedTopics
       .filter((topic) => topic.sourceType === "PRELIMINARY")
+      .filter((topic) => !isDeletedOrEmptyTopic(topic))
       .map((topic) => ({ topic: { title: topic.title ?? "" } }))
   ).length;
   const envKeys = [
@@ -290,7 +324,8 @@ test("ranking stats fall back to local cache when Data Connect is unconfigured",
 test("live board data uses Data Connect topics instead of bundled cache as base", () => {
   const traeApi = read(traeApiPath);
 
-  assert.match(traeApi, /const sourceTopics = dbFailed \? preliminaryCacheTopics\(allTopics\) : topTopics;/);
+  assert.match(traeApi, /const sourceTopics = \(dbFailed \? preliminaryCacheTopics\(allTopics\) : topTopics\)\.filter\(/);
+  assert.match(traeApi, /!isDeletedOrEmptyTopic\(topic\)/);
   assert.doesNotMatch(
     traeApi,
     /if \(dbFailed\) \{[\s\S]*?return \{ stats, baseItems \};[\s\S]*?const baseItems: RankingItem\[\] = allTopics\.map/

@@ -77,6 +77,8 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 
 - Public APIs must not return `rawHtml` or unrestricted raw model internals.
 - Do not reintroduce one huge nested board query for all topics; use bounded page chunks.
+- Board data must filter deleted/empty preliminary topics before public ranking rows are built.
+- Sort direction changes display order only; rank numbers must remain canonical best-first leaderboard positions.
 
 ## Change History
 
@@ -99,3 +101,5 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 | 2026-07-02 | Implemented `GetBoardPage` missing-operation fallback to `GetBoardData`. | Codex |
 | 2026-07-02 | Planned normalized-title dedupe for public ranking rows. | Codex |
 | 2026-07-02 | Implemented public ranking dedupe after sorting and before rank pagination. | Codex |
+| 2026-07-02 | Planned deleted/empty board filtering and selectable display sort direction. | Codex |
+| 2026-07-02 | Implemented deleted/empty board filtering and `dir=asc|desc` display ordering. | Codex |

@@ -65,6 +65,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - Signup topics must never be judged.
 - All LLM scoring calls must go through `callLLMWithFallback()`.
 - If all free models fail, keep the topic in `judge_error` for a later scheduled retry; never switch to a paid API.
+- Deleted/empty preliminary topics must not consume evaluator or consensus LLM calls.
 
 ## Change History
 
@@ -99,6 +100,8 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | 2026-07-02 | Implemented `GetBoardPage` missing-operation fallback to legacy `GetBoardData` for judge candidate reads. | Codex |
 | 2026-07-02 | Planned normalized-title dedupe for judge candidate selection. | Codex |
 | 2026-07-02 | Implemented judge candidate dedupe before mode filtering and run slicing. | Codex |
+| 2026-07-02 | Planned skip logic for deleted/empty judge candidates. | Codex |
+| 2026-07-02 | Implemented deleted/empty judge candidate filtering before mode selection. | Codex |
 
 ## Change Plan: Consensus Only With Parallel Evaluator Teams
 

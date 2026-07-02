@@ -48,6 +48,7 @@ Documents the route handlers created for public, admin, and cron TRAE APIs.
 - Admin and cron APIs must reject missing or invalid tokens.
 - Dev APIs must reject non-local hosts and forwarded public traffic.
 - Public APIs must not return raw HTML or secrets.
+- `GET /api/trae-contest/topics` passes through `dir` to support selectable high-to-low or low-to-high ranking display order.
 
 ## Change History
 
@@ -60,3 +61,5 @@ Documents the route handlers created for public, admin, and cron TRAE APIs.
 | 2026-07-02 | Planned public single-topic submit route. | Codex |
 | 2026-07-02 | Implemented public single-topic submit route. | Codex |
 | 2026-07-02 | Implemented refresh-safe submitted-topic crawl status and preliminary-only validation. | Codex |
+| 2026-07-02 | Planned topics `dir` query passthrough for selectable rank display order. | Codex |
+| 2026-07-02 | Implemented topics `dir` query passthrough. | Codex |
