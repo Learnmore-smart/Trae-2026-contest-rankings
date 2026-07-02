@@ -5,10 +5,11 @@ import { callLLMWithFallback, LLMFallbackError } from "./llm.ts";
 import { finishRun, startRun } from "./runs.ts";
 import { gatherVisualEvidence, type TopicVisualEvidence } from "./vision.ts";
 import {
-  getBoardData,
+  getBoardPage as getBoardPageQuery,
   upsertEvaluation,
   updateTopicEvaluationState,
   upsertModelTokenUsage,
+  type GetBoardPageData,
   type UpsertEvaluationVariables
 } from "@trae-contest/dataconnect-generated";
 import {
@@ -22,6 +23,7 @@ import {
 } from "./types.ts";
 
 export const PROMPT_VERSION = "trae-contest-2026-v4-official-screenshot-evidence";
+const JUDGE_BOARD_PAGE_SIZE = 1000;
 
 export type JudgeEvaluatorId = "product" | "technical" | "ux" | "risk";
 
@@ -489,9 +491,12 @@ function buildRawModelResponse(
   );
 }
 
-export async function judgeOneTopic(topic: TraeTopic, match: TraeMatch | null): Promise<TraeEvaluation> {
-  const config = getTraeConfig();
-  const visualEvidence = await gatherVisualEvidence(topic, { config });
+async function judgeOneTopicConsensus(
+  topic: TraeTopic,
+  match: TraeMatch | null,
+  config: ReturnType<typeof getTraeConfig>,
+  visualEvidence: TopicVisualEvidence | null
+): Promise<TraeEvaluation> {
   const evaluatorRuns = await runEvaluatorTeam(topic, match, config, visualEvidence);
   const consensusPrompt = buildConsensusJudgePrompt(topic, match, evaluatorRuns, visualEvidence);
   let result: Awaited<ReturnType<typeof callLLMWithFallback<EvaluationOutput>>>;
@@ -538,6 +543,12 @@ export async function judgeOneTopic(topic: TraeTopic, match: TraeMatch | null): 
     error: null,
     createdAt
   };
+}
+
+export async function judgeOneTopic(topic: TraeTopic, match: TraeMatch | null): Promise<TraeEvaluation> {
+  const config = getTraeConfig();
+  const visualEvidence = await gatherVisualEvidence(topic, { config });
+  return judgeOneTopicConsensus(topic, match, config, visualEvidence);
 }
 
 const providerMap = {
@@ -669,18 +680,41 @@ function normalizeJudgeConcurrency(value: number | undefined, max: number): numb
   return Math.min(safeMax, Math.max(1, parsed));
 }
 
+async function fetchJudgeBoardPage(dc: unknown, offset: number): Promise<GetBoardPageData["topics"]> {
+  const res = await getBoardPageQuery(dc as any, { limit: JUDGE_BOARD_PAGE_SIZE, offset } as any);
+  return res.data.topics ?? [];
+}
+
+async function fetchJudgeBoardPages(dc: unknown): Promise<GetBoardPageData["topics"]> {
+  const pages: Array<GetBoardPageData["topics"]> = [];
+
+  for (let offset = 0; ; offset += JUDGE_BOARD_PAGE_SIZE) {
+    const page = await fetchJudgeBoardPage(dc, offset);
+    pages.push(page);
+    if (page.length < JUDGE_BOARD_PAGE_SIZE) break;
+  }
+
+  return pages.flat();
+}
+
 export function shouldJudgeTopicForMode(
   topic: TraeTopic,
   latestEvaluation: TraeEvaluation | undefined,
   mode: JudgeMode
 ): boolean {
   if (mode === "low-confidence") return Boolean(latestEvaluation && latestEvaluation.confidenceScore < 55);
-  if (mode === "changed") return topic.status === "needs_judging" || topic.status === "judge_error";
+  if (mode === "changed") {
+    return (
+      topic.status === "needs_judging" ||
+      topic.status === "judge_error" ||
+      !latestEvaluation ||
+      latestEvaluation.promptVersion !== PROMPT_VERSION
+    );
+  }
   return (
     topic.status === "needs_judging" ||
     topic.status === "judge_error" ||
-    !latestEvaluation ||
-    latestEvaluation.promptVersion !== PROMPT_VERSION
+    !latestEvaluation
   );
 }
 
@@ -695,8 +729,7 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
   let failedCount = 0;
 
   try {
-    const boardRes = await getBoardData(dc as any);
-    const rawTopics = boardRes.data.topics ?? [];
+    const rawTopics = await fetchJudgeBoardPages(dc);
 
     const mapped = rawTopics.map((t) => {
       const latestEval = t.evaluations_on_topic?.[0];

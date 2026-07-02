@@ -8,6 +8,8 @@ import {
   ArrowDownWideNarrow,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Crown,
   ExternalLink,
   Globe,
@@ -30,6 +32,7 @@ import { useContestTheme, type ContestTheme } from "./theme";
 import type { RankingItem, StatsPayload } from "@/lib/trae/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "/trae-contest-2026";
+const RANKING_PAGE_SIZE = 50;
 
 const TRACKS = ["全部赛道", "生活娱乐", "学习工作", "社会服务", "硬件交互", "社会公益"];
 const SORTS = ["total", "innovation", "practicality", "completion", "design", "confidence", "views", "replies", "updated"] as const;
@@ -151,6 +154,9 @@ const COPY = {
     track: "赛道",
     sort: "排序",
     totalResults: "个作品",
+    previousPage: "上一页",
+    nextPage: "下一页",
+    pageLabel: "页",
     emptyTitle: "榜单正在候场",
     emptyBody: "公开帖抓取成功后，初赛作品会出现在这里；评分完成后会显示名次和详情。",
     lockedSemi: "复赛暂未开放",
@@ -241,6 +247,9 @@ const COPY = {
     track: "Track",
     sort: "Sort",
     totalResults: "projects",
+    previousPage: "Previous page",
+    nextPage: "Next page",
+    pageLabel: "Page",
     emptyTitle: "Ranking is waiting",
     emptyBody: "Once public posts are collected, preliminary projects will appear here; after scoring, ranks and detail pages will be available.",
     lockedSemi: "Semifinal is not open yet",
@@ -928,6 +937,7 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
   const [q, setQ] = useState("");
   const [track, setTrack] = useState("全部赛道");
   const [sort, setSort] = useState<SortValue>("total");
+  const [page, setPage] = useState(1);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -944,13 +954,14 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
   const totalTokens = (stats?.totalInputTokens ?? 0) + (stats?.totalOutputTokens ?? 0);
   const progressTotal = stats?.preliminaryCount ?? 0;
   const progressDone = stats?.evaluatedCount ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / RANKING_PAGE_SIZE));
 
   const queryString = useMemo(() => {
-    const params = new URLSearchParams({ page: "1", pageSize: "1000", sort });
+    const params = new URLSearchParams({ page: String(page), pageSize: String(RANKING_PAGE_SIZE), sort });
     if (q.trim()) params.set("q", q.trim());
     if (track !== "全部赛道") params.set("track", track);
     return params.toString();
-  }, [q, sort, track]);
+  }, [page, q, sort, track]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -982,6 +993,10 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   useEffect(() => {
     const key = "trae-contest-session-id";
@@ -1158,18 +1173,47 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
                     <Search className="h-4 w-4 text-cyan-300" />
                     <input
                       value={q}
-                      onChange={(event) => setQ(event.target.value)}
+                      onChange={(event) => {
+                        setPage(1);
+                        setQ(event.target.value);
+                      }}
                       placeholder={t.search}
                       className="w-full bg-transparent text-white outline-none placeholder:text-slate-500"
                     />
                     {q ? (
-                      <button type="button" onClick={() => setQ("")} aria-label={t.clearSearch} className="text-slate-500 transition hover:text-white">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPage(1);
+                          setQ("");
+                        }}
+                        aria-label={t.clearSearch}
+                        className="text-slate-500 transition hover:text-white"
+                      >
                         <X className="h-4 w-4" />
                       </button>
                     ) : null}
                   </label>
-                  <Dropdown icon={<Tag className="h-4 w-4" />} label={t.track} value={track} options={trackOptions} onChange={setTrack} />
-                  <Dropdown icon={<ArrowDownWideNarrow className="h-4 w-4" />} label={t.sort} value={sort} options={sortOptions} onChange={(value) => setSort(value as SortValue)} />
+                  <Dropdown
+                    icon={<Tag className="h-4 w-4" />}
+                    label={t.track}
+                    value={track}
+                    options={trackOptions}
+                    onChange={(value) => {
+                      setPage(1);
+                      setTrack(value);
+                    }}
+                  />
+                  <Dropdown
+                    icon={<ArrowDownWideNarrow className="h-4 w-4" />}
+                    label={t.sort}
+                    value={sort}
+                    options={sortOptions}
+                    onChange={(value) => {
+                      setPage(1);
+                      setSort(value as SortValue);
+                    }}
+                  />
                   <ViewToggle value={viewMode} onChange={setViewMode} labels={{ list: t.viewListLabel, grid: t.viewGridLabel }} />
                 </section>
 
@@ -1177,6 +1221,27 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
                   <div className="ranking-inline-meta__stats">
                     <span>{fmtInteger(total, language)} {t.totalResults}</span>
                     <span>{t.scoredProgress} {fmtInteger(progressDone, language)}/{fmtInteger(progressTotal, language)}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs font-black uppercase text-slate-400">
+                    <button
+                      type="button"
+                      aria-label={t.previousPage}
+                      disabled={page <= 1 || loading}
+                      onClick={() => setPage((current) => Math.max(1, current - 1))}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-slate-200 transition hover:border-cyan-300/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <span aria-live="polite">{t.pageLabel} {fmtInteger(page, language)}/{fmtInteger(totalPages, language)}</span>
+                    <button
+                      type="button"
+                      aria-label={t.nextPage}
+                      disabled={page >= totalPages || loading}
+                      onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-slate-200 transition hover:border-cyan-300/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
 

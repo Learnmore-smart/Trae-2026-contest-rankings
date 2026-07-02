@@ -63,3 +63,4 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 - 2026-07-01 Codex: Replace route-local `12 / 3` constants with shared `DEFAULT_JUDGE_BATCH_MAX = 24` and `DEFAULT_JUDGE_CONCURRENCY = 6` from `lib/trae/judge-policy.ts`.
 - Keep the public behavior the same: judge existing backlog immediately, scrape/match concurrently, then judge newly matched backlog.
 - Implemented by importing the shared constants and passing them into `judgeChangedTraeTopics()`.
+- 2026-07-01 Codex: With shared defaults raised to `100 / 20`, public run should still use `mode: "unjudged"` so it advances the public scored count before optional stale-score rejudges.

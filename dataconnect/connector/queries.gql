@@ -102,6 +102,95 @@ query GetBoardData @auth(level: PUBLIC, insecureReason: "Leaderboard is public."
   }
 }
 
+# Paged version of the public board query. Each call stays bounded, while the
+# server can assemble the full contest board by walking offsets.
+query GetBoardPage($limit: Int!, $offset: Int!) @auth(level: PUBLIC, insecureReason: "Leaderboard is public.") {
+  topics(
+    where: { sourceType: { eq: PRELIMINARY } }
+    orderBy: [{ totalScore: DESC }]
+    limit: $limit
+    offset: $offset
+  ) {
+    id
+    sourceType
+    externalTopicId
+    slug
+    title
+    url
+    authorName
+    authorAvatarUrl
+    track
+    tags
+    replyCount
+    viewCount
+    likeCount
+    createdAtExternal
+    lastActivityAtExternal
+    scrapedAt
+    updatedAt
+    contentText
+    excerpt
+    demoUrl
+    attachmentUrls
+    imageUrls
+    sessionIds
+    traeEvidence
+    contentHash
+    status
+    totalScore
+    innovationScore
+    practicalityScore
+    completionScore
+    designScore
+    complianceRiskScore
+    directionConsistencyScore
+    confidenceScore
+    competitionLevel
+    evaluatedAt
+    evaluations_on_topic(orderBy: [{ createdAt: DESC }], limit: 1) {
+      id
+      provider
+      model
+      promptVersion
+      totalScore
+      innovationScore
+      practicalityScore
+      completionScore
+      designScore
+      complianceRiskScore
+      directionConsistencyScore
+      confidenceScore
+      competitionLevel
+      summary
+      strengths
+      weaknesses
+      suggestions
+      complianceRisks
+      dimensionComments
+      matchComment
+      inputTokens
+      outputTokens
+      error
+      createdAt
+    }
+    match_on_preliminaryTopic {
+      id
+      preliminaryTopicId
+      signupTopicId
+      preliminaryAuthorName
+      signupAuthorName
+      matchMethod
+      matchConfidence
+      titleSimilarity
+      directionConsistencyScore
+      directionConsistencyComment
+      mismatchRisk
+      createdAt
+      updatedAt
+    }
+  }
+}
+
 # ─── Topic detail ─────────────────────────────────────────────────────────────
 # Full topic page: topic + latest evaluation (unlike board, includes prompt and
 # raw model response so the UI can show "模型输入/输出") + match.

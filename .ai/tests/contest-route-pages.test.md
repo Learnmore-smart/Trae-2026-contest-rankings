@@ -49,6 +49,8 @@ Guards public contest routing and workflow safety invariants.
 - 2026-06-30 Codex: Add a runtime regression guard for stats fallback so the ranking header cannot show `0/0` while cached rows are visible.
 - 2026-06-30 Codex: Add regression guards for official-track normalization and for avoiding the 424-row bundled snapshot as the live ranking base when Data Connect succeeds.
 - 2026-06-30 Codex: Implemented the official-track fallback test, preliminary-only fallback stats assertion, and static live-board-source guard.
+- 2026-07-01 Codex: Add pagination guards that fail if the client requests `pageSize=1000` again or if the Data Connect board read has no paged operation.
+- 2026-07-01 Codex: Implemented pagination guards for client page size, previous/next controls, `GetBoardPage`, and `fetchBoardPages()`.
 
 ## Important Notes / NEVER Change
 
@@ -82,6 +84,8 @@ Guards public contest routing and workflow safety invariants.
 | 2026-06-30 | Implemented official-track and live-board-source regression guards. | Codex |
 | 2026-07-01 | Planned detail-page basePath, error contrast, and AI I/O audit guards. | Codex |
 | 2026-07-01 | Implemented detail-page basePath, error contrast, AI I/O, ranking error contrast, and pipeline error-detail guards. | Codex |
+| 2026-07-01 | Planned public ranking pagination regression guards. | Codex |
+| 2026-07-01 | Implemented public ranking pagination regression guards. | Codex |
 
 ## Planned Change: Public Run Workflow Guard
 
@@ -95,6 +99,9 @@ Guards public contest routing and workflow safety invariants.
 - Add a static guard for `lib/trae/judge-policy.ts` values `24` and `6`.
 - Implemented in the public run workflow source-level test.
 - 2026-07-01 Codex: Update the guard to expect `48 / 8`.
+- 2026-07-01 Codex: Update the guard to expect `100 / 20`, and add a source guard that the judge worker also uses paged board reads rather than first-1000 `GetBoardData`.
+- 2026-07-02 Codex: Update the guard to expect `100 / 100` so public runs can start 100 consensus evaluator teams concurrently.
+- Implemented the `100 / 100` public route policy guard.
 
 ## Bug Fix Plan: Detail Page Must Work Under Base Path
 

@@ -27,6 +27,8 @@ Defines Firebase Data Connect read queries for public leaderboard data and pipel
 ## Agent Decisions / Thoughts
 
 - 2026-06-30 Codex: The project scale is now expected to reach about 3000 preliminary topics. Hard-coded `limit: 1000` in board/pipeline queries is no longer valid for matching or judging coverage.
+- 2026-07-01 Codex: Keep each nested board read bounded at or below 1000 rows, but add a generated `GetBoardPage(limit, offset)` operation so server code can assemble the full board in chunks instead of relying on a single capped query.
+- 2026-07-01 Codex: Implemented `GetBoardPage($limit, $offset)` with the same light board fields as `GetBoardData`.
 
 ## Bug Fix Plan: Remove 1000-Row Workflow Truncation
 
@@ -61,3 +63,5 @@ Defines Firebase Data Connect read queries for public leaderboard data and pipel
 | 2026-06-30 | Created query documentation and planned truncation fix. | Codex |
 | 2026-06-30 | Planned deadline fix to revert wide nested query limits. | Codex |
 | 2026-06-30 | Reverted deadline-prone 5000-row nested query limits to 1000. | Codex |
+| 2026-07-01 | Planned paged board query for full public leaderboard pagination. | Codex |
+| 2026-07-01 | Added paged board query for chunked public leaderboard reads. | Codex |

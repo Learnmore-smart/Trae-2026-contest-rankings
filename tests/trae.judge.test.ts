@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   buildConsensusJudgePrompt,
@@ -209,8 +210,9 @@ describe("multi-evaluator judging", () => {
     assert.match(prompt, /finished Demo\/product interface screenshot/i);
   });
 
-  it("queues stale prompt-version evaluations for automatic rejudge", () => {
+  it("keeps default judging focused on unscored rows before stale rejudges", () => {
     const judgedTopic = { ...topic, status: "judged" as const };
+    const unscoredTopic = { ...topic, status: "judged" as const, id: "topic-unscored" };
     const currentEvaluation = {
       ...validPayload,
       id: "eval-current",
@@ -229,7 +231,9 @@ describe("multi-evaluator judging", () => {
       promptVersion: "trae-contest-2026-v3-visual-evidence"
     } satisfies TraeEvaluation;
 
-    assert.equal(shouldJudgeTopicForMode(judgedTopic, staleEvaluation, "unjudged"), true);
+    assert.equal(shouldJudgeTopicForMode(unscoredTopic, undefined, "unjudged"), true);
+    assert.equal(shouldJudgeTopicForMode(judgedTopic, staleEvaluation, "unjudged"), false);
+    assert.equal(shouldJudgeTopicForMode(judgedTopic, staleEvaluation, "changed"), true);
     assert.equal(shouldJudgeTopicForMode(judgedTopic, currentEvaluation, "unjudged"), false);
   });
 
@@ -293,5 +297,18 @@ describe("judge topic concurrency", () => {
 
     assert.equal(peak, 3);
     assert.deepEqual([...completed].sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7]);
+  });
+});
+
+describe("judge strategy surface", () => {
+  it("does not expose a single-evaluator fast judge path or env switch", () => {
+    const judgeSource = readFileSync("lib/trae/judge.ts", "utf8");
+    const configSource = readFileSync("lib/trae/config.ts", "utf8");
+    const envExample = readFileSync(".env.example", "utf8");
+
+    assert.doesNotMatch(judgeSource, /judgeOneTopicFast|FAST SINGLE-EVALUATOR RUN|strategy:\s*"fast"/);
+    assert.doesNotMatch(judgeSource, /JudgeStrategy|judgeStrategy/);
+    assert.doesNotMatch(configSource, /TRAE_JUDGE_STRATEGY|JudgeStrategy|judgeStrategy/);
+    assert.doesNotMatch(envExample, /TRAE_JUDGE_STRATEGY/);
   });
 });

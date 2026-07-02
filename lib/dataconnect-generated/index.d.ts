@@ -158,6 +158,15 @@ export interface GetBoardDataData {
   } & Topic_Key)[];
 }
 
+export interface GetBoardPageData {
+  topics: GetBoardDataData["topics"];
+}
+
+export interface GetBoardPageVariables {
+  limit: number;
+  offset: number;
+}
+
 export interface GetLatestRunData {
   runs: ({
     id: string;
@@ -760,6 +769,11 @@ export function getBoardData(dc: DataConnect, options?: OperationOptions): Promi
 /** Generated Node Admin SDK operation action function for the 'GetBoardData' Query. Allow users to pass in custom DataConnect instances. */
 export function getBoardData(options?: OperationOptions): Promise<ExecuteOperationResponse<GetBoardDataData>>;
 
+/** Generated Node Admin SDK operation action function for the 'GetBoardPage' Query. Allow users to execute without passing in DataConnect. */
+export function getBoardPage(dc: DataConnect, vars: GetBoardPageVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetBoardPageData>>;
+/** Generated Node Admin SDK operation action function for the 'GetBoardPage' Query. Allow users to pass in custom DataConnect instances. */
+export function getBoardPage(vars: GetBoardPageVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetBoardPageData>>;
+
 /** Generated Node Admin SDK operation action function for the 'GetTopicDetail' Query. Allow users to execute without passing in DataConnect. */
 export function getTopicDetail(dc: DataConnect, vars: GetTopicDetailVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetTopicDetailData>>;
 /** Generated Node Admin SDK operation action function for the 'GetTopicDetail' Query. Allow users to pass in custom DataConnect instances. */
@@ -794,4 +808,3 @@ export function getScrapeCursor(vars: GetScrapeCursorVariables, options?: Operat
 export function getTopicsBySourceType(dc: DataConnect, vars: GetTopicsBySourceTypeVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetTopicsBySourceTypeData>>;
 /** Generated Node Admin SDK operation action function for the 'GetTopicsBySourceType' Query. Allow users to pass in custom DataConnect instances. */
 export function getTopicsBySourceType(vars: GetTopicsBySourceTypeVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetTopicsBySourceTypeData>>;
-

@@ -12,6 +12,7 @@ const projectDetailClientPath = join(appDir, "project/project-detail-client.tsx"
 const nextConfigPath = join(process.cwd(), "next.config.mjs");
 const runRoutePath = join(process.cwd(), "app/api/trae-contest/run/route.ts");
 const judgePolicyPath = join(process.cwd(), "lib/trae/judge-policy.ts");
+const judgePath = join(process.cwd(), "lib/trae/judge.ts");
 const dataConnectQueriesPath = join(process.cwd(), "dataconnect/connector/queries.gql");
 const traeApiPath = join(process.cwd(), "lib/trae/api.ts");
 const topicsCachePath = join(process.cwd(), "lib/trae/topics-cache.json");
@@ -95,6 +96,41 @@ test("data connect nested topic reads stay below deadline-prone size", () => {
 
   assert.ok(limits.length >= 2, "expected board and topic-pool queries to declare limits");
   assert.ok(limits.every((limit) => limit <= 1000), `nested topic query limits should avoid 300s deadlines, got ${limits.join(", ")}`);
+});
+
+test("public ranking uses bounded server pages instead of a 1000-row client page", () => {
+  const client = read(clientPath);
+
+  assert.match(client, /const RANKING_PAGE_SIZE = 50;/);
+  assert.match(client, /const \[page, setPage\] = useState\(1\);/);
+  assert.match(client, /new URLSearchParams\(\{ page: String\(page\), pageSize: String\(RANKING_PAGE_SIZE\), sort \}\)/);
+  assert.doesNotMatch(client, /pageSize: "1000"/);
+  assert.match(client, /aria-label=\{t\.previousPage\}/);
+  assert.match(client, /aria-label=\{t\.nextPage\}/);
+});
+
+test("Data Connect board reads can page beyond the first 1000 topics", () => {
+  const queries = read(dataConnectQueriesPath);
+  const traeApi = read(traeApiPath);
+
+  assert.match(queries, /query GetBoardPage\(\$limit: Int!, \$offset: Int!\)/);
+  assert.match(queries, /limit: \$limit/);
+  assert.match(queries, /offset: \$offset/);
+  assert.match(traeApi, /getBoardPage as getBoardPageQuery/);
+  assert.match(traeApi, /const BOARD_PAGE_SIZE = 1000;/);
+  assert.match(traeApi, /async function fetchBoardPages/);
+  assert.match(traeApi, /getBoardPageQuery\(dc as any, \{ limit: BOARD_PAGE_SIZE, offset \}/);
+  assert.doesNotMatch(traeApi, /getBoardData as getBoardDataQuery/);
+});
+
+test("judge candidate reads can page beyond the first 1000 topics", () => {
+  const judge = read(judgePath);
+
+  assert.match(judge, /getBoardPage as getBoardPageQuery/);
+  assert.match(judge, /const JUDGE_BOARD_PAGE_SIZE = 1000;/);
+  assert.match(judge, /async function fetchJudgeBoardPages/);
+  assert.match(judge, /getBoardPageQuery\(dc as any, \{ limit: JUDGE_BOARD_PAGE_SIZE, offset \}/);
+  assert.doesNotMatch(judge, /\bgetBoardData\b/);
 });
 
 test("stats load path is independent from ranking topic list", () => {
@@ -235,8 +271,8 @@ test("public run status reports bounded judging batch counts", () => {
   const client = read(clientPath);
   const judgePolicy = read(judgePolicyPath);
 
-  assert.match(judgePolicy, /export const DEFAULT_JUDGE_BATCH_MAX = 48;/);
-  assert.match(judgePolicy, /export const DEFAULT_JUDGE_CONCURRENCY = 8;/);
+  assert.match(judgePolicy, /export const DEFAULT_JUDGE_BATCH_MAX = 100;/);
+  assert.match(judgePolicy, /export const DEFAULT_JUDGE_CONCURRENCY = 100;/);
   assert.match(route, /import \{ DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY \} from "@\/lib\/trae\/judge-policy";/);
   assert.doesNotMatch(route, /const PUBLIC_JUDGE_MAX =/);
   assert.doesNotMatch(route, /const PUBLIC_JUDGE_CONCURRENCY =/);

@@ -27,6 +27,8 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 ## Agent Decisions / Thoughts
 
 - 2026-06-30 Codex: The app has been moved from `/trae-contest-2026` to root-level routes. Future source-level route tests must use `app/page.tsx`, `app/ranking/page.tsx`, and `app/contest-client.tsx`.
+- 2026-07-01 Codex: The ranking page must request bounded pages instead of `pageSize=1000`; the public total should reflect the API total, and bottom controls should move between server-returned pages without clearing existing rows during refresh.
+- 2026-07-01 Codex: Implemented `RANKING_PAGE_SIZE = 50`, page state in the query string, filter/sort/search reset to page 1, and icon-only previous/next controls in the ranking meta row.
 
 ## Bug Fix Plan: Stats Request Must Survive Topic Deadline
 
@@ -70,6 +72,8 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 | 2026-06-30 | Implemented suppression of unknown row track labels. | Codex |
 | 2026-07-01 | Planned readable ranking errors and visible backend pipeline error details. | Codex |
 | 2026-07-01 | Implemented readable ranking error panel and surfaced backend pipeline error details. | Codex |
+| 2026-07-01 | Planned server-backed ranking pagination controls. | Codex |
+| 2026-07-01 | Implemented bounded ranking page requests and pagination controls. | Codex |
 
 ## Change Plan: Public Run Starts Scoring Immediately
 

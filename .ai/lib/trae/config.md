@@ -1,6 +1,6 @@
 # lib/trae/config.ts
 
-> Last updated: 2026-06-30 | Protection: STANDARD
+> Last updated: 2026-07-02 | Protection: STANDARD
 
 ## Purpose
 
@@ -9,7 +9,8 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 ## What It Does
 
 - Supplies defaults for NVIDIA and OpenRouter free endpoint model names, limits, rate limits, and forum URLs.
-- Supplies `judgeConcurrency` (`TRAE_JUDGE_CONCURRENCY`, default 1) for bounded topic-level judge parallelism.
+- Supplies `judgeConcurrency` (`TRAE_JUDGE_CONCURRENCY`, default from `DEFAULT_JUDGE_CONCURRENCY`, currently 100) for bounded topic-level judge parallelism.
+- Does not expose a judge strategy switch. Scoring quality requires the four-evaluator plus consensus referee path only.
 - Tunes the matcher's forum signup lookups: `maxForumLookupsPerRun` (env `TRAE_MAX_FORUM_LOOKUPS_PER_RUN`, default `0` = unlimited), `forumLookupConcurrency` (`TRAE_FORUM_LOOKUP_CONCURRENCY`, default 16), `forumMinRequestMs` per-host start spacing (`TRAE_FORUM_MIN_REQUEST_MS`, default 150), and `forumMaxRetries` (`TRAE_FORUM_MAX_RETRIES`, default 5). Defaults favor fastest convergence; the forum host is the only real limiter (Retry-After + host-wide cooldown + backoff cover throttling).
 - Keeps NVIDIA text judging order explicit and separate from the preferred NVIDIA image/multimodal model, plus a distinct `nvidiaImageFallbackModel` (env `NVIDIA_IMAGE_FALLBACK_MODEL`, default `minimaxai/minimax-m3`) used when the primary image model soft-throttles.
 - Keeps secret access server-side.
@@ -31,6 +32,9 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 - 2026-06-29 Codex: Planned zero-budget AI provider config with NVIDIA first, OpenRouter second, no paid direct model-provider API, and no billing-dependent fallback.
 - 2026-06-30 Codex: Live NVIDIA checks showed `moonshotai/kimi-k2.6`, `z-ai/glm-5.1`, and `deepseek-ai/deepseek-v4-flash` work on the text JSON path; MiniMax M3 exists but returns NVIDIA's HTTP-200 empty-choices soft throttle in current tests.
 - 2026-06-30 Codex: Text judging should prefer Kimi K2.6 > GLM 5.1 > DeepSeek V4 Flash. DeepSeek should only be the last fallback and should request reasoning effort `max`, not `high`.
+- 2026-07-01 Codex: Throughput defaults now come from `lib/trae/judge-policy.ts`; owner requested `100 / 20`, with env vars remaining optional overrides for local and job runs.
+- 2026-07-02 Codex: Owner rejected making `fast` the default because score quality still requires the four evaluators plus consensus referee. Keep consensus as the default and raise topic-level concurrency so many evaluator teams run at once.
+- 2026-07-02 Codex: Owner rejected keeping the single-LLM strategy at all. Remove `JudgeStrategy`, `judgeStrategy`, and `TRAE_JUDGE_STRATEGY` from config.
 
 ## Important Notes / NEVER Change
 
@@ -53,11 +57,12 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 | 2026-06-30 | Planned NVIDIA text order change to Kimi K2.6 primary, GLM 5.1 fallback, DeepSeek V4 Flash final fallback. | Codex |
 | 2026-06-30 | Added `nvidiaImageFallbackModel` (`NVIDIA_IMAGE_FALLBACK_MODEL`, default `minimaxai/minimax-m3`) so `lib/trae/vision.ts` has a second vision-capable model when the primary soft-throttles. | Claude |
 | 2026-07-01 | Added `judgeConcurrency` (`TRAE_JUDGE_CONCURRENCY`, default `1`) for bounded topic-level judging parallelism. | Codex |
+| 2026-07-02 | Removed `judgeStrategy` config and the `TRAE_JUDGE_STRATEGY` env knob. | Codex |
 
 ## Planned Change: Judge Concurrency Config
 
-- 2026-07-01 Codex: Add `judgeConcurrency` from `TRAE_JUDGE_CONCURRENCY`, default `1`, so CLI/job/admin callers can opt into bounded parallel topic judging without changing model/provider settings.
-- Keep the default conservative for cron/serverless paths; the admin client will explicitly request concurrency `3` for the approved manual run.
+- 2026-07-01 Codex: Add `judgeConcurrency` from `TRAE_JUDGE_CONCURRENCY` so CLI/job/admin callers can opt into bounded parallel topic judging without changing model/provider settings.
+- The default now comes from `DEFAULT_JUDGE_CONCURRENCY`, currently `100`, because throughput should come from many consensus evaluator teams running in parallel.
 - Implemented in `getTraeConfig()` and documented in `.env.example`.
 
 ## Change Plan: Code Defaults For Judge Throughput
@@ -66,3 +71,11 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 - Use shared code constants as fallbacks for `TRAE_JUDGE_CONCURRENCY` and `TRAE_MAX_JUDGE_PER_RUN`: `6` workers and `24` topics per batch.
 - Env vars remain optional overrides for local scripts/jobs, not required Cloud Run setup.
 - Implemented by importing `DEFAULT_JUDGE_CONCURRENCY` and `DEFAULT_JUDGE_BATCH_MAX` as config fallbacks.
+- 2026-07-01 Codex: Update the documented target to `20` workers and `100` topics per batch after the owner asked for max concurrency.
+- 2026-07-02 Codex: Update the target to `100` workers and `100` topics per batch after the owner clarified that evaluator teams should run in parallel.
+
+## Change Plan: Consensus-Only Judging
+
+- 2026-07-02 Codex: Deleted the strategy env parsing entirely.
+- `getTraeConfig()` should keep throughput knobs only: `TRAE_JUDGE_CONCURRENCY` and `TRAE_MAX_JUDGE_PER_RUN`.
+- Scoring behavior belongs in `judgeOneTopic()` and is always consensus-only.

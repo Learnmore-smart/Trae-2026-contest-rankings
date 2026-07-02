@@ -62,6 +62,9 @@ Guards the admin console's compact running-status UI against leaking long action
 - Verify the shared policy file defines the aggressive defaults `24 / 6`.
 - Implemented in the admin judge policy source-level test.
 - 2026-07-01 Codex: Update the shared policy expectations to `48 / 8`.
+- 2026-07-01 Codex: Update the shared policy expectations to `100 / 20` after the owner requested max concurrency.
+- 2026-07-02 Codex: Update the shared policy expectation to `100 / 100` so the admin can run 100 consensus evaluator teams concurrently.
+- Implemented the `100 / 100` source-level expectation.
 
 ## Planned Change: Admin Theme Shell Test
 

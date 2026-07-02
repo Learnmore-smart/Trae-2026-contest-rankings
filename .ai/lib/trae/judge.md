@@ -1,6 +1,6 @@
 # lib/trae/judge.ts
 
-> Last updated: 2026-06-30 | Protection: STANDARD
+> Last updated: 2026-07-02 | Protection: STANDARD
 
 ## Purpose
 
@@ -12,6 +12,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - Gathers real visual evidence once per topic via `gatherVisualEvidence()` (post-image vision + an automatic demo-URL screenshot vision pass) before building any prompt, and folds the resulting summaries into the shared base prompt.
 - Processes selected topic slices with bounded in-process concurrency via `runWithConcurrency()`.
 - Uses `callLLMWithFallback()` so all model calls share provider order, retries, timeout, and logging behavior.
+- Uses only the four-evaluator plus consensus referee path. No single-evaluator judge strategy is allowed.
 - Handles 429, timeout, invalid JSON, validation errors, and model fallbacks.
 - Writes SQL `evaluations`, updates denormalized topic scoring fields, and records token usage through Data Connect.
 
@@ -27,7 +28,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 ## Dependencies
 
 - Internal: `config`, `dataconnect`, `llm`, `runs`, `types`, `vision`.
-- Generated SDK: `getBoardData`, `upsertEvaluation`, `updateTopicEvaluationState`, `upsertModelTokenUsage`.
+- Generated SDK: `getBoardPage`, `upsertEvaluation`, `updateTopicEvaluationState`, `upsertModelTokenUsage`.
 - External: `zod`.
 
 ## Agent Decisions / Thoughts
@@ -45,6 +46,9 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - 2026-07-01 Codex: Verified existing final scoring prompt already contains the uploaded screenshot evidence rule; added regression coverage without changing judge runtime code.
 - 2026-07-01 Codex: The automatic judge queue must include stale evaluations whose `promptVersion` differs from the current `PROMPT_VERSION`, otherwise fixes to extraction/vision/prompt wording will not repair old public scores. Keep already-current judged topics out of the queue to avoid infinite rejudging.
 - 2026-07-01 Codex: Bump `PROMPT_VERSION` after the screenshot-evidence fixes so already-judged v3 rows become stale and are automatically re-scored.
+- 2026-07-01 Codex: Owner reported the public count is stuck at `149/3,702`. Root cause: default `unjudged` mode was spending capacity on stale prompt-version rejudges, and the judge source still read only `GetBoardData`'s first 1000 topics. Change default `unjudged` to true unscored rows, reserve stale prompt rejudge for `changed`, and page judge candidates through `GetBoardPage`.
+- 2026-07-02 Codex: Owner wants score quality preserved: default must remain four evaluators plus consensus referee. Throughput should come from running many evaluator teams in parallel, not switching to a one-call judge.
+- 2026-07-02 Codex: Owner rejected keeping any single-LLM/fast path at all. Remove the fast strategy, its env switch, and its stored prompt/raw-response helpers.
 
 ## Planned Change: SQL Connect Runtime
 
@@ -85,6 +89,16 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | 2026-07-01 | Planned stale prompt-version rejudge selection for automatic judging. | Codex |
 | 2026-07-01 | Planned prompt-version bump for automatic old-score rejudge. | Codex |
 | 2026-07-01 | Implemented stale prompt-version queue selection and bumped `PROMPT_VERSION` to `v4-official-screenshot-evidence`. | Codex |
+| 2026-07-01 | Planned true-unjudged default queue and paged judge candidate reads to unblock score-count progress beyond 149. | Codex |
+| 2026-07-02 | Planned consensus default with more parallel evaluator teams. | Codex |
+| 2026-07-02 | Deleted the single-evaluator fast judge path. | Codex |
+
+## Change Plan: Consensus Only With Parallel Evaluator Teams
+
+- 2026-07-02 Codex: Removed `JudgeStrategy`, `TRAE_JUDGE_STRATEGY`, `judgeOneTopicFast()`, and all `FAST SINGLE-EVALUATOR RUN` storage helpers.
+- `judgeOneTopic()` should always gather visual evidence and then call the consensus evaluator team path.
+- Throughput remains controlled by `DEFAULT_JUDGE_CONCURRENCY = 100`, so many consensus evaluator teams can run in parallel without lowering score quality.
+- Added regression coverage that the fast/single-evaluator symbols and env knob do not reappear.
 
 ## Planned Change: Bounded Judge Concurrency
 

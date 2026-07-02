@@ -1,5 +1,4 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
 import { getTraeConfig } from "./config.ts";
 import { extractTopicSignals, getContentHash, htmlToText, normalizeWhitespace } from "./extractors.ts";
@@ -422,6 +421,13 @@ const topicStatusMap = {
   judge_error: "JUDGE_ERROR"
 } as const;
 
+export function nextScrapedTopicStatus(sourceType: TraeSourceType, existingStatus: unknown): keyof typeof topicStatusMap {
+  if (sourceType !== "preliminary") return "scraped";
+  return typeof existingStatus === "string" && existingStatus.toLowerCase() === "judged"
+    ? "judged"
+    : "needs_judging";
+}
+
 function topicToVariables(topic: TraeTopic, status: keyof typeof topicStatusMap) {
   return {
     id: topic.id,
@@ -481,7 +487,7 @@ export async function upsertTopic(topic: TraeTopic): Promise<"created" | "update
     return "unchanged";
   }
 
-  const updatedStatus = topic.sourceType === "preliminary" ? "needs_judging" : "scraped";
+  const updatedStatus = nextScrapedTopicStatus(topic.sourceType, existing.status);
   await upsertTopicMutation(dc as any, topicToVariables(topic, updatedStatus) as any);
   return "updated";
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isRankableDiscourseTopic, parseRetryAfterMs, sanitizeRawJsonForDataConnect } from "../lib/trae/scraper.ts";
+import { isRankableDiscourseTopic, nextScrapedTopicStatus, parseRetryAfterMs, sanitizeRawJsonForDataConnect } from "../lib/trae/scraper.ts";
 
 describe("sanitizeRawJsonForDataConnect", () => {
   it("stores raw Discourse payloads as bounded JSON strings instead of nested persistence entities", () => {
@@ -58,5 +58,21 @@ describe("isRankableDiscourseTopic", () => {
     assert.equal(isRankableDiscourseTopic({ id: 22550, title: "Global announcement", pinned_globally: true }), false);
     assert.equal(isRankableDiscourseTopic({ id: 22551, title: "Hidden draft", visible: false }), false);
     assert.equal(isRankableDiscourseTopic({ id: 22552, title: "Actual demo project", pinned: false, visible: true }), true);
+  });
+});
+
+describe("nextScrapedTopicStatus", () => {
+  it("preserves judged preliminary rows on content update so public scored progress does not drop", () => {
+    assert.equal(nextScrapedTopicStatus("preliminary", "JUDGED"), "judged");
+    assert.equal(nextScrapedTopicStatus("preliminary", "judged"), "judged");
+  });
+
+  it("keeps unjudged or failed preliminary rows in the judge queue after content update", () => {
+    assert.equal(nextScrapedTopicStatus("preliminary", "NEEDS_JUDGING"), "needs_judging");
+    assert.equal(nextScrapedTopicStatus("preliminary", "JUDGE_ERROR"), "needs_judging");
+  });
+
+  it("keeps signup scrape updates out of the judge queue", () => {
+    assert.equal(nextScrapedTopicStatus("signup", "SCRAPED"), "scraped");
   });
 });

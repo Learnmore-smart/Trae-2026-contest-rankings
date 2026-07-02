@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getDataConnectDb } from "./dataconnect.ts";
 import {
-  getBoardData as getBoardDataQuery,
+  getBoardPage as getBoardPageQuery,
   getLatestRun,
   getStats,
   getOnlineCount,
@@ -154,6 +154,7 @@ interface BoardData {
 let boardCache: { version: string; data: BoardData } | null = null;
 let versionCheckedAt = 0;
 const VERSION_TTL_MS = 15_000;
+const BOARD_PAGE_SIZE = 1000;
 
 async function getBoardVersion(): Promise<string> {
   try {
@@ -242,6 +243,20 @@ async function buildStatsFromSource(): Promise<StatsPayload> {
   return statsPayloadFromResponse(statsRes, onlineCount);
 }
 
+async function fetchBoardPage(dc: unknown, offset: number): Promise<any[]> {
+  const res = await getBoardPageQuery(dc as any, { limit: BOARD_PAGE_SIZE, offset } as any);
+  return res.data.topics ?? [];
+}
+
+async function fetchBoardPages(dc: unknown, totalHint: number): Promise<any[]> {
+  const firstPage = await fetchBoardPage(dc, 0);
+  const targetTotal = Math.max(firstPage.length, Math.floor(totalHint));
+  const pageCount = Math.max(1, Math.ceil(targetTotal / BOARD_PAGE_SIZE));
+  const offsets = Array.from({ length: pageCount - 1 }, (_, index) => (index + 1) * BOARD_PAGE_SIZE);
+  const remainingPages = await Promise.all(offsets.map((offset) => fetchBoardPage(dc, offset)));
+  return [firstPage, ...remainingPages].flat();
+}
+
 async function buildBoardDataFromSource(): Promise<BoardData> {
   let topTopics: any[] = [];
   let statsRes: any = null;
@@ -250,12 +265,9 @@ async function buildBoardDataFromSource(): Promise<BoardData> {
 
   try {
     const dc = getDataConnectDb();
-    const [boardRes, sRes] = await Promise.all([
-      getBoardDataQuery(dc as any),
-      getStats(dc as any)
-    ]);
-    topTopics = boardRes.data.topics ?? [];
-    statsRes = sRes;
+    statsRes = await getStats(dc as any);
+    const totalPreliminary = statsRes.data.preliminaryCount?.[0]?._count ?? 0;
+    topTopics = await fetchBoardPages(dc, totalPreliminary);
 
     const onlineSince = new Date(Date.now() - 2 * 60 * 1000).toISOString();
     const onlineRes = await getOnlineCount(dc as any, { onlineSince } as any);

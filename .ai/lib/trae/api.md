@@ -33,6 +33,8 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 - 2026-06-29 Codex: Use server-side in-memory joins for the first version to avoid complex Firestore composite indexes during launch.
 - 2026-06-29 Codex: Expose only aggregate token totals in stats, not provider/model-level token records.
 - 2026-06-30 Codex: SQL migration keeps the same public API shape while replacing Firestore collection reads with Data Connect generated queries.
+- 2026-07-01 Codex: Public board construction should page through bounded Data Connect board chunks and cache the assembled read model, so the browser gets small pages while filters/sorts still run against the full preliminary set.
+- 2026-07-01 Codex: Implemented `fetchBoardPages()` using `GetBoardPage` chunks of 1000 rows based on the live preliminary count.
 
 ## Planned Change: Lint And SQL Adapter Boundary
 
@@ -70,6 +72,7 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 ## Important Notes / NEVER Change
 
 - Public APIs must not return `rawHtml` or unrestricted raw model internals.
+- Do not reintroduce one huge nested board query for all topics; use bounded page chunks.
 
 ## Change History
 
@@ -87,3 +90,5 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 | 2026-06-30 | Implemented stats fallback from local topic cache for 100/424 header recovery. | Codex |
 | 2026-06-30 | Planned official-track normalization and live board source fix for 424-row fallback leakage. | Codex |
 | 2026-06-30 | Implemented official-track normalization and live Data Connect board source usage. | Codex |
+| 2026-07-01 | Planned chunked full-board assembly for accurate server-side pagination. | Codex |
+| 2026-07-01 | Implemented chunked board page assembly via generated `getBoardPage`. | Codex |
