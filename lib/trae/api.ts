@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getDataConnectDb } from "./dataconnect.ts";
+import { getDataConnectDb, isMissingDataConnectOperationError } from "./dataconnect.ts";
 import {
+  getBoardData as getBoardDataQuery,
   getBoardPage as getBoardPageQuery,
   getLatestRun,
   getStats,
@@ -11,6 +12,7 @@ import {
   upsertPresence,
   listRuns as listRunsQuery
 } from "@trae-contest/dataconnect-generated";
+import { dedupeByTopicTitle } from "./dedupe.ts";
 import type {
   RankingItem,
   StatsPayload,
@@ -248,13 +250,26 @@ async function fetchBoardPage(dc: unknown, offset: number): Promise<any[]> {
   return res.data.topics ?? [];
 }
 
+async function fetchLegacyBoardData(dc: unknown): Promise<any[]> {
+  const res = await getBoardDataQuery(dc as any);
+  return res.data.topics ?? [];
+}
+
 async function fetchBoardPages(dc: unknown, totalHint: number): Promise<any[]> {
-  const firstPage = await fetchBoardPage(dc, 0);
-  const targetTotal = Math.max(firstPage.length, Math.floor(totalHint));
-  const pageCount = Math.max(1, Math.ceil(targetTotal / BOARD_PAGE_SIZE));
-  const offsets = Array.from({ length: pageCount - 1 }, (_, index) => (index + 1) * BOARD_PAGE_SIZE);
-  const remainingPages = await Promise.all(offsets.map((offset) => fetchBoardPage(dc, offset)));
-  return [firstPage, ...remainingPages].flat();
+  try {
+    const firstPage = await fetchBoardPage(dc, 0);
+    const targetTotal = Math.max(firstPage.length, Math.floor(totalHint));
+    const pageCount = Math.max(1, Math.ceil(targetTotal / BOARD_PAGE_SIZE));
+    const offsets = Array.from({ length: pageCount - 1 }, (_, index) => (index + 1) * BOARD_PAGE_SIZE);
+    const remainingPages = await Promise.all(offsets.map((offset) => fetchBoardPage(dc, offset)));
+    return [firstPage, ...remainingPages].flat();
+  } catch (error) {
+    if (isMissingDataConnectOperationError(error, "GetBoardPage")) {
+      console.warn("Data Connect operation GetBoardPage is not deployed; falling back to legacy GetBoardData.");
+      return fetchLegacyBoardData(dc);
+    }
+    throw error;
+  }
 }
 
 async function buildBoardDataFromSource(): Promise<BoardData> {
@@ -398,6 +413,7 @@ export async function listRankedTopics(params: TopicListParams = {}): Promise<{
     if (typeof a === "string" || typeof b === "string") return String(b).localeCompare(String(a));
     return Number(b) - Number(a);
   });
+  items = dedupeByTopicTitle(items);
   items = items.map((item, index) => ({ ...item, rank: index + 1 }));
 
   const total = items.length;

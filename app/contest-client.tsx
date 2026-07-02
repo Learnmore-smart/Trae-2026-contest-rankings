@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, FormEvent, ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -66,6 +66,18 @@ interface PipelineStatus {
   finishedAt: string | null;
   message: string;
   error: string | null;
+}
+
+interface SubmittedTopicStatus {
+  running: boolean;
+  phase: "idle" | "crawling" | "done" | "error";
+  startedAt: string | null;
+  finishedAt: string | null;
+  submittedUrl: string | null;
+  message: string;
+  error: string | null;
+  result: "created" | "updated" | "unchanged" | null;
+  topic: { id: string; title: string; url: string; status: string } | null;
 }
 
 const SEMIFINAL_START = new Date("2026-07-15T00:00:00+08:00");
@@ -184,6 +196,15 @@ const COPY = {
     hasDemo: "有 Demo",
     top: "当前最高分",
     openDetail: "查看作品详情",
+    submitUrlTitle: "请你爬我",
+    submitUrlPlaceholder: "粘贴 TRAE 初赛帖链接",
+    submitUrlAction: "提交链接",
+    submitUrlBusy: "抓取中",
+    submitUrlRequired: "请先粘贴 TRAE 论坛帖子链接。",
+    submitUrlCreated: "已抓取并加入待评分队列。",
+    submitUrlUpdated: "帖子内容已更新，等待评分。",
+    submitUrlUnchanged: "这个帖子已经在队列里。",
+    submitUrlFailed: "提交失败，请稍后重试。",
     sortLabels: {
       total: "综合分",
       innovation: "创新性",
@@ -277,6 +298,15 @@ const COPY = {
     hasDemo: "Demo",
     top: "Top score",
     openDetail: "Open project detail",
+    submitUrlTitle: "Crawl my post",
+    submitUrlPlaceholder: "Paste a TRAE preliminary topic link",
+    submitUrlAction: "Submit link",
+    submitUrlBusy: "Crawling",
+    submitUrlRequired: "Paste a TRAE forum topic link first.",
+    submitUrlCreated: "Collected and queued for scoring.",
+    submitUrlUpdated: "Post content updated and queued.",
+    submitUrlUnchanged: "This post is already in the queue.",
+    submitUrlFailed: "Submit failed. Try again later.",
     sortLabels: {
       total: "Total score",
       innovation: "Innovation",
@@ -689,6 +719,152 @@ function RunButton({ language, onCompleted }: { language: ContestLanguage; onCom
         </span>
       ) : null}
     </div>
+  );
+}
+
+function submitSuccessMessage(result: unknown, language: ContestLanguage): string {
+  const t = COPY[language];
+  if (result === "created") return t.submitUrlCreated;
+  if (result === "updated") return t.submitUrlUpdated;
+  return t.submitUrlUnchanged;
+}
+
+function UserTopicSubmit({ language, onSubmitted }: { language: ContestLanguage; onSubmitted: () => void }) {
+  const t = COPY[language];
+  const [url, setUrl] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const pollRef = useRef<number | null>(null);
+  const completedRef = useRef<string | null>(null);
+  const submittedRef = useRef(onSubmitted);
+  submittedRef.current = onSubmitted;
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  const applyStatus = useCallback(
+    (next: SubmittedTopicStatus) => {
+      setSubmitting(next.running);
+
+      if (next.running) {
+        setMessage({ tone: "success", text: next.message });
+        return;
+      }
+
+      if (next.phase === "done") {
+        const completedKey = `${next.finishedAt ?? ""}:${next.result ?? ""}:${next.topic?.id ?? ""}`;
+        setUrl("");
+        setMessage({ tone: "success", text: submitSuccessMessage(next.result, language) });
+        if (completedRef.current !== completedKey) {
+          completedRef.current = completedKey;
+          submittedRef.current();
+        }
+        return;
+      }
+
+      if (next.phase === "error") {
+        setMessage({ tone: "error", text: next.error || next.message || t.submitUrlFailed });
+      }
+    },
+    [language, t.submitUrlFailed]
+  );
+
+  const readStatus = useCallback(async (): Promise<SubmittedTopicStatus | null> => {
+    try {
+      const response = await fetch(`${API_BASE}/api/trae-contest/submit`, { cache: "no-store" });
+      if (!response.ok) return null;
+      return (await response.json()) as SubmittedTopicStatus;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const startPolling = useCallback(() => {
+    stopPolling();
+    pollRef.current = window.setInterval(async () => {
+      const next = await readStatus();
+      if (!next) return;
+      applyStatus(next);
+      if (!next.running) stopPolling();
+    }, 1500);
+  }, [applyStatus, readStatus, stopPolling]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const next = await readStatus();
+      if (!next || cancelled) return;
+      if (next.running) {
+        applyStatus(next);
+        startPolling();
+      }
+    })();
+    return () => {
+      cancelled = true;
+      stopPolling();
+    };
+  }, [applyStatus, readStatus, startPolling, stopPolling]);
+
+  const submit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const trimmed = url.trim();
+      if (!trimmed) {
+        setMessage({ tone: "error", text: t.submitUrlRequired });
+        return;
+      }
+
+      setSubmitting(true);
+      setMessage(null);
+      try {
+        const response = await fetch(`${API_BASE}/api/trae-contest/submit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: trimmed })
+        });
+        const payload = (await response.json().catch(() => ({}))) as Partial<SubmittedTopicStatus> & { error?: string };
+        if (!response.ok) throw new Error(payload.error || t.submitUrlFailed);
+
+        applyStatus(payload as SubmittedTopicStatus);
+        if (payload.running) startPolling();
+      } catch (error) {
+        stopPolling();
+        setMessage({ tone: "error", text: error instanceof Error ? error.message : t.submitUrlFailed });
+        setSubmitting(false);
+      }
+    },
+    [applyStatus, startPolling, stopPolling, t.submitUrlFailed, t.submitUrlRequired, url]
+  );
+
+  return (
+    <form className="user-crawl-panel" onSubmit={(event) => void submit(event)}>
+      <label className="user-crawl-panel__label" htmlFor="user-topic-url">
+        {t.submitUrlTitle}
+      </label>
+      <div className="user-crawl-panel__control">
+        <input
+          id="user-topic-url"
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder={t.submitUrlPlaceholder}
+          className="user-crawl-panel__input"
+          disabled={submitting}
+        />
+        <button type="submit" className="user-crawl-panel__button" disabled={submitting}>
+          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+          <span>{submitting ? t.submitUrlBusy : t.submitUrlAction}</span>
+        </button>
+      </div>
+      {message ? (
+        <p className="user-crawl-panel__message" data-tone={message.tone} role={message.tone === "error" ? "alert" : "status"}>
+          {message.text}
+        </p>
+      ) : null}
+    </form>
   );
 }
 
@@ -1133,6 +1309,7 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
                     </Link>
                     {runControl}
                   </div>
+                  <UserTopicSubmit language={language} onSubmitted={load} />
                 </div>
               </div>
             </section>
@@ -1216,30 +1393,39 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
                   />
                   <ViewToggle value={viewMode} onChange={setViewMode} labels={{ list: t.viewListLabel, grid: t.viewGridLabel }} />
                 </section>
+                <UserTopicSubmit language={language} onSubmitted={load} />
 
                 <div className="ranking-inline-meta">
                   <div className="ranking-inline-meta__stats">
                     <span>{fmtInteger(total, language)} {t.totalResults}</span>
                     <span>{t.scoredProgress} {fmtInteger(progressDone, language)}/{fmtInteger(progressTotal, language)}</span>
                   </div>
-                  <div className="flex items-center gap-2 text-xs font-black uppercase text-slate-400">
+                  <div
+                    className="ranking-page-switch"
+                    aria-label={`${t.pageLabel} ${fmtInteger(page, language)} / ${fmtInteger(totalPages, language)}`}
+                  >
                     <button
                       type="button"
                       aria-label={t.previousPage}
                       disabled={page <= 1 || loading}
                       onClick={() => setPage((current) => Math.max(1, current - 1))}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-slate-200 transition hover:border-cyan-300/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                      className="ranking-page-switch__button"
                     >
                       <ChevronLeft className="h-4 w-4" />
+                      <span className="ranking-page-switch__text">{t.previousPage}</span>
                     </button>
-                    <span aria-live="polite">{t.pageLabel} {fmtInteger(page, language)}/{fmtInteger(totalPages, language)}</span>
+                    <span className="ranking-page-switch__label" aria-live="polite">
+                      <span>{t.pageLabel}</span>
+                      <strong>{fmtInteger(page, language)} / {fmtInteger(totalPages, language)}</strong>
+                    </span>
                     <button
                       type="button"
                       aria-label={t.nextPage}
                       disabled={page >= totalPages || loading}
                       onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-slate-200 transition hover:border-cyan-300/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                      className="ranking-page-switch__button"
                     >
+                      <span className="ranking-page-switch__text">{t.nextPage}</span>
                       <ChevronRight className="h-4 w-4" />
                     </button>
                   </div>

@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isRankableDiscourseTopic, nextScrapedTopicStatus, parseRetryAfterMs, sanitizeRawJsonForDataConnect } from "../lib/trae/scraper.ts";
+import {
+  isRankableDiscourseTopic,
+  isSubmittedPreliminaryTopicPayload,
+  nextScrapedTopicStatus,
+  parseRetryAfterMs,
+  parseTraeForumTopicUrl,
+  sanitizeRawJsonForDataConnect,
+  TraeForumUrlError
+} from "../lib/trae/scraper.ts";
 
 describe("sanitizeRawJsonForDataConnect", () => {
   it("stores raw Discourse payloads as bounded JSON strings instead of nested persistence entities", () => {
@@ -58,6 +66,54 @@ describe("isRankableDiscourseTopic", () => {
     assert.equal(isRankableDiscourseTopic({ id: 22550, title: "Global announcement", pinned_globally: true }), false);
     assert.equal(isRankableDiscourseTopic({ id: 22551, title: "Hidden draft", visible: false }), false);
     assert.equal(isRankableDiscourseTopic({ id: 22552, title: "Actual demo project", pinned: false, visible: true }), true);
+  });
+});
+
+describe("parseTraeForumTopicUrl", () => {
+  it("accepts canonical TRAE forum topic links and normalizes query strings away", () => {
+    const ref = parseTraeForumTopicUrl("https://forum.trae.cn/t/demo-project/22552?u=noah#reply");
+
+    assert.deepEqual(ref, {
+      externalTopicId: "22552",
+      slug: "demo-project",
+      title: "Topic 22552",
+      url: "https://forum.trae.cn/t/demo-project/22552"
+    });
+  });
+
+  it("accepts short TRAE topic links without a category id in the URL", () => {
+    const ref = parseTraeForumTopicUrl("https://forum.trae.cn/t/topic/66965");
+
+    assert.deepEqual(ref, {
+      externalTopicId: "66965",
+      slug: "topic",
+      title: "Topic 66965",
+      url: "https://forum.trae.cn/t/topic/66965"
+    });
+  });
+
+  it("rejects non-TRAE hosts, insecure schemes, and category URLs", () => {
+    assert.throws(() => parseTraeForumTopicUrl("https://forum.trae.cn.evil.test/t/demo/22552"), TraeForumUrlError);
+    assert.throws(() => parseTraeForumTopicUrl("http://forum.trae.cn/t/demo/22552"), TraeForumUrlError);
+    assert.throws(() => parseTraeForumTopicUrl("https://forum.trae.cn/c/contest/1"), TraeForumUrlError);
+  });
+});
+
+describe("isSubmittedPreliminaryTopicPayload", () => {
+  it("accepts the visible preliminary category label from the forum page title", () => {
+    assert.equal(
+      isSubmittedPreliminaryTopicPayload("社会服务 - 「书在架上」图书馆实时排架核查系统 - TRAE AI 创造力大赛 / 【大赛初赛专区】 - TRAE 官方中文社区"),
+      true
+    );
+    assert.equal(
+      isSubmittedPreliminaryTopicPayload("社会服务 - 「书在架上」图书馆实时排架核查系统 - TRAE AI 创造力大赛 / 【大赛报名专区】 - TRAE 官方中文社区"),
+      false
+    );
+  });
+
+  it("accepts only category-named JSON fields, not user-controlled topic content", () => {
+    assert.equal(isSubmittedPreliminaryTopicPayload({ category_name: "【大赛初赛专区】" }), true);
+    assert.equal(isSubmittedPreliminaryTopicPayload({ cooked: "我写了【大赛初赛专区】这几个字" }), false);
   });
 });
 

@@ -304,6 +304,93 @@
   gap: 0.7rem;
 }
 
+.user-crawl-panel {
+  display: grid;
+  gap: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  padding: 0.75rem;
+}
+
+.user-crawl-panel__label {
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0;
+}
+
+.user-crawl-panel__control {
+  display: flex;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.user-crawl-panel__input {
+  min-width: 0;
+  flex: 1 1 14rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  padding: 0.52rem 0.65rem;
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 760;
+  outline: none;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.user-crawl-panel__input::placeholder {
+  color: var(--muted);
+}
+
+.user-crawl-panel__input:focus {
+  border-color: rgba(22, 136, 168, 0.52);
+  background: var(--surface-hover);
+}
+
+.user-crawl-panel__button {
+  display: inline-flex;
+  min-height: 2.36rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.42rem;
+  border: 1px solid rgba(22, 136, 168, 0.32);
+  border-radius: 6px;
+  background: var(--cyan);
+  padding: 0.48rem 0.78rem;
+  color: white;
+  font-size: 0.78rem;
+  font-weight: 920;
+  white-space: nowrap;
+  transition: filter 150ms ease, opacity 150ms ease;
+}
+
+.user-crawl-panel__button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.user-crawl-panel__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.user-crawl-panel__message {
+  min-height: 1.15rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 780;
+  line-height: 1.45;
+}
+
+.user-crawl-panel__message[data-tone="success"] {
+  color: var(--green);
+}
+
+.user-crawl-panel__message[data-tone="error"] {
+  color: var(--red);
+}
+
 .notice-bar {
   border-left: 3px solid rgba(197, 138, 32, 0.58);
   border-radius: 0;
@@ -501,6 +588,69 @@
 
 .ranking-inline-meta span {
   display: inline-flex;
+}
+
+.ranking-page-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface-raised);
+  padding: 0.22rem;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+.ranking-page-switch__button {
+  display: inline-flex;
+  min-height: 2.1rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.34rem;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-solid);
+  padding: 0 0.68rem;
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1;
+  text-transform: uppercase;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease, opacity 150ms ease;
+}
+
+.ranking-page-switch__button:hover:not(:disabled) {
+  border-color: rgba(22, 136, 168, 0.45);
+  background: var(--surface-hover);
+  color: var(--cyan);
+}
+
+.ranking-page-switch__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.ranking-page-switch__label {
+  display: inline-flex;
+  min-width: 7.2rem;
+  min-height: 2.1rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0 0.65rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ranking-page-switch__label strong {
+  color: var(--ink);
+  font-size: 0.86rem;
+  font-weight: 950;
 }
 
 .view-toggle {
@@ -991,6 +1141,30 @@
     min-width: 0 !important;
   }
 
+  .ranking-inline-meta {
+    align-items: stretch;
+  }
+
+  .ranking-inline-meta__stats {
+    width: 100%;
+  }
+
+  .ranking-page-switch {
+    width: 100%;
+    margin-left: 0;
+    justify-content: space-between;
+  }
+
+  .ranking-page-switch__button {
+    flex: 1 1 0;
+    padding-inline: 0.5rem;
+  }
+
+  .ranking-page-switch__label {
+    min-width: 5.75rem;
+    padding-inline: 0.45rem;
+  }
+
   .ranking-toolbar {
     flex-direction: column;
     align-items: stretch;
@@ -1052,6 +1226,19 @@
   }
 
   .hero-actions .control-button {
+    width: 100%;
+  }
+
+  .user-crawl-panel {
+    width: 100%;
+  }
+
+  .user-crawl-panel__control {
+    flex-direction: column;
+  }
+
+  .user-crawl-panel__input,
+  .user-crawl-panel__button {
     width: 100%;
   }
 

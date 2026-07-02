@@ -46,6 +46,10 @@ Scrapes public TRAE Discourse category and topic data for signup and preliminary
 - 2026-06-29 Codex: Browser QA revealed the first limited preliminary scrape collected a pinned contest guide post. Implemented parser-level filtering for pinned/global-pinned/non-visible Discourse topic refs so public guidance posts are not ranked or judged as projects.
 - 2026-06-30 Codex: Scraping should write through Data Connect only; keep conservative network behavior and bounded raw snapshots.
 - 2026-07-02 Codex: Owner reported the public scored count regressing from 147 to 125 and then net-negative throughput. Root cause is scraper status reset outpacing judge throughput. Preserve `JUDGED` on content updates to keep old scores live until an explicit rejudge replaces them.
+- 2026-07-02 Codex: Add a public user-submitted topic path. The parser must only accept `https://forum.trae.cn/t/.../<id>` links, reject lookalike hosts/schemes/category URLs, and return a `CategoryTopicRef` that reuses the existing `fetchTopic` + `upsertTopic` pipeline as a preliminary topic.
+- 2026-07-02 Codex: Implemented `TraeForumUrlError` and `parseTraeForumTopicUrl()` as pure exported helpers so public route validation can be tested without network or Data Connect.
+- 2026-07-02 Codex: Tighten submitted-topic crawling so it only accepts actual preliminary posts. Root cause: `/submit` validated the topic URL host/path, then called `fetchTopic("preliminary", ref)` without checking the Discourse topic category. Fix by adding a fetch option that requires the real forum category text to include `大赛初赛专区`; do not rely on URL slugs or numeric category ids.
+- 2026-07-02 Codex: Implemented `isSubmittedPreliminaryTopicPayload()` and `FetchTopicOptions.requirePreliminaryCategory`. JSON category-named fields may pass directly; otherwise the submitted-topic path fetches the HTML topic page and checks the page title/category text before upserting.
 
 ## Planned Change: SQL Connect Runtime
 
@@ -82,3 +86,7 @@ Scrapes public TRAE Discourse category and topic data for signup and preliminary
 | 2026-06-30 | Replaced `waitForHost` with a concurrency-safe start-slot allocator (configurable `forumMinRequestMs`, default 150). | Claude |
 | 2026-06-30 | Robust 429 handling: honor `Retry-After`, host-wide cooldown on 429/403/503, configurable `forumMaxRetries`. | Claude |
 | 2026-07-02 | Planned preserving judged status across scrape content updates to stop net-negative scored-count movement. | Codex |
+| 2026-07-02 | Planned user-submitted TRAE topic URL validation for public single-topic crawling. | Codex |
+| 2026-07-02 | Implemented user-submitted TRAE topic URL validation helpers. | Codex |
+| 2026-07-02 | Planned preliminary-category text validation for user-submitted topic crawls. | Codex |
+| 2026-07-02 | Implemented preliminary-category text validation for user-submitted topic crawls. | Codex |

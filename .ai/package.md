@@ -12,6 +12,7 @@ Defines the Next.js app dependencies and TRAE worker/admin scripts.
 - Provides local scripts for scraping, matching, judging, and full runs.
 - Declares dependencies for Next.js, React, Firestore Admin SDK, Zod, Cheerio, Tailwind, and lucide icons.
 - Includes TRAE LLM fallback and scraper serialization regression tests in the default test script.
+- Includes TRAE duplicate-title dedupe regression tests in the default test script.
 - Includes explicit source-level UI regression tests in the default test script, including the admin console busy-badge guard.
 
 ## Public API
@@ -33,6 +34,7 @@ Defines the Next.js app dependencies and TRAE worker/admin scripts.
 - 2026-06-29 Codex: Add the landing hero layout guard to the explicit Node test list so the annotated hero class hooks stay covered by the default test script.
 - 2026-06-29 Codex: Plan to include the contest route-page regression test in `npm run test` so refreshable home/ranking URL behavior stays covered.
 - 2026-06-30 Codex: Keep the Node test list explicit and add an admin-console regression file so the compact busy badge contract runs in the default suite.
+- 2026-07-02 Codex: Add duplicate-title dedupe coverage to the explicit Node test list so public ranking regressions are covered by `npm run test`.
 
 ## Important Notes / NEVER Change
 
@@ -51,3 +53,5 @@ Defines the Next.js app dependencies and TRAE worker/admin scripts.
 | 2026-06-29 | Planned adding contest route-page regression test to `npm run test`. | Codex |
 | 2026-06-30 | Planned adding admin console busy-badge regression test to `npm run test`. | Codex |
 | 2026-06-30 | Added admin console busy-badge regression test to `npm run test`. | Codex |
+| 2026-07-02 | Planned adding duplicate-title dedupe regression test to `npm run test`. | Codex |
+| 2026-07-02 | Added duplicate-title dedupe regression test to `npm run test`. | Codex |

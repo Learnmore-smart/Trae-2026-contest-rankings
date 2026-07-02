@@ -29,6 +29,11 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 - 2026-06-30 Codex: The app has been moved from `/trae-contest-2026` to root-level routes. Future source-level route tests must use `app/page.tsx`, `app/ranking/page.tsx`, and `app/contest-client.tsx`.
 - 2026-07-01 Codex: The ranking page must request bounded pages instead of `pageSize=1000`; the public total should reflect the API total, and bottom controls should move between server-returned pages without clearing existing rows during refresh.
 - 2026-07-01 Codex: Implemented `RANKING_PAGE_SIZE = 50`, page state in the query string, filter/sort/search reset to page 1, and icon-only previous/next controls in the ranking meta row.
+- 2026-07-02 Codex: User screenshot showed the page switch was not visible. Replace the icon-only control with a named `ranking-page-switch` group that has visible previous/next text and a prominent page label.
+- 2026-07-02 Codex: Add a compact `UserTopicSubmit` form. It should post to `${API_BASE}/api/trae-contest/submit`, show concise success/error feedback, and reload public stats/ranking data after a successful crawl.
+- 2026-07-02 Codex: Implemented the visible page switch in the ranking metadata row. It keeps the existing page state/query behavior and only changes the control presentation.
+- 2026-07-02 Codex: Implemented `UserTopicSubmit` on both the landing side rail and ranking page. It validates empty input client-side, surfaces server validation errors, clears on success, and calls `load()` so stats/ranking refresh after a crawl.
+- 2026-07-02 Codex: Updated `UserTopicSubmit` to read `GET /api/trae-contest/submit` on mount and poll while `running`, so refreshing the page during a submitted-topic crawl still shows the crawler state.
 
 ## Bug Fix Plan: Stats Request Must Survive Topic Deadline
 
@@ -74,6 +79,11 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 | 2026-07-01 | Implemented readable ranking error panel and surfaced backend pipeline error details. | Codex |
 | 2026-07-01 | Planned server-backed ranking pagination controls. | Codex |
 | 2026-07-01 | Implemented bounded ranking page requests and pagination controls. | Codex |
+| 2026-07-02 | Planned visible text page-switch control for the ranking metadata row. | Codex |
+| 2026-07-02 | Planned public user-submitted TRAE topic crawl form. | Codex |
+| 2026-07-02 | Implemented explicit text page-switch controls. | Codex |
+| 2026-07-02 | Implemented public user-submitted TRAE topic crawl form. | Codex |
+| 2026-07-02 | Implemented refresh-surviving submitted-topic crawl status polling. | Codex |
 
 ## Change Plan: Public Run Starts Scoring Immediately
 

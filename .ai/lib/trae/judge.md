@@ -13,6 +13,8 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - Processes selected topic slices with bounded in-process concurrency via `runWithConcurrency()`.
 - Uses `callLLMWithFallback()` so all model calls share provider order, retries, timeout, and logging behavior.
 - Uses only the four-evaluator plus consensus referee path. No single-evaluator judge strategy is allowed.
+- Falls back from paged `GetBoardPage` candidate reads to legacy `GetBoardData` only when the deployed connector reports that `GetBoardPage` is missing.
+- Filters duplicate judge candidates by normalized topic title before selecting the run slice, so repeated posts do not consume multiple evaluator teams.
 - Handles 429, timeout, invalid JSON, validation errors, and model fallbacks.
 - Writes SQL `evaluations`, updates denormalized topic scoring fields, and records token usage through Data Connect.
 
@@ -49,6 +51,8 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - 2026-07-01 Codex: Owner reported the public count is stuck at `149/3,702`. Root cause: default `unjudged` mode was spending capacity on stale prompt-version rejudges, and the judge source still read only `GetBoardData`'s first 1000 topics. Change default `unjudged` to true unscored rows, reserve stale prompt rejudge for `changed`, and page judge candidates through `GetBoardPage`.
 - 2026-07-02 Codex: Owner wants score quality preserved: default must remain four evaluators plus consensus referee. Throughput should come from running many evaluator teams in parallel, not switching to a one-call judge.
 - 2026-07-02 Codex: Owner rejected keeping any single-LLM/fast path at all. Remove the fast strategy, its env switch, and its stored prompt/raw-response helpers.
+- 2026-07-02 Codex: Owner hit `operation "GetBoardPage" not found` when starting a run. Root cause is connector deployment skew, not model judging. Add a narrow fallback to the deployed legacy board query so the run button does not fail immediately; full >1000 coverage still requires deploying `GetBoardPage`.
+- 2026-07-02 Codex: Duplicate preliminary posts with identical titles should not both enter the judge queue. Prefer already-scored or higher-scored duplicates before title dedupe, then apply the normal mode filter and max slice.
 
 ## Planned Change: SQL Connect Runtime
 
@@ -92,6 +96,9 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | 2026-07-01 | Planned true-unjudged default queue and paged judge candidate reads to unblock score-count progress beyond 149. | Codex |
 | 2026-07-02 | Planned consensus default with more parallel evaluator teams. | Codex |
 | 2026-07-02 | Deleted the single-evaluator fast judge path. | Codex |
+| 2026-07-02 | Implemented `GetBoardPage` missing-operation fallback to legacy `GetBoardData` for judge candidate reads. | Codex |
+| 2026-07-02 | Planned normalized-title dedupe for judge candidate selection. | Codex |
+| 2026-07-02 | Implemented judge candidate dedupe before mode filtering and run slicing. | Codex |
 
 ## Change Plan: Consensus Only With Parallel Evaluator Teams
 

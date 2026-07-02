@@ -13,6 +13,16 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
+export function isMissingDataConnectOperationError(error: unknown, operationName: string): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("operation") &&
+    normalized.includes("not found") &&
+    message.includes(`"${operationName}"`)
+  );
+}
+
 type ServiceAccountEnv = ServiceAccount & {
   private_key?: string;
   privateKey?: string;

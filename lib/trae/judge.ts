@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { getTraeConfig } from "./config.ts";
-import { getDataConnectDb, nowIso } from "./dataconnect.ts";
+import { getDataConnectDb, isMissingDataConnectOperationError, nowIso } from "./dataconnect.ts";
 import { callLLMWithFallback, LLMFallbackError } from "./llm.ts";
 import { finishRun, startRun } from "./runs.ts";
 import { gatherVisualEvidence, type TopicVisualEvidence } from "./vision.ts";
+import { dedupeByTopicTitle } from "./dedupe.ts";
 import {
+  getBoardData as getBoardDataQuery,
   getBoardPage as getBoardPageQuery,
   upsertEvaluation,
   updateTopicEvaluationState,
@@ -685,16 +687,29 @@ async function fetchJudgeBoardPage(dc: unknown, offset: number): Promise<GetBoar
   return res.data.topics ?? [];
 }
 
+async function fetchLegacyJudgeBoardData(dc: unknown): Promise<GetBoardPageData["topics"]> {
+  const res = await getBoardDataQuery(dc as any);
+  return res.data.topics ?? [];
+}
+
 async function fetchJudgeBoardPages(dc: unknown): Promise<GetBoardPageData["topics"]> {
-  const pages: Array<GetBoardPageData["topics"]> = [];
+  try {
+    const pages: Array<GetBoardPageData["topics"]> = [];
 
-  for (let offset = 0; ; offset += JUDGE_BOARD_PAGE_SIZE) {
-    const page = await fetchJudgeBoardPage(dc, offset);
-    pages.push(page);
-    if (page.length < JUDGE_BOARD_PAGE_SIZE) break;
+    for (let offset = 0; ; offset += JUDGE_BOARD_PAGE_SIZE) {
+      const page = await fetchJudgeBoardPage(dc, offset);
+      pages.push(page);
+      if (page.length < JUDGE_BOARD_PAGE_SIZE) break;
+    }
+
+    return pages.flat();
+  } catch (error) {
+    if (isMissingDataConnectOperationError(error, "GetBoardPage")) {
+      console.warn("Data Connect operation GetBoardPage is not deployed; falling back to legacy GetBoardData.");
+      return fetchLegacyJudgeBoardData(dc);
+    }
+    throw error;
   }
-
-  return pages.flat();
 }
 
 export function shouldJudgeTopicForMode(
@@ -764,7 +779,7 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
       };
     });
 
-    const topics = mapped
+    const topics = dedupeByTopicTitle(mapped)
       .filter(({ topic, latestEvaluation }) => shouldJudgeTopicForMode(topic, latestEvaluation, mode))
       .slice(0, max);
 

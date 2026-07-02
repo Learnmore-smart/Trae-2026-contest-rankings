@@ -21,7 +21,10 @@ Guards public contest routing and workflow safety invariants.
 - Verifies stats fall back to local topic-cache counts when Data Connect is unavailable.
 - Verifies fallback ranking rows are preliminary-only and expose only official track labels after normalization.
 - Verifies the live Data Connect board path uses live query topics as the ranking base rather than the bundled JSON cache.
+- Verifies `GetBoardPage` has a narrow `operation not found` fallback to the legacy deployed board query.
+- Verifies public ranking and judge candidate reads call the shared duplicate-title filter server-side.
 - Verifies the public project detail page does not expose raw AI scoring input/output records.
+- Verifies the public user-topic submit route exists, validates TRAE links through the scraper helper, crawls as preliminary, refreshes the board, and is wired from the client form.
 
 ## Public API
 
@@ -51,6 +54,13 @@ Guards public contest routing and workflow safety invariants.
 - 2026-06-30 Codex: Implemented the official-track fallback test, preliminary-only fallback stats assertion, and static live-board-source guard.
 - 2026-07-01 Codex: Add pagination guards that fail if the client requests `pageSize=1000` again or if the Data Connect board read has no paged operation.
 - 2026-07-01 Codex: Implemented pagination guards for client page size, previous/next controls, `GetBoardPage`, and `fetchBoardPages()`.
+- 2026-07-02 Codex: Add a guard that pagination renders as an explicit `ranking-page-switch` with visible previous/next text, not just icon-only buttons.
+- 2026-07-02 Codex: Implemented the visible page-switch guard and verified it fails before the client markup change, then passes after.
+- 2026-07-02 Codex: Add fallback guards for deployed connectors that do not yet expose `GetBoardPage`.
+- 2026-07-02 Codex: Add source-level guard for the public user-submitted topic crawl route and form wiring.
+- 2026-07-02 Codex: Tighten the source guard so `/submit` must call `fetchTopic` with `requirePreliminaryCategory: true` and expose `GET` status for refresh-surviving background crawls.
+- 2026-07-02 Codex: Implemented the guard for `__traeTopicSubmit`, `GET`, background `runSubmittedTopic`, strict fetch options, and client-side status `GET` polling.
+- 2026-07-02 Codex: Add source-level guard requiring normalized-title dedupe to be wired into both public ranking and judge candidate selection.
 
 ## Important Notes / NEVER Change
 
@@ -86,6 +96,13 @@ Guards public contest routing and workflow safety invariants.
 | 2026-07-01 | Implemented detail-page basePath, error contrast, AI I/O, ranking error contrast, and pipeline error-detail guards. | Codex |
 | 2026-07-01 | Planned public ranking pagination regression guards. | Codex |
 | 2026-07-01 | Implemented public ranking pagination regression guards. | Codex |
+| 2026-07-02 | Planned visible page-switch source guard. | Codex |
+| 2026-07-02 | Implemented visible page-switch source guard. | Codex |
+| 2026-07-02 | Implemented public user-topic submit route/client source guard. | Codex |
+| 2026-07-02 | Planned preliminary-only and refresh-surviving submit route guard. | Codex |
+| 2026-07-02 | Implemented preliminary-only and refresh-surviving submit route guard. | Codex |
+| 2026-07-02 | Added duplicate-title server-side integration guard. | Codex |
+| 2026-07-02 | Updated fallback count expectation to use unique titles after server-side dedupe. | Codex |
 
 ## Planned Change: Public Run Workflow Guard
 
@@ -102,6 +119,7 @@ Guards public contest routing and workflow safety invariants.
 - 2026-07-01 Codex: Update the guard to expect `100 / 20`, and add a source guard that the judge worker also uses paged board reads rather than first-1000 `GetBoardData`.
 - 2026-07-02 Codex: Update the guard to expect `100 / 100` so public runs can start 100 consensus evaluator teams concurrently.
 - Implemented the `100 / 100` public route policy guard.
+- 2026-07-02 Codex: Revise the paged-read guards so `GetBoardData` is allowed only as a fallback for `operation "GetBoardPage" not found`.
 
 ## Bug Fix Plan: Detail Page Must Work Under Base Path
 

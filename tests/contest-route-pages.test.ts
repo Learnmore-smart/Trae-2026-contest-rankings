@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 
+import { dedupeByTopicTitle } from "../lib/trae/dedupe.ts";
+
 const appDir = join(process.cwd(), "app");
 const landingPagePath = join(appDir, "page.tsx");
 const rankingPagePath = join(appDir, "ranking/page.tsx");
@@ -11,6 +13,7 @@ const clientPath = join(appDir, "contest-client.tsx");
 const projectDetailClientPath = join(appDir, "project/project-detail-client.tsx");
 const nextConfigPath = join(process.cwd(), "next.config.mjs");
 const runRoutePath = join(process.cwd(), "app/api/trae-contest/run/route.ts");
+const submitRoutePath = join(process.cwd(), "app/api/trae-contest/submit/route.ts");
 const judgePolicyPath = join(process.cwd(), "lib/trae/judge-policy.ts");
 const judgePath = join(process.cwd(), "lib/trae/judge.ts");
 const dataConnectQueriesPath = join(process.cwd(), "dataconnect/connector/queries.gql");
@@ -109,6 +112,15 @@ test("public ranking uses bounded server pages instead of a 1000-row client page
   assert.match(client, /aria-label=\{t\.nextPage\}/);
 });
 
+test("public ranking page switch is visible text, not icon-only", () => {
+  const client = read(clientPath);
+
+  assert.match(client, /className="ranking-page-switch"/);
+  assert.match(client, /className="ranking-page-switch__label" aria-live="polite"/);
+  assert.match(client, /className="ranking-page-switch__text">\{t\.previousPage\}/);
+  assert.match(client, /className="ranking-page-switch__text">\{t\.nextPage\}/);
+});
+
 test("Data Connect board reads can page beyond the first 1000 topics", () => {
   const queries = read(dataConnectQueriesPath);
   const traeApi = read(traeApiPath);
@@ -117,20 +129,34 @@ test("Data Connect board reads can page beyond the first 1000 topics", () => {
   assert.match(queries, /limit: \$limit/);
   assert.match(queries, /offset: \$offset/);
   assert.match(traeApi, /getBoardPage as getBoardPageQuery/);
+  assert.match(traeApi, /getBoardData as getBoardDataQuery/);
   assert.match(traeApi, /const BOARD_PAGE_SIZE = 1000;/);
   assert.match(traeApi, /async function fetchBoardPages/);
   assert.match(traeApi, /getBoardPageQuery\(dc as any, \{ limit: BOARD_PAGE_SIZE, offset \}/);
-  assert.doesNotMatch(traeApi, /getBoardData as getBoardDataQuery/);
+  assert.match(traeApi, /isMissingDataConnectOperationError\(error, "GetBoardPage"\)/);
+  assert.match(traeApi, /getBoardDataQuery\(dc as any\)/);
 });
 
 test("judge candidate reads can page beyond the first 1000 topics", () => {
   const judge = read(judgePath);
 
   assert.match(judge, /getBoardPage as getBoardPageQuery/);
+  assert.match(judge, /getBoardData as getBoardDataQuery/);
   assert.match(judge, /const JUDGE_BOARD_PAGE_SIZE = 1000;/);
   assert.match(judge, /async function fetchJudgeBoardPages/);
   assert.match(judge, /getBoardPageQuery\(dc as any, \{ limit: JUDGE_BOARD_PAGE_SIZE, offset \}/);
-  assert.doesNotMatch(judge, /\bgetBoardData\b/);
+  assert.match(judge, /isMissingDataConnectOperationError\(error, "GetBoardPage"\)/);
+  assert.match(judge, /getBoardDataQuery\(dc as any\)/);
+});
+
+test("ranking and judge candidates filter duplicate topic titles server-side", () => {
+  const traeApi = read(traeApiPath);
+  const judge = read(judgePath);
+
+  assert.match(traeApi, /import \{ dedupeByTopicTitle \} from "\.\/dedupe\.ts";/);
+  assert.match(traeApi, /items = dedupeByTopicTitle\(items\);\s*items = items\.map/);
+  assert.match(judge, /import \{ dedupeByTopicTitle \} from "\.\/dedupe\.ts";/);
+  assert.match(judge, /const topics = dedupeByTopicTitle\(mapped\)\s*\.filter/);
 });
 
 test("stats load path is independent from ranking topic list", () => {
@@ -178,9 +204,14 @@ test("ranking topics fall back to local cache when Data Connect is unconfigured"
 test("ranking fallback rows are preliminary-only and use official track labels", async () => {
   type CachedTopic = {
     sourceType?: string;
+    title?: string;
   };
   const cachedTopics = JSON.parse(read(topicsCachePath)) as CachedTopic[];
-  const expectedPreliminaryCount = cachedTopics.filter((topic) => topic.sourceType === "PRELIMINARY").length;
+  const expectedPreliminaryCount = dedupeByTopicTitle(
+    cachedTopics
+      .filter((topic) => topic.sourceType === "PRELIMINARY")
+      .map((topic) => ({ topic: { title: topic.title ?? "" } }))
+  ).length;
   const envKeys = [
     "FIREBASE_SERVICE_ACCOUNT_KEY",
     "GOOGLE_APPLICATION_CREDENTIALS",
@@ -287,4 +318,25 @@ test("public run status reports bounded judging batch counts", () => {
   assert.match(client, /setStatus\(\{ running: true, phase: "judge", startedAt: null, finishedAt: null, message: t\.judging, error: null \}\);/);
   assert.match(client, /cooldown \? t\.cooldown : status\?\.message \?\? phaseMessage\(phase, language\)/);
   assert.match(client, /phase === "error" && status\?\.error/);
+});
+
+test("public user topic submit only accepts TRAE forum links and refreshes the board", () => {
+  const client = read(clientPath);
+
+  assert.ok(existsSync(submitRoutePath), "submit route should exist");
+  const route = read(submitRoutePath);
+
+  assert.match(route, /export function GET/);
+  assert.match(route, /__traeTopicSubmit/);
+  assert.match(route, /void runSubmittedTopic/);
+  assert.match(route, /parseTraeForumTopicUrl/);
+  assert.match(route, /fetchTopic\("preliminary", ref, \{ requirePreliminaryCategory: true \}\)/);
+  assert.match(route, /upsertTopic\(topic\)/);
+  assert.match(route, /writeBoardSnapshot\(\)/);
+  assert.match(route, /status: 400/);
+
+  assert.match(client, /function UserTopicSubmit/);
+  assert.match(client, /fetch\(`\$\{API_BASE\}\/api\/trae-contest\/submit`, \{ cache: "no-store" \}\)/);
+  assert.match(client, /fetch\(`\$\{API_BASE\}\/api\/trae-contest\/submit`/);
+  assert.match(client, /<UserTopicSubmit language=\{language\} onSubmitted=\{load\} \/>/);
 });

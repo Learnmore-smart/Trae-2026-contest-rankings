@@ -13,6 +13,7 @@ Initializes Firebase Admin for Firebase Data Connect and exposes the SQL connect
 - Initializes exactly one Firebase Admin app.
 - Returns the generated `trae-contest` Data Connect admin connector.
 - Provides `nowIso()` for pipeline timestamps.
+- Detects Data Connect "operation not found" errors so callers can fall back when generated SDK code is ahead of the deployed connector.
 
 ## Public API
 
@@ -20,6 +21,7 @@ Initializes Firebase Admin for Firebase Data Connect and exposes the SQL connect
 |------|------|-------------|
 | `getDataConnectDb` | function | Returns the Data Connect admin connector. |
 | `isDataConnectConfigured` | function | Reports whether server credentials are available. |
+| `isMissingDataConnectOperationError` | function | Checks whether a Data Connect error means a named operation is not deployed on the active connector. |
 | `nowIso` | function | Returns an ISO timestamp string. |
 
 ## Dependencies
@@ -31,6 +33,7 @@ Initializes Firebase Admin for Firebase Data Connect and exposes the SQL connect
 
 - 2026-06-30 Codex: Move active runtime code off the old Firestore helper path. Keep Firebase Admin initialization because Data Connect Admin still needs a Firebase app, but do not import or instantiate Firestore.
 - 2026-06-30 Codex: Implemented `getDataConnectDb()` with Firebase app initialization and no Firestore Admin dependency.
+- 2026-07-02 Codex: Owner hit `operation "GetBoardPage" not found` after clicking run. Root cause is generated code calling a query that the active deployed connector does not yet expose. Add a shared operation-missing detector so board/judge reads can fall back without hiding other Data Connect failures.
 
 ## Bug Fix: App-Wide Data Connect Credential Failure (Silent Fallback To Stale Cache)
 
@@ -53,3 +56,4 @@ Initializes Firebase Admin for Firebase Data Connect and exposes the SQL connect
 | 2026-06-30 | Planned Data Connect admin helper. | Codex |
 | 2026-06-30 | Implemented Data Connect admin helper. | Codex |
 | 2026-06-30 | Fixed silent Data Connect auth failure: repaired the `FIREBASE_SERVICE_ACCOUNT_KEY` PEM footer typo on `private_key` (not just the derived `privateKey` copy) so real DB reads/writes stop silently falling back to the stale local JSON cache. | Claude |
+| 2026-07-02 | Implemented Data Connect operation-missing detector for `GetBoardPage` deployment skew fallback. | Codex |

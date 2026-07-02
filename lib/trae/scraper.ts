@@ -29,6 +29,20 @@ export interface CategoryTopicRef {
   rawJson?: unknown;
 }
 
+const TRAE_FORUM_ORIGIN = "https://forum.trae.cn";
+const PRELIMINARY_CATEGORY_TEXT = "大赛初赛专区";
+
+export class TraeForumUrlError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TraeForumUrlError";
+  }
+}
+
+export interface FetchTopicOptions {
+  requirePreliminaryCategory?: boolean;
+}
+
 interface FetchResult {
   url: string;
   body: string;
@@ -171,6 +185,76 @@ function categoryJsonUrl(sourceUrl: string, page: number): string {
   const url = new URL(jsonUrl);
   url.searchParams.set("page", String(page));
   return url.toString();
+}
+
+function decodeTopicSlug(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+export function parseTraeForumTopicUrl(rawUrl: string): CategoryTopicRef {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl.trim());
+  } catch {
+    throw new TraeForumUrlError("请输入有效的 TRAE 论坛链接。");
+  }
+
+  if (parsed.origin !== TRAE_FORUM_ORIGIN) {
+    throw new TraeForumUrlError("链接必须来自 https://forum.trae.cn/。");
+  }
+
+  const segments = parsed.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
+  if (segments[0] !== "t") {
+    throw new TraeForumUrlError("请输入 TRAE 论坛帖子链接，而不是分类或首页链接。");
+  }
+
+  const idSegment = segments.length >= 3 ? segments[2] : segments[1];
+  const externalTopicId = idSegment?.replace(/\.json$/, "");
+  if (!externalTopicId || !/^\d+$/.test(externalTopicId)) {
+    throw new TraeForumUrlError("无法从链接中识别帖子 ID。");
+  }
+
+  const slug = segments.length >= 3 ? decodeTopicSlug(segments[1]) : "topic";
+  const encodedSlug = encodeURIComponent(slug || "topic");
+
+  return {
+    externalTopicId,
+    slug,
+    title: `Topic ${externalTopicId}`,
+    url: `${TRAE_FORUM_ORIGIN}/t/${encodedSlug}/${externalTopicId}`
+  };
+}
+
+function includesPreliminaryCategoryText(value: string): boolean {
+  return normalizeWhitespace(value).includes(PRELIMINARY_CATEGORY_TEXT);
+}
+
+function pageTitleHasPreliminaryCategory(html: string): boolean {
+  const $ = cheerio.load(html);
+  const title = normalizeWhitespace($("title").first().text() || html);
+  return new RegExp(`/\\s*【?${PRELIMINARY_CATEGORY_TEXT}】?\\s*-`).test(title);
+}
+
+function collectCategoryStrings(value: unknown, insideCategoryField = false, depth = 0): string[] {
+  if (depth > 8 || value == null) return [];
+  if (typeof value === "string") return insideCategoryField ? [value] : [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectCategoryStrings(item, insideCategoryField, depth + 1));
+  }
+  if (typeof value !== "object") return [];
+
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) =>
+    collectCategoryStrings(nested, insideCategoryField || /category/i.test(key), depth + 1)
+  );
+}
+
+export function isSubmittedPreliminaryTopicPayload(payload: unknown): boolean {
+  if (typeof payload === "string") return pageTitleHasPreliminaryCategory(payload);
+  return collectCategoryStrings(payload).some(includesPreliminaryCategoryText);
 }
 
 function topicJsonUrl(topic: CategoryTopicRef): string {
@@ -401,10 +485,23 @@ export function usernameFromAvatarUrl(raw: string | undefined | null): string | 
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-export async function fetchTopic(sourceType: TraeSourceType, ref: CategoryTopicRef): Promise<TraeTopic> {
+function assertSubmittedPreliminaryTopic(payload: unknown): void {
+  if (!isSubmittedPreliminaryTopicPayload(payload)) {
+    throw new TraeForumUrlError("只支持【大赛初赛专区】帖子。");
+  }
+}
+
+export async function fetchTopic(sourceType: TraeSourceType, ref: CategoryTopicRef, options: FetchTopicOptions = {}): Promise<TraeTopic> {
   const jsonPayload = await tryFetchJson(topicJsonUrl(ref));
-  if (jsonPayload) return topicFromJson(sourceType, ref, jsonPayload);
+  if (jsonPayload) {
+    if (options.requirePreliminaryCategory && !isSubmittedPreliminaryTopicPayload(jsonPayload)) {
+      const html = await fetchText(ref.url, "text/html,application/xhtml+xml").then((result) => result.body);
+      assertSubmittedPreliminaryTopic(html);
+    }
+    return topicFromJson(sourceType, ref, jsonPayload);
+  }
   const html = await fetchText(ref.url, "text/html,application/xhtml+xml").then((result) => result.body);
+  if (options.requirePreliminaryCategory) assertSubmittedPreliminaryTopic(html);
   return topicFromHtml(sourceType, ref, html);
 }
 

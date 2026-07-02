@@ -11,8 +11,10 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 - Combines topic, latest evaluation, and match data.
 - Computes stats cards and online presence counts.
 - Applies public filters and sorting for preliminary-only listings.
+- Filters duplicate public ranking rows by normalized topic title so repeated forum posts do not occupy multiple ranks.
 - Sums token usage aggregate documents into public input/output totals.
 - Caches the built board data in memory for a short TTL, supporting `bypassCache` to force rebuilds from Data Connect.
+- Falls back from paged `GetBoardPage` reads to legacy `GetBoardData` when the deployed connector has not yet been updated with the new operation.
 
 ## Public API
 
@@ -35,6 +37,8 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 - 2026-06-30 Codex: SQL migration keeps the same public API shape while replacing Firestore collection reads with Data Connect generated queries.
 - 2026-07-01 Codex: Public board construction should page through bounded Data Connect board chunks and cache the assembled read model, so the browser gets small pages while filters/sorts still run against the full preliminary set.
 - 2026-07-01 Codex: Implemented `fetchBoardPages()` using `GetBoardPage` chunks of 1000 rows based on the live preliminary count.
+- 2026-07-02 Codex: Owner hit `operation "GetBoardPage" not found`; production connector can lag generated code. Add a narrow fallback to legacy `GetBoardData` only for that exact missing-operation case.
+- 2026-07-02 Codex: Owner reported duplicate public ranking posts with the same title. Public sorting should happen first, then normalized-title dedupe should keep only the highest visible row for the active sort before ranks and pagination are assigned.
 
 ## Planned Change: Lint And SQL Adapter Boundary
 
@@ -92,3 +96,6 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 | 2026-06-30 | Implemented official-track normalization and live Data Connect board source usage. | Codex |
 | 2026-07-01 | Planned chunked full-board assembly for accurate server-side pagination. | Codex |
 | 2026-07-01 | Implemented chunked board page assembly via generated `getBoardPage`. | Codex |
+| 2026-07-02 | Implemented `GetBoardPage` missing-operation fallback to `GetBoardData`. | Codex |
+| 2026-07-02 | Planned normalized-title dedupe for public ranking rows. | Codex |
+| 2026-07-02 | Implemented public ranking dedupe after sorting and before rank pagination. | Codex |

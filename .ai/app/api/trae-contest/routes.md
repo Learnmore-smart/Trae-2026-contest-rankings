@@ -9,6 +9,7 @@ Documents the route handlers created for public, admin, and cron TRAE APIs.
 ## What It Does
 
 - Public read routes expose stats, preliminary topic lists, topic details, and presence heartbeats.
+- Public submit route accepts one user-provided TRAE forum topic link and crawls that topic only.
 - Admin routes validate `TRAE_ADMIN_TOKEN` before scrape/match/judge/run-history actions.
 - Cron routes validate `TRAE_CRON_SECRET` before scheduled worker actions.
 - Dev routes must be available only from localhost and must not work in hosted production traffic.
@@ -38,6 +39,9 @@ Documents the route handlers created for public, admin, and cron TRAE APIs.
 - 2026-06-29 Codex: Use a single doc for related route handlers to keep the empty scaffold documentation manageable.
 - 2026-06-29 Codex: Add GET cron support for hosted schedulers while preserving cron-secret validation; add a separate localhost-only dev route so local testing does not require exposing admin tokens.
 - 2026-06-29 Claude: Add a public token-free `POST/GET /api/trae-contest/run` so the single landing-page button can trigger and poll the whole pipeline. Safety comes from a module-level in-flight lock + 30s cooldown (state stored on `globalThis` to survive dev hot-reload) rather than a token. Runs fire-and-forget so the HTTP response is immediate; on serverless the scheduled cron remains the authoritative path for long runs. Also relaxed `dev/run` localhost detection to accept loopback `x-forwarded-for`/`x-forwarded-host` values (the Next dev server forwards `::1`), which previously 403'd legitimate localhost requests.
+- 2026-07-02 Codex: Add a public `POST /api/trae-contest/submit` endpoint for one strict TRAE forum topic URL. Keep it separate from `/run` so users can ask the site to crawl their own post without starting the full scrape/match/judge pipeline.
+- 2026-07-02 Codex: Implemented `/submit` with strict URL validation, single preliminary topic fetch/upsert, best-effort board snapshot refresh, and explicit 400 responses for invalid links.
+- 2026-07-02 Codex: Updated `/submit` to mirror the public run route's refresh-safe status model: `POST` starts one background crawl, `GET` returns current status, and the background worker rejects topics whose published category text is not `大赛初赛专区`.
 
 ## Important Notes / NEVER Change
 
@@ -53,3 +57,6 @@ Documents the route handlers created for public, admin, and cron TRAE APIs.
 | 2026-06-29 | Planned GET cron and localhost-only dev runner routes. | Codex |
 | 2026-06-29 | Implemented GET cron handler and localhost-only dev runner route. | Codex |
 | 2026-06-29 | Added public `run` pipeline trigger/status endpoint for the single landing button; relaxed dev/run loopback detection. | Claude |
+| 2026-07-02 | Planned public single-topic submit route. | Codex |
+| 2026-07-02 | Implemented public single-topic submit route. | Codex |
+| 2026-07-02 | Implemented refresh-safe submitted-topic crawl status and preliminary-only validation. | Codex |
