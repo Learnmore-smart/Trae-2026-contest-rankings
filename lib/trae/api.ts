@@ -415,13 +415,6 @@ export async function listRankedTopics(params: TopicListParams = {}): Promise<{
   }
 
   if (params.track) items = items.filter((item) => item.topic.track === params.track);
-  if (query) {
-    items = items.filter((item) =>
-      `${item.topic.title} ${item.topic.authorName} ${item.topic.excerpt} ${item.topic.tags.join(" ")}`
-        .toLowerCase()
-        .includes(query)
-    );
-  }
   if (typeof params.minConfidence === "number") {
     items = items.filter((item) => (item.evaluation?.confidenceScore ?? 0) >= params.minConfidence!);
   }
@@ -433,9 +426,17 @@ export async function listRankedTopics(params: TopicListParams = {}): Promise<{
     return compareSortValueDescending(left, right, sort);
   });
   items = dedupeByTopicTitle(items);
-  // Assign rank in canonical best-first order first, then reverse each partition
-  // the display order — so rank always means leaderboard position, not row number.
+  // Assign rank over the full (unsearched) leaderboard, then apply the search filter.
+  // This keeps rank meaning true leaderboard position: a search narrows which rows are
+  // shown without renumbering them, so a user can't fake a #1 by searching their own work.
   items = items.map((item, index) => ({ ...item, rank: index + 1 }));
+  if (query) {
+    items = items.filter((item) =>
+      `${item.topic.title} ${item.topic.authorName} ${item.topic.excerpt} ${item.topic.tags.join(" ")}`
+        .toLowerCase()
+        .includes(query)
+    );
+  }
   if (dir === "asc") {
     const gradedItems = items.filter(isGradedRankingItem).reverse();
     const ungradedItems = items.filter((item) => !isGradedRankingItem(item)).reverse();
