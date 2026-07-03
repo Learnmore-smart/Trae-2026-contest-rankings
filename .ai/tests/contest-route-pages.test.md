@@ -111,6 +111,16 @@ Guards public contest routing and workflow safety invariants.
 | 2026-07-02 | Implemented deleted/empty suppression, selectable page size, and selectable sort direction guards. | Codex |
 | 2026-07-02 | Planned filter-change skeleton and graded-first ordering guards. | Codex |
 | 2026-07-02 | Implemented filter-change skeleton and ascending graded-first ordering regression guards. | Codex |
+| 2026-07-03 | Planned RSC suffix normalization guard for clicked project detail navigation. | Codex |
+| 2026-07-03 | Implemented RSC suffix helper and route/API source guards. | Codex |
+
+## Bug Fix Plan: Clicked Detail Cards Must Not Keep `.rsc` In Topic IDs
+
+- 2026-07-03 Codex: Browser reproduction on `https://www.rateministere.com/trae-contest-2026/ranking` showed that clicking the first ranking card navigates to `/project/preliminary_28589`, but the detail client requests `/api/trae-contest/topics/preliminary_28589.rsc` and receives 404.
+- Root cause: client-side App Router RSC navigation behind the Vercel external rewrite can surface Next's internal `.rsc` suffix as part of the dynamic `[id]` route param. A manual hard refresh uses the normal document request, so the id is clean and the page works.
+- Fix strategy: add a shared `normalizeTopicRouteId()` helper, use it in `app/project/[id]/page.tsx` before passing the id to the client, and use it in `app/api/trae-contest/topics/[id]/route.ts` before `getTopicDetail()`.
+- Test plan: add Node tests that require the helper to strip only terminal `.rsc`, and source guards requiring both route boundaries to call the helper.
+- Implemented: `tests/contest-route-pages.test.ts` now imports the helper, verifies terminal-only suffix stripping, and guards both route files for helper usage.
 
 ## Planned Change: Public Run Workflow Guard
 

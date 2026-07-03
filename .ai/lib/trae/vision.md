@@ -72,3 +72,12 @@ Gathers real visual evidence for judging: describes a topic's post images and ca
 - 2026-07-01 Codex: Owner reported posts visibly containing images can still show "no images" or fail to use the right evidence for mini-program/app demos. The extractor will mark likely QR/demo-access images in `traeEvidence.visualDemoImageUrls`; `describeTopicImages()` should prioritize those before generic screenshots while keeping the existing cap.
 - Keep the existing no-throw behavior: if Kimi/vision fails, judging must still proceed with honest evidence-limit wording.
 - Implemented: `describeTopicImages()` prepends `visualDemoImageUrls`, then likely QR/miniprogram filenames inferred from legacy text cues, then `imageUrls`; it dedupes before applying the existing 4-image cap.
+
+## Change Plan: Pluggable Demo Audit Evidence
+
+- 2026-07-03 Codex: Add a pluggable demo audit path before the thum.io fallback. The default runtime still avoids directly fetching arbitrary demos, but tests and future Cloud Run workers can inject a browser/package auditor that opens web demos, clicks primary controls, or extracts downloadable HTML packages and returns real screenshots for Kimi.
+- Extend `VisualEvidence` with optional `source`, `auditStatus`, and `artifactType` metadata.
+- Add an optional `demoAuditFn` hook to `GatherVisualEvidenceOptions`.
+- `describeDemoScreenshot()` should try the hook first. If it returns evidence, preserve it and do not call thum.io.
+- If the hook is absent or returns null, keep the existing thum.io screenshot-proxy fallback and label it as `screenshot_proxy`, not interactive browsing.
+- Tests must inject the hook so no network or Playwright dependency is required.

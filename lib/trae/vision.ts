@@ -5,10 +5,17 @@ import type { TraeTopic } from "./types.ts";
 /** Cap each vision request while still covering every uploaded image across batches. */
 const MAX_TOPIC_IMAGES_PER_BATCH = 4;
 
+export type DemoEvidenceSource = "browser_agent" | "package_agent" | "screenshot_proxy";
+export type DemoAuditStatus = "browser_verified" | "package_verified" | "first_screen_only" | "verification_failed";
+export type DemoArtifactType = "web" | "download" | "qr_or_image";
+
 export interface VisualEvidence {
   summary: string;
   provider: string;
   model: string;
+  source?: DemoEvidenceSource;
+  auditStatus?: DemoAuditStatus;
+  artifactType?: DemoArtifactType;
 }
 
 export interface TopicVisualEvidence {
@@ -20,6 +27,7 @@ export interface GatherVisualEvidenceOptions {
   config?: TraeConfig;
   fetchFn?: typeof fetch;
   sleepFn?: (delayMs: number) => Promise<void>;
+  demoAuditFn?: (topic: TraeTopic) => Promise<VisualEvidence | null>;
 }
 
 function isHttpUrl(url: string): boolean {
@@ -131,6 +139,15 @@ export async function describeDemoScreenshot(
   topic: TraeTopic,
   options: GatherVisualEvidenceOptions = {}
 ): Promise<VisualEvidence | null> {
+  if (options.demoAuditFn) {
+    try {
+      const auditEvidence = await options.demoAuditFn(topic);
+      if (auditEvidence) return auditEvidence;
+    } catch {
+      // Fall back to the screenshot proxy when an optional browser/package audit fails.
+    }
+  }
+
   if (!topic.demoUrl) return null;
   const screenshotUrl = buildDemoScreenshotUrl(topic.demoUrl);
   if (!screenshotUrl) return null;
@@ -154,7 +171,14 @@ export async function describeDemoScreenshot(
       fetchFn: options.fetchFn,
       sleepFn: options.sleepFn
     });
-    return { summary: result.content.trim(), provider: result.provider, model: result.model };
+    return {
+      summary: result.content.trim(),
+      provider: result.provider,
+      model: result.model,
+      source: "screenshot_proxy",
+      auditStatus: "first_screen_only",
+      artifactType: "web"
+    };
   } catch {
     return null;
   }

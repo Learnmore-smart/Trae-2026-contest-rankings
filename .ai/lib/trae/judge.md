@@ -149,3 +149,14 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - 2026-07-03 Codex: Remove REMOVED_PROVIDER from provider maps used by evaluation persistence and reverse mapping.
 - New evaluations should only originate from `friend` or `nvidia` runtime providers and persist as `NVIDIA`.
 
+## Change Plan: Evidence Semantics for Re-Audit
+
+- 2026-07-03 Codex: Owner clarified audit standards: Session ID should be judged as present/missing, not by suspicious authenticity or a 3-count threshold.
+- Demo review should first prove whether material exists, then separately report whether browser/package verification ran.
+- "Unable to verify interactive core functionality" is only justified when no product/demo evidence exists or actual browser/package/screenshot evidence shows a static, broken, or non-core product page.
+- Bump `PROMPT_VERSION` so stale scores can be rejudged under the corrected standard.
+- Change `complianceHints()` so Session ID is only missing when no IDs are detected.
+- Update base/evaluator/consensus prompts to distinguish demo material availability from verification method.
+- Do not phrase found-but-unverified Demo evidence as missing Demo.
+- Do not ask the model to doubt Session ID authenticity; only present whether Session IDs were detected.
+

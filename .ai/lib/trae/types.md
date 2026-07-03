@@ -57,3 +57,9 @@ Defines shared TypeScript types and Zod schemas for TRAE topics, matches, evalua
 - Runtime call logs should only emit `friend` or `nvidia`.
 - Data Connect adapters continue to persist the supported provider bucket as `NVIDIA`.
 
+## Change Plan: Evidence Review Semantics
+
+- 2026-07-03 Codex: Add optional demo-verification metadata for visual evidence so prompts can separate "Demo found", "first screenshot proxy inspected", "browser/package audit performed", and "verification failed".
+- Keep persisted topic evidence backward-compatible; do not require a Data Connect schema migration.
+- Session ID material checks should be interpreted by prompts as binary present/missing; counts may remain in extracted metadata for display and historical compatibility.
+

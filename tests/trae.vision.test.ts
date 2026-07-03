@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getTraeConfig } from "../lib/trae/config.ts";
+import { auditDemoArtifact } from "../lib/trae/demo-audit.ts";
 import {
   buildDemoScreenshotUrl,
   describeDemoScreenshot,
@@ -118,6 +119,126 @@ const baseTopic: TraeTopic = {
 function visionResponse(text: string): Response {
   return Response.json({ choices: [{ message: { content: text } }] });
 }
+
+function fakePlaywright(screenshotBytes: Uint8Array, navigations: string[], clicks: string[]) {
+  return {
+    chromium: {
+      launch: async () => ({
+        newPage: async () => ({
+          goto: async (url: string) => {
+            navigations.push(url);
+          },
+          waitForLoadState: async () => undefined,
+          locator: (selector: string) => ({
+            first() {
+              return this;
+            },
+            count: async () => (selector.includes("button") ? 1 : 0),
+            isVisible: async () => true,
+            click: async () => {
+              clicks.push(selector);
+            }
+          }),
+          screenshot: async () => Buffer.from(screenshotBytes)
+        }),
+        close: async () => undefined
+      })
+    }
+  };
+}
+
+function makeStoredZip(entries: Array<{ name: string; content: string }>): Buffer {
+  const chunks: Buffer[] = [];
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name);
+    const content = Buffer.from(entry.content);
+    const header = Buffer.alloc(30);
+    header.writeUInt32LE(0x04034b50, 0);
+    header.writeUInt16LE(20, 4);
+    header.writeUInt16LE(0, 6);
+    header.writeUInt16LE(0, 8);
+    header.writeUInt32LE(0, 10);
+    header.writeUInt32LE(0, 14);
+    header.writeUInt32LE(content.length, 18);
+    header.writeUInt32LE(content.length, 22);
+    header.writeUInt16LE(name.length, 26);
+    header.writeUInt16LE(0, 28);
+    chunks.push(header, name, content);
+  }
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  chunks.push(end);
+  return Buffer.concat(chunks);
+}
+
+describe("auditDemoArtifact", () => {
+  it("opens a web demo with a browser adapter, clicks a primary control, and sends the screenshot to vision", async () => {
+    await withEnv(zeroBudgetEnv(), async () => {
+      const navigations: string[] = [];
+      const clicks: string[] = [];
+      let sawScreenshot = false;
+      const evidence = await auditDemoArtifact(baseTopic, {
+        config: getTraeConfig(),
+        importPlaywright: async () => fakePlaywright(Buffer.from("fake-png"), navigations, clicks),
+        fetchFn: async (_url, init) => {
+          const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ type: string; image_url?: { url: string } }> }> };
+          sawScreenshot = body.messages[0]?.content.some((part) => part.image_url?.url.startsWith("data:image/png;base64,")) ?? false;
+          return visionResponse("浏览器审核显示点击后进入了可交互产品界面。");
+        },
+        sleepFn: async () => undefined
+      });
+
+      assert.deepEqual(navigations, [baseTopic.demoUrl]);
+      assert.ok(clicks.length >= 1);
+      assert.equal(sawScreenshot, true);
+      assert.equal(evidence?.source, "browser_agent");
+      assert.equal(evidence?.auditStatus, "browser_verified");
+      assert.equal(evidence?.artifactType, "web");
+      assert.match(evidence?.summary ?? "", /可交互产品界面/);
+    });
+  });
+
+  it("extracts a zip demo, opens index.html with a browser adapter, and sends the screenshot to vision", async () => {
+    await withEnv(zeroBudgetEnv(), async () => {
+      const navigations: string[] = [];
+      const zip = makeStoredZip([
+        { name: "dist/index.html", content: "<!doctype html><button>Start</button>" },
+        { name: "dist/app.js", content: "console.log('demo')" }
+      ]);
+      const evidence = await auditDemoArtifact(
+        {
+          ...baseTopic,
+          demoUrl: null,
+          attachmentUrls: ["https://forum.example.test/uploads/source.zip"],
+          traeEvidence: {
+            ...baseTopic.traeEvidence,
+            hasDemoUrl: false,
+            hasDemoEvidence: true,
+            demoEvidenceTypes: ["download"],
+            downloadDemoUrls: ["https://forum.example.test/uploads/source.zip"]
+          }
+        },
+        {
+          config: getTraeConfig(),
+          importPlaywright: async () => fakePlaywright(Buffer.from("zip-png"), navigations, []),
+          fetchFn: async (url, init) => {
+            if (String(url).includes("/uploads/source.zip")) return new Response(zip);
+            const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ image_url?: { url: string } }> }> };
+            assert.ok(body.messages[0]?.content.some((part) => part.image_url?.url.startsWith("data:image/png;base64,")));
+            return visionResponse("ZIP 包审核显示 index.html 可以渲染为产品界面。");
+          },
+          sleepFn: async () => undefined
+        }
+      );
+
+      assert.ok(navigations[0]?.startsWith("file://"));
+      assert.equal(evidence?.source, "package_agent");
+      assert.equal(evidence?.auditStatus, "package_verified");
+      assert.equal(evidence?.artifactType, "download");
+      assert.match(evidence?.summary ?? "", /index\.html/);
+    });
+  });
+});
 
 describe("buildDemoScreenshotUrl", () => {
   it("builds a thum.io screenshot URL for http(s) demo links", () => {
@@ -344,6 +465,77 @@ describe("describeTopicImages", () => {
 });
 
 describe("describeDemoScreenshot", () => {
+  it("uses injected browser audit evidence before the screenshot-proxy fallback", async () => {
+    await withEnv(zeroBudgetEnv(), async () => {
+      let auditCalled = false;
+      let fetchCalled = false;
+      const evidence = await describeDemoScreenshot(baseTopic, {
+        config: getTraeConfig(),
+        demoAuditFn: async (topic) => {
+          auditCalled = true;
+          assert.equal(topic.id, baseTopic.id);
+          return {
+            summary: "Browser agent opened the demo, clicked the primary control, and captured an interactive product screen.",
+            provider: "browser-agent",
+            model: "playwright+kimi-k2.6",
+            source: "browser_agent",
+            auditStatus: "browser_verified",
+            artifactType: "web"
+          };
+        },
+        fetchFn: async () => {
+          fetchCalled = true;
+          return visionResponse("unused");
+        }
+      });
+
+      assert.equal(auditCalled, true);
+      assert.equal(fetchCalled, false);
+      assert.equal(evidence?.source, "browser_agent");
+      assert.equal(evidence?.auditStatus, "browser_verified");
+      assert.equal(evidence?.artifactType, "web");
+      assert.match(evidence?.summary ?? "", /clicked the primary control/);
+    });
+  });
+
+  it("allows injected package audit evidence when only a downloadable zip demo exists", async () => {
+    await withEnv(zeroBudgetEnv(), async () => {
+      const evidence = await describeDemoScreenshot(
+        {
+          ...baseTopic,
+          demoUrl: null,
+          attachmentUrls: ["https://forum.example.test/uploads/source.zip"],
+          traeEvidence: {
+            ...baseTopic.traeEvidence,
+            hasDemoUrl: false,
+            hasDemoEvidence: true,
+            demoEvidenceTypes: ["download"],
+            downloadDemoUrls: ["https://forum.example.test/uploads/source.zip"]
+          }
+        },
+        {
+          config: getTraeConfig(),
+          demoAuditFn: async () => ({
+            summary: "Package auditor extracted index.html from the zip and captured a rendered product screen.",
+            provider: "browser-agent",
+            model: "zip-html+kimi-k2.6",
+            source: "package_agent",
+            auditStatus: "package_verified",
+            artifactType: "download"
+          }),
+          fetchFn: async () => {
+            throw new Error("screenshot proxy should not be called for package audit evidence");
+          }
+        }
+      );
+
+      assert.equal(evidence?.source, "package_agent");
+      assert.equal(evidence?.auditStatus, "package_verified");
+      assert.equal(evidence?.artifactType, "download");
+      assert.match(evidence?.summary ?? "", /extracted index\.html/);
+    });
+  });
+
   it("sends a thum.io screenshot URL of the demo link to the vision model", async () => {
     await withEnv(zeroBudgetEnv(), async () => {
       let sentImageUrl: string | undefined;
@@ -359,6 +551,9 @@ describe("describeDemoScreenshot", () => {
 
       assert.equal(sentImageUrl, "https://image.thum.io/get/width/1200/noanimate/https://warmguide.netlify.app/");
       assert.equal(evidence?.summary, "这是一个静态营销落地页。");
+      assert.equal(evidence?.source, "screenshot_proxy");
+      assert.equal(evidence?.auditStatus, "first_screen_only");
+      assert.equal(evidence?.artifactType, "web");
     });
   });
 

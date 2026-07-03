@@ -25,7 +25,7 @@ import {
   type TraeTopic
 } from "./types.ts";
 
-export const PROMPT_VERSION = "trae-contest-2026-v4-official-screenshot-evidence";
+export const PROMPT_VERSION = "trae-contest-2026-v5-demo-audit-standards";
 const JUDGE_BOARD_PAGE_SIZE = 1000;
 
 export type JudgeEvaluatorId = "product" | "technical" | "ux" | "risk";
@@ -168,16 +168,44 @@ function hasDemoEvidence(topic: TraeTopic): boolean {
   return topic.traeEvidence?.hasDemoEvidence === true || getDemoEvidenceTypes(topic).length > 0;
 }
 
+function detectedSessionIdCount(topic: TraeTopic): number {
+  return topic.sessionIds.length > 0 ? topic.sessionIds.length : (topic.traeEvidence?.sessionIdCount ?? 0);
+}
+
 function complianceHints(topic: TraeTopic, match: TraeMatch | null): string[] {
   const risks: string[] = [];
   if (!hasDemoEvidence(topic)) risks.push("缺少 Demo 体验证据");
   if (!topic.traeEvidence?.hasTraeProcess) risks.push("没有清晰 TRAE 实践过程");
   if ((topic.traeEvidence?.screenshotCount ?? 0) < 3) risks.push("开发截图少于 3 张");
-  if ((topic.traeEvidence?.sessionIdCount ?? 0) < 3) risks.push("Session ID 少于 3 个");
+  if (detectedSessionIdCount(topic) === 0) risks.push("未检测到 Session ID");
   if (!match?.signupTopicId) risks.push("暂未匹配到报名记录");
   if (match?.mismatchRisk === "medium" || match?.mismatchRisk === "high") risks.push("初赛作品与报名方向可能不一致");
   if (topic.contentText.length < 240) risks.push("帖子材料较少，评分置信度应降低");
   return risks;
+}
+
+function demoEvidenceSource(evidence: NonNullable<TopicVisualEvidence["demoEvidence"]> | null | undefined): string {
+  return evidence?.source ?? "screenshot_proxy";
+}
+
+function formatDemoEvidenceSummary(evidence: NonNullable<TopicVisualEvidence["demoEvidence"]>): string {
+  const method = demoEvidenceSource(evidence);
+  const status = evidence.auditStatus ?? "first_screen_only";
+  const artifactType = evidence.artifactType ?? "web";
+
+  if (method === "browser_agent" || method === "package_agent") {
+    return [
+      "Demo browser/package audit evidence (browser/package demo audit WAS performed; screenshots came from a direct audit adapter rather than the screenshot proxy):",
+      evidence.summary,
+      `Demo audit method: ${method}; status: ${status}; artifact type: ${artifactType}.`
+    ].join("\n");
+  }
+
+  return [
+    "Demo first-screen screenshot proxy evidence (only the first rendered screen was inspected; no click-through browser audit was performed):",
+    evidence.summary,
+    `Demo audit method: screenshot_proxy; status: ${status}; artifact type: ${artifactType}.`
+  ].join("\n");
 }
 
 function formatVisualEvidenceSection(topic: TraeTopic, visualEvidence: TopicVisualEvidence | null): string {
@@ -186,7 +214,7 @@ function formatVisualEvidenceSection(topic: TraeTopic, visualEvidence: TopicVisu
   const visualDemoImageUrls = getVisualDemoImageUrls(topic);
   const demoEvidenceTypes = getDemoEvidenceTypes(topic);
   const demoSection = visualEvidence?.demoEvidence
-    ? `Demo 自动截图与视觉识别（AI 已实际截图并查看该网页刚才的真实渲染效果，等同于人类打开链接第一眼看到的画面）：\n${visualEvidence.demoEvidence.summary}`
+    ? formatDemoEvidenceSummary(visualEvidence.demoEvidence)
     : topic.demoUrl
       ? "Demo 自动浏览：本轮截图或视觉识别未成功，仅使用帖子公开文本与 URL，不要假设已实际查看该页面。"
       : hasDemoEvidence(topic)
@@ -218,8 +246,41 @@ function formatVisualEvidenceSection(topic: TraeTopic, visualEvidence: TopicVisu
     downloadDemoSection,
     visualDemoSection,
     `图片数量：${topic.imageUrls.length}`,
-    imageSection
+    imageSection,
+    `Session IDs detected: ${detectedSessionIdCount(topic) > 0 ? "yes" : "no"}`
   ].join("\n");
+}
+
+function demoEvidenceLimitation(
+  topic: TraeTopic,
+  visualEvidence: TopicVisualEvidence | null,
+  detectedDemoUrls: string[]
+): string {
+  const evidence = visualEvidence?.demoEvidence;
+  if (!evidence) {
+    return `- demo URL available: ${topic.demoUrl ? "yes" : "no"}; detected demo-like URLs: ${detectedDemoUrls.length}; browser/package demo audit or screenshot verification was not performed successfully for this run.`;
+  }
+
+  const method = demoEvidenceSource(evidence);
+  if (method === "browser_agent" || method === "package_agent") {
+    return "- browser/package demo audit WAS performed; treat the demo vision summary above as real observed evidence from direct web click-through or extracted package rendering.";
+  }
+
+  return "- first-screen screenshot proxy WAS inspected; treat it as real first-screen rendered evidence, but it is not click-through browser validation and does not prove deeper flows work.";
+}
+
+function demoConsensusRule(visualEvidence: TopicVisualEvidence | null): string {
+  const evidence = visualEvidence?.demoEvidence;
+  if (!evidence) {
+    return "interactive demo browsing was not performed in this run; no browser/package demo audit evidence is available.";
+  }
+
+  const method = demoEvidenceSource(evidence);
+  if (method === "browser_agent" || method === "package_agent") {
+    return "browser/package demo audit WAS performed in this run; weigh the demo vision summary above as real observed evidence of the audited interactive or package-rendered state.";
+  }
+
+  return "first-screen screenshot proxy evidence WAS inspected in this run; weigh it as first-screen rendered evidence only, not as click-through browser validation.";
 }
 
 export function buildJudgePrompt(
@@ -242,8 +303,10 @@ export function buildJudgePrompt(
 - 完成度 20 分：是否有可体验 Demo、功能完整度、帖子材料充分度。若 Demo 截图证据显示这只是一个静态介绍/营销落地页而非真正可交互的产品功能（例如没有可操作的功能界面、无法演示核心 AI 能力），完成度不得评为高分，需在 dimensionComments.completion 中说明依据。
 - ${designDimension}
 
-合规/材料风险只作为评分解释参考，不做单独审核页面。重点识别：缺 Demo、缺 TRAE 实践过程、缺 3 张开发截图、缺 3 个 Session ID、作品与报名方向不一致、只有概念没有 Demo、赛道/标题/标签不一致、材料不足导致置信度降低。
+合规/材料风险只作为评分解释参考，不做单独审核页面。重点识别：缺 Demo、缺 TRAE 实践过程、缺 3 张开发截图、缺 Session ID、作品与报名方向不一致、只有概念没有 Demo、赛道/标题/标签不一致、材料不足导致置信度降低。
 Uploaded screenshot evidence can satisfy official ordinary screenshot material requirements. When image vision is available, explicitly use it to judge whether there is at least one Trae usage/development process screenshot and at least one finished Demo/product interface screenshot. Do not require a web Demo URL when uploaded screenshots, download packages, QR codes, or mini-program evidence already show a usable product/demo path.
+Session ID standard: treat Session IDs as binary evidence. If at least one Session ID is detected, do not penalize for fewer than 3 and do not speculate about authenticity.
+Demo audit standard: first decide whether Demo material exists, then separately state whether web click-through or package verification was performed. Do not call found but unverified Demo evidence missing. Only say "unable to verify interactive core functionality" when no product/demo evidence exists, or when actual image/browser/package evidence shows a static, broken, or non-core product surface.
 
 报名匹配信息：
 ${summarizeMatch(match)}
@@ -301,11 +364,7 @@ function evidenceLimitations(topic: TraeTopic, visualEvidence: TopicVisualEviden
       : `- image URLs available: ${topic.imageUrls.length}; image vision was not performed successfully for this run.`
   );
 
-  lines.push(
-    visualEvidence?.demoEvidence
-      ? "- an automatic screenshot of the demo URL WAS captured and inspected just now; treat the demo vision summary above as real observed evidence of the page's current rendered state."
-      : `- demo URL available: ${topic.demoUrl ? "yes" : "no"}; detected demo-like URLs: ${detectedDemoUrls.length}; interactive demo browsing/screenshot was not performed successfully for this run.`
-  );
+  lines.push(demoEvidenceLimitation(topic, visualEvidence, detectedDemoUrls));
 
   lines.push(
     `- demo evidence available: ${hasDemoEvidence(topic) ? "yes" : "no"}; demo evidence types: ${demoEvidenceTypes.join(", ") || "none"}.`
@@ -314,6 +373,8 @@ function evidenceLimitations(topic: TraeTopic, visualEvidence: TopicVisualEviden
   lines.push(
     "- Do not claim you saw evidence beyond what is explicitly provided above (post text, or the vision summaries when present).",
     "- If public demo/image URLs are available but automation failed, do not describe that as missing contestant-provided materials; describe it only as an automation/evidence-verification limitation.",
+    "- Do not call found but unverified Demo evidence missing.",
+    "- Only say unable to verify interactive core functionality when no product/demo evidence exists, or when actual image/browser/package evidence shows a static, broken, or non-core product surface.",
     "- Penalize confidence and completion when no real evidence proves a working product beyond marketing claims."
   );
 
@@ -361,7 +422,7 @@ Rules:
 - If a weak/static/demo-less project received a high score from any evaluator without evidence, reduce completion, design, and confidence.
 - If evaluators disagree by more than 8 total-score points, explain the resolved disagreement in summary or dimensionComments.
 - ${visualEvidence?.imageEvidence ? "image vision WAS performed in this run; weigh the image vision summary above as real evidence." : "image vision was not performed in this run."}
-- ${visualEvidence?.demoEvidence ? "interactive demo browsing (automatic screenshot + vision inspection) WAS performed in this run; weigh the demo vision summary above as real evidence of the page's current state." : "interactive demo browsing was not performed in this run."}
+- ${demoConsensusRule(visualEvidence)}
 - Do not claim screenshots or demo behavior were inspected unless that is present in the post text or the vision summaries above.
 
 ${evidenceLimitations(topic, visualEvidence)}

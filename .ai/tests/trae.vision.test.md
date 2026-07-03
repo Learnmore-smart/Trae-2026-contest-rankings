@@ -46,3 +46,9 @@ Verifies the visual-evidence gathering module used by the judge pipeline.
 - 2026-07-03 Codex: Update tests to expect combined per-batch summaries when more than 4 images are sent.
 - Keep assertions that every selected image URL is sent, with QR/demo images first.
 
+## Change Plan: Pluggable Demo Audit Tests
+
+- 2026-07-03 Codex: Add a red test proving `describeDemoScreenshot()` uses injected browser/package audit evidence before screenshot-proxy fallback.
+- Assert injected audit evidence carries `source: "browser_agent"` and does not call the vision fetch fallback.
+- Add a fallback assertion that thum.io evidence is marked `source: "screenshot_proxy"` so judge prompts can avoid calling it interactive browsing.
+

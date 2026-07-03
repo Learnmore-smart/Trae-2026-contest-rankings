@@ -129,6 +129,24 @@ describe("multi-evaluator judging", () => {
     assert.match(prompt, /do not describe that as missing contestant-provided materials/i);
   });
 
+  it("treats Session ID evidence as binary present or missing, not a 3-ID threshold", () => {
+    const prompt = buildJudgePrompt(
+      {
+        ...topic,
+        sessionIds: ["one-real-session-id"],
+        traeEvidence: {
+          ...topic.traeEvidence,
+          sessionIdCount: 1,
+          hasThreeSessionIds: false
+        }
+      },
+      null
+    );
+
+    assert.match(prompt, /Session IDs detected: yes/i);
+    assert.doesNotMatch(prompt, /Session ID\s*少于\s*3|Session ID less than 3/i);
+  });
+
   it("reports no demo URL distinctly from a failed screenshot attempt", () => {
     const prompt = buildJudgePrompt({ ...topic, demoUrl: null }, null);
     assert.match(prompt, /未检测到 Demo 链接/);
@@ -194,6 +212,61 @@ describe("multi-evaluator judging", () => {
     assert.match(prompt, /页面是一个静态营销落地页，没有可操作的产品功能/);
     assert.doesNotMatch(prompt, /本轮未进行视觉识别/);
     assert.doesNotMatch(prompt, /截图或视觉识别未成功/);
+  });
+
+  it("labels screenshot-proxy demo evidence as first-screen only, not browser click-through", () => {
+    const profiles = getJudgeEvaluatorProfiles();
+    const prompt = buildConsensusJudgePrompt(
+      topic,
+      null,
+      profiles.map((profile) => ({
+        profile,
+        output: validPayload,
+        rawContent: JSON.stringify(validPayload)
+      })),
+      {
+        imageEvidence: null,
+        demoEvidence: {
+          summary: "The first screen renders a landing page with one start button.",
+          provider: "nvidia",
+          model: "moonshotai/kimi-k2.6",
+          source: "screenshot_proxy",
+          auditStatus: "first_screen_only",
+          artifactType: "web"
+        }
+      }
+    );
+
+    assert.match(prompt, /first-screen screenshot proxy/i);
+    assert.doesNotMatch(prompt, /interactive demo browsing \(automatic screenshot \+ vision inspection\) WAS performed/i);
+    assert.match(prompt, /Do not call found but unverified Demo evidence missing/i);
+  });
+
+  it("labels browser or package audit evidence as verified demo inspection", () => {
+    const profiles = getJudgeEvaluatorProfiles();
+    const prompt = buildConsensusJudgePrompt(
+      topic,
+      null,
+      profiles.map((profile) => ({
+        profile,
+        output: validPayload,
+        rawContent: JSON.stringify(validPayload)
+      })),
+      {
+        imageEvidence: null,
+        demoEvidence: {
+          summary: "Browser agent clicked the CTA and captured the interactive workflow.",
+          provider: "browser-agent",
+          model: "playwright+kimi-k2.6",
+          source: "browser_agent",
+          auditStatus: "browser_verified",
+          artifactType: "web"
+        }
+      }
+    );
+
+    assert.match(prompt, /browser\/package demo audit WAS performed/i);
+    assert.match(prompt, /Browser agent clicked the CTA/);
   });
 
   it("treats uploaded screenshots as official material evidence categories", () => {
@@ -305,9 +378,14 @@ describe("multi-evaluator judging", () => {
     );
 
     assert.match(prompt, /image vision WAS performed/);
-    assert.match(prompt, /interactive demo browsing \(automatic screenshot \+ vision inspection\) WAS performed/);
+    assert.match(prompt, /first-screen screenshot proxy evidence WAS inspected/);
     assert.doesNotMatch(prompt, /image vision was not performed/);
-    assert.doesNotMatch(prompt, /interactive demo browsing was not performed/);
+    assert.doesNotMatch(prompt, /no browser\/package demo audit evidence is available/);
+  });
+
+  it("bumps the prompt version for the corrected demo and session audit standard", () => {
+    assert.notEqual(PROMPT_VERSION, "trae-contest-2026-v4-official-screenshot-evidence");
+    assert.match(PROMPT_VERSION, /demo-audit-standards/);
   });
 });
 

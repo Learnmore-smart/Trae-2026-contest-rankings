@@ -62,3 +62,12 @@ Verifies model JSON parsing, repair, Zod validation behavior, and evidence-aware
 - Added an offline assertion importing `DEFAULT_JUDGE_BATCH_MAX` and `DEFAULT_JUDGE_CONCURRENCY`.
 - Expects `DEFAULT_JUDGE_CONCURRENCY` to be 8 because 8 teams times 5 calls/team reaches 40 rpm.
 - Expects `DEFAULT_JUDGE_BATCH_MAX` to be 4000 so scheduled jobs can drain more than 3000 newly scraped topics.
+
+## Change Plan: Session and Demo Audit Semantics
+
+- 2026-07-03 Codex: Add a red test proving one detected Session ID is not labeled as "Session ID less than 3".
+- Add prompt tests for method-aware demo evidence:
+  - screenshot-proxy evidence says only first-screen screenshot was inspected;
+  - browser-agent evidence says browser/package audit was performed.
+- Assert prompts instruct evaluators not to call a found-but-unverified Demo missing.
+- Assert `PROMPT_VERSION` changes from the previous v4 screenshot prompt.

@@ -11,13 +11,16 @@ const appDir = join(process.cwd(), "app");
 const landingPagePath = join(appDir, "page.tsx");
 const rankingPagePath = join(appDir, "ranking/page.tsx");
 const clientPath = join(appDir, "contest-client.tsx");
+const projectPagePath = join(appDir, "project/[id]/page.tsx");
 const projectDetailClientPath = join(appDir, "project/project-detail-client.tsx");
 const nextConfigPath = join(process.cwd(), "next.config.mjs");
 const topicsRoutePath = join(process.cwd(), "app/api/trae-contest/topics/route.ts");
+const topicDetailRoutePath = join(process.cwd(), "app/api/trae-contest/topics/[id]/route.ts");
 const runRoutePath = join(process.cwd(), "app/api/trae-contest/run/route.ts");
 const submitRoutePath = join(process.cwd(), "app/api/trae-contest/submit/route.ts");
 const judgePolicyPath = join(process.cwd(), "lib/trae/judge-policy.ts");
 const judgePath = join(process.cwd(), "lib/trae/judge.ts");
+const topicRouteIdPath = join(process.cwd(), "lib/trae/topic-route-id.ts");
 const dataConnectQueriesPath = join(process.cwd(), "dataconnect/connector/queries.gql");
 const traeApiPath = join(process.cwd(), "lib/trae/api.ts");
 const topicsCachePath = join(process.cwd(), "lib/trae/topics-cache.json");
@@ -74,6 +77,20 @@ test("project detail API requests default to configured Next base path", () => {
   assert.equal(basePath, "/trae-contest-2026");
   assert.match(detailClient, /const API_BASE = process\.env\.NEXT_PUBLIC_BASE_PATH \?\? "\/trae-contest-2026";/);
   assert.match(detailClient, /fetch\(`\$\{API_BASE\}\/api\/trae-contest\/topics\/\$\{encodeURIComponent\(id\)\}`/);
+});
+
+test("project detail route ids strip the RSC suffix from client navigations", async () => {
+  const projectPage = read(projectPagePath);
+  const topicDetailRoute = read(topicDetailRoutePath);
+  const { normalizeTopicRouteId } = await import(pathToFileURL(topicRouteIdPath).href) as typeof import("../lib/trae/topic-route-id.ts");
+
+  assert.equal(normalizeTopicRouteId("preliminary_28589.rsc"), "preliminary_28589");
+  assert.equal(normalizeTopicRouteId("preliminary_28589"), "preliminary_28589");
+  assert.equal(normalizeTopicRouteId("prefix.rsc.middle"), "prefix.rsc.middle");
+  assert.match(projectPage, /import \{ normalizeTopicRouteId \} from "@\/lib\/trae\/topic-route-id";/);
+  assert.match(projectPage, /<ProjectDetailClient id=\{normalizeTopicRouteId\(id\)\} \/>/);
+  assert.match(topicDetailRoute, /import \{ normalizeTopicRouteId \} from "@\/lib\/trae\/topic-route-id";/);
+  assert.match(topicDetailRoute, /getTopicDetail\(normalizeTopicRouteId\(decodeURIComponent\(id\)\)\)/);
 });
 
 test("project detail error panel is readable in light and dark themes", () => {
