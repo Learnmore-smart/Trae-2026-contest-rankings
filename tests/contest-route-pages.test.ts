@@ -439,6 +439,32 @@ test("topic detail falls back to local cache when Data Connect returns no row", 
   }
 });
 
+test("topic detail resolves from the live board data before the static snapshot", () => {
+  const traeApi = read(traeApiPath);
+
+  // The board lists thousands of DB-only works that never made it into topics-cache.json.
+  // If the detail query misses or the DB blips, we must reach for that same warm board data
+  // (which shares the board's DB -> legacy -> snapshot chain) before the tiny static cache,
+  // or a still-listed work renders as "不存在".
+  assert.match(
+    traeApi,
+    /async function getTopicDetailFromBoard\(id: string\): Promise<RankingItem \| null> \{[\s\S]*?const \{ baseItems \} = await getBoardData\(\);[\s\S]*?baseItems\.find\(\(item\) => item\.topic\.id === id\)/,
+    "getTopicDetailFromBoard should resolve an id from the board's in-memory baseItems"
+  );
+  // Both recovery paths (non-preliminary/missing row, and a thrown DB error) must try the
+  // board first, then the snapshot.
+  assert.match(
+    traeApi,
+    /if \(!t \|\| t\.sourceType !== "PRELIMINARY"\) \{\s*return \(await getTopicDetailFromBoard\(id\)\) \?\? \(await getTopicDetailFromCache\(id\)\);/,
+    "the missing/non-preliminary branch should fall back to board data then cache"
+  );
+  assert.match(
+    traeApi,
+    /catch \(error\) \{[\s\S]*?return \(await getTopicDetailFromBoard\(id\)\) \?\? \(await getTopicDetailFromCache\(id\)\);\s*\}\s*\}/,
+    "the DB-error catch should fall back to board data then cache"
+  );
+});
+
 test("public user topic submit only accepts TRAE forum links and refreshes the board", () => {
   const client = read(clientPath);
 

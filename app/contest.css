@@ -758,6 +758,64 @@
   flex: 1 1 8rem;
 }
 
+.rank-row--grid .rank-row__score-row {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 0.55rem;
+  width: 100%;
+}
+
+.rank-row--grid .rank-row__summary {
+  text-align: left;
+}
+
+.rank-row--grid .rank-row__scores .score-ring[data-size="large"] .score-ring__track {
+  width: 2.85rem;
+  height: 2.85rem;
+}
+
+.rank-row--grid .rank-row__scores .score-ring__value {
+  font-size: 0.92rem;
+}
+
+.rank-row--grid .rank-row__scores .score-ring__max {
+  font-size: 0.58rem;
+}
+
+.rank-row--grid .rank-row__signals {
+  font-size: 0.62rem;
+}
+
+.rank-row--grid .rank-row__aspects {
+  display: flex;
+  gap: 0.28rem;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+}
+
+.rank-row--grid .rank-row__aspects .score-ring {
+  min-width: 2.6rem;
+}
+
+.rank-row--grid .rank-row__aspects .score-ring__track {
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0.15rem;
+}
+
+.rank-row--grid .rank-row__aspects .score-ring__value {
+  font-size: 0.72rem;
+}
+
+.rank-row--grid .rank-row__aspects .score-ring__max {
+  font-size: 0.48rem;
+}
+
+.rank-row--grid .rank-row__aspects .score-ring__label {
+  font-size: 0.58rem;
+}
+
+
 .rank-row__rank {
   grid-area: rank;
   display: grid;

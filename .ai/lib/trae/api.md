@@ -81,6 +81,13 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 - Regression risk: detail may show snapshot-lagged evaluation/match data when Data Connect is empty, but that is consistent with the rows the board is already displaying.
 - Implemented: added `getTopicDetailFromCache()`, made both no-row and thrown paths fall back to it, and added a `contest-route-pages` regression test asserting a cached preliminary id resolves while signup/unknown ids stay null.
 
+## Bug Fix Plan: Detail Fallback Must Cover The Whole Board, Not Just The Snapshot
+
+- 2026-07-02 Codex: Owner reported `作品修改后再次在网页上查看显示不存在` — a work that lists on the board renders `作品不存在` on its detail page. Root cause: the board serves the full live Data Connect set (~3,097 preliminary works, of which ~2,700+ exist only in the DB), and its assembled read model stays warm in the in-memory `boardCache` even through a DB blip. But `getTopicDetail()`'s only recovery when its single `GetTopicDetail` lookup missed/threw was `getTopicDetailFromCache()`, i.e. the committed `topics-cache.json` — a 364-work snapshot. So the "listed ⇒ openable" invariant only held for those 364 works; for every DB-only work, a transient detail-query failure (most likely *during a submit/re-scrape*, when `upsertTopic` + `writeBoardSnapshot` are hammering Data Connect) dropped through to the snapshot, found nothing, and 404ed a still-listed work.
+- Fix strategy: add `getTopicDetailFromBoard(id)` that resolves the id from the same `getBoardData()` the leaderboard serves (sharing its DB → legacy → snapshot chain and its warm cache), and try it *before* the static snapshot on both the missing/non-preliminary branch and the `catch`. The board's evaluation is lightened but keeps every field the detail page renders, so a fallback card is complete.
+- Regression risk: none on the happy path — the board fallback only runs when the direct detail query misses or throws, and it reuses the cached board read model, so it adds no extra Data Connect load. A signup/unknown id still resolves to null because board `baseItems` are preliminary-only and the snapshot guard rejects non-preliminary rows.
+- Implemented: added `getTopicDetailFromBoard()`, wired both recovery paths to `(await getTopicDetailFromBoard(id)) ?? (await getTopicDetailFromCache(id))`, and added a `contest-route-pages` regression test asserting the board-first fallback wiring in both branches.
+
 ## Important Notes / NEVER Change
 
 - Public APIs must not return `rawHtml` or unrestricted raw model internals.
@@ -88,7 +95,7 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 - Board data must filter deleted/empty preliminary topics before public ranking rows are built.
 - Sort direction changes display order only; rank numbers must remain canonical best-first leaderboard positions.
 - Ungraded ranking rows must remain after all graded rows before pagination, even when the selected sort direction is low-to-high.
-- `getTopicDetail()` must fall back to `topics-cache.json` whenever Data Connect yields no matching preliminary — on an empty/non-preliminary result as well as a thrown error — so any work that lists on the board also opens in detail.
+- `getTopicDetail()` must fall back to the warm board data (`getTopicDetailFromBoard`) and then `topics-cache.json` whenever Data Connect yields no matching preliminary — on an empty/non-preliminary result as well as a thrown error — so any work that lists on the board also opens in detail. The static snapshot alone is not enough: the board lists thousands of DB-only works absent from it.
 
 ## Change History
 
@@ -113,6 +120,7 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 | 2026-07-02 | Implemented public ranking dedupe after sorting and before rank pagination. | Codex |
 | 2026-07-02 | Planned deleted/empty board filtering and selectable display sort direction. | Codex |
 | 2026-07-02 | Implemented deleted/empty board filtering and `dir=asc|desc` display ordering. | Codex |
+| 2026-07-02 | Fixed detail 404 for DB-only works by falling back to warm board data before the static snapshot. | Codex |
 | 2026-07-02 | Planned graded-first public ranking order for all sort directions. | Codex |
 | 2026-07-02 | Implemented graded-first ranking partitioning before rank assignment and pagination. | Codex |
 | 2026-07-02 | Fixed topic detail 404s: `getTopicDetail()` now falls back to the local snapshot on empty/non-preliminary DB results, not only on thrown errors. | Codex |

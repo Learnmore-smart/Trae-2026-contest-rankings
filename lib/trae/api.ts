@@ -502,15 +502,39 @@ async function getTopicDetailFromCache(id: string): Promise<RankingItem | null> 
   }
 }
 
+/**
+ * Resolve a detail from the exact in-memory data the leaderboard is serving. The board's
+ * source chain (live DB → legacy query → committed JSON snapshot) is far broader than the
+ * detail query's single lookup, and it stays warm in `boardCache` even through a DB blip.
+ * So whenever the direct detail query can't resolve an id, anything currently listed on the
+ * board still opens here. This is what keeps "listed ⇒ openable" true for the thousands of
+ * works that live only in the DB and never made it into the static snapshot — without it,
+ * a transient DB failure (e.g. while a submit/re-scrape is hammering Data Connect) makes a
+ * still-listed work render as "作品不存在". The board's evaluation is lightened, but it keeps
+ * every field the detail page renders, so a fallback card is complete.
+ */
+async function getTopicDetailFromBoard(id: string): Promise<RankingItem | null> {
+  try {
+    const { baseItems } = await getBoardData();
+    return baseItems.find((item) => item.topic.id === id) ?? null;
+  } catch (error) {
+    console.error(`Failed to resolve topic ${id} from board data:`, error);
+    return null;
+  }
+}
+
 export async function getTopicDetail(id: string): Promise<RankingItem | null> {
   try {
     const dc = getDataConnectDb();
     const res = await getTopicDetailQuery(dc as any, { id });
     const t = res.data.topic;
     // DB reachable but this id isn't a stored preliminary — e.g. Data Connect is empty
-    // or only partially deployed while the board is served from the JSON snapshot. Fall
-    // back to that same snapshot instead of hard-404ing, so a listed work still opens.
-    if (!t || t.sourceType !== "PRELIMINARY") return await getTopicDetailFromCache(id);
+    // or only partially deployed while the board is served from the JSON snapshot. Try the
+    // warm board data first (covers every listed DB-only work), then the snapshot, instead
+    // of hard-404ing, so a listed work still opens.
+    if (!t || t.sourceType !== "PRELIMINARY") {
+      return (await getTopicDetailFromBoard(id)) ?? (await getTopicDetailFromCache(id));
+    }
 
     const latestEval = t.evaluations_on_topic?.[0];
     const match = t.match_on_preliminaryTopic;
@@ -544,8 +568,8 @@ export async function getTopicDetail(id: string): Promise<RankingItem | null> {
       match: mappedMatch
     };
   } catch (error) {
-    console.error(`Failed to get topic detail for ${id} from DB, checking cache:`, error);
-    return await getTopicDetailFromCache(id);
+    console.error(`Failed to get topic detail for ${id} from DB, checking board data and cache:`, error);
+    return (await getTopicDetailFromBoard(id)) ?? (await getTopicDetailFromCache(id));
   }
 }
 
