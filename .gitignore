@@ -24,6 +24,3 @@ logs/
 .local/
 .playwright-mcp/
 test-results/
-
-# Generated local data caches
-lib/trae/topics-cache.json

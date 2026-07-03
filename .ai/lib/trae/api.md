@@ -40,6 +40,7 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 - 2026-07-02 Codex: Owner hit `operation "GetBoardPage" not found`; production connector can lag generated code. Add a narrow fallback to legacy `GetBoardData` only for that exact missing-operation case.
 - 2026-07-02 Codex: Owner reported duplicate public ranking posts with the same title. Public sorting should happen first, then normalized-title dedupe should keep only the highest visible row for the active sort before ranks and pagination are assigned.
 - 2026-07-02 Codex: Public ranking ordering must partition graded rows ahead of ungraded rows for every display direction, so low-to-high sorting never pulls pending items to the top.
+- 2026-07-03 Codex: `topics-cache.json` is not disposable temp data. It is the committed fallback snapshot for Data Connect-unavailable reads, but it should stay compact by omitting raw scrape payloads that `sanitizeTopic()` strips.
 
 ## Planned Change: Lint And SQL Adapter Boundary
 
@@ -96,6 +97,7 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 - Sort direction changes display order only; rank numbers must remain canonical best-first leaderboard positions.
 - Ungraded ranking rows must remain after all graded rows before pagination, even when the selected sort direction is low-to-high.
 - `getTopicDetail()` must fall back to the warm board data (`getTopicDetailFromBoard`) and then `topics-cache.json` whenever Data Connect yields no matching preliminary — on an empty/non-preliminary result as well as a thrown error — so any work that lists on the board also opens in detail. The static snapshot alone is not enough: the board lists thousands of DB-only works absent from it.
+- The committed fallback snapshot should keep public fields, evaluation, and match data, but not raw Discourse JSON/HTML.
 
 ## Change History
 
@@ -124,6 +126,7 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 | 2026-07-02 | Planned graded-first public ranking order for all sort directions. | Codex |
 | 2026-07-02 | Implemented graded-first ranking partitioning before rank assignment and pagination. | Codex |
 | 2026-07-02 | Fixed topic detail 404s: `getTopicDetail()` now falls back to the local snapshot on empty/non-preliminary DB results, not only on thrown errors. | Codex |
+| 2026-07-03 | Documented `topics-cache.json` as compact versioned fallback data, not a temp cache. | Codex |
 ## Change Plan: Provider Map Cleanup
 
 - 2026-07-03 Codex: Remove REMOVED_PROVIDER from read-side provider reverse maps.
