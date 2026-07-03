@@ -5,6 +5,24 @@ export const metadata: Metadata = {
   title: "TRAE AI 创造力大赛第三方 AI 评分榜",
   description: "由 AI 根据公开帖子内容生成的 TRAE AI 创造力大赛第三方模拟评分榜，仅供学习、观摩和参考。",
   metadataBase: new URL("https://rateministere.com"),
+  openGraph: {
+    title: "TRAE AI 创造力大赛第三方 AI 评分榜",
+    description: "由 AI 根据公开帖子内容生成的 TRAE AI 创造力大赛第三方模拟评分榜，仅供学习、观摩和参考。",
+    images: [
+      {
+        url: "/trae-contest-2026/trae-contest-ranking-og.png",
+        width: 1200,
+        height: 630,
+        alt: "TRAE AI 创造力大赛第三方 AI 评分榜"
+      }
+    ]
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "TRAE AI 创造力大赛第三方 AI 评分榜",
+    description: "由 AI 根据公开帖子内容生成的 TRAE AI 创造力大赛第三方模拟评分榜，仅供学习、观摩和参考。",
+    images: ["/trae-contest-2026/trae-contest-ranking-og.png"]
+  },
   icons: {
     icon: "/trae-contest-2026/icons/favicon.ico",
     shortcut: "/trae-contest-2026/icons/favicon.ico"
