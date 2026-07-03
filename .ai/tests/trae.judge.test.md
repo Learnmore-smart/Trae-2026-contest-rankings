@@ -71,3 +71,10 @@ Verifies model JSON parsing, repair, Zod validation behavior, and evidence-aware
   - browser-agent evidence says browser/package audit was performed.
 - Assert prompts instruct evaluators not to call a found-but-unverified Demo missing.
 - Assert `PROMPT_VERSION` changes from the previous v4 screenshot prompt.
+
+## Implemented Change: Session and Demo Audit Semantics
+
+- Added prompt regression coverage that one Session ID is accepted as present evidence and no `Session ID less than 3` risk appears.
+- Added prompt coverage for screenshot-proxy evidence as first-screen-only.
+- Added prompt coverage for browser/package evidence as verified audit evidence.
+- Added prompt-version regression coverage for `v5-demo-audit-standards`.

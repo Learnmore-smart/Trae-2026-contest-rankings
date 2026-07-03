@@ -201,6 +201,8 @@ describe("auditDemoArtifact", () => {
   it("extracts a zip demo, opens index.html with a browser adapter, and sends the screenshot to vision", async () => {
     await withEnv(zeroBudgetEnv(), async () => {
       const navigations: string[] = [];
+      const baseEvidence = baseTopic.traeEvidence;
+      assert.ok(baseEvidence);
       const zip = makeStoredZip([
         { name: "dist/index.html", content: "<!doctype html><button>Start</button>" },
         { name: "dist/app.js", content: "console.log('demo')" }
@@ -211,7 +213,7 @@ describe("auditDemoArtifact", () => {
           demoUrl: null,
           attachmentUrls: ["https://forum.example.test/uploads/source.zip"],
           traeEvidence: {
-            ...baseTopic.traeEvidence,
+            ...baseEvidence,
             hasDemoUrl: false,
             hasDemoEvidence: true,
             demoEvidenceTypes: ["download"],
@@ -222,7 +224,7 @@ describe("auditDemoArtifact", () => {
           config: getTraeConfig(),
           importPlaywright: async () => fakePlaywright(Buffer.from("zip-png"), navigations, []),
           fetchFn: async (url, init) => {
-            if (String(url).includes("/uploads/source.zip")) return new Response(zip);
+            if (String(url).includes("/uploads/source.zip")) return new Response(new Uint8Array(zip));
             const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ image_url?: { url: string } }> }> };
             assert.ok(body.messages[0]?.content.some((part) => part.image_url?.url.startsWith("data:image/png;base64,")));
             return visionResponse("ZIP 包审核显示 index.html 可以渲染为产品界面。");
@@ -500,13 +502,15 @@ describe("describeDemoScreenshot", () => {
 
   it("allows injected package audit evidence when only a downloadable zip demo exists", async () => {
     await withEnv(zeroBudgetEnv(), async () => {
+      const baseEvidence = baseTopic.traeEvidence;
+      assert.ok(baseEvidence);
       const evidence = await describeDemoScreenshot(
         {
           ...baseTopic,
           demoUrl: null,
           attachmentUrls: ["https://forum.example.test/uploads/source.zip"],
           traeEvidence: {
-            ...baseTopic.traeEvidence,
+            ...baseEvidence,
             hasDemoUrl: false,
             hasDemoEvidence: true,
             demoEvidenceTypes: ["download"],

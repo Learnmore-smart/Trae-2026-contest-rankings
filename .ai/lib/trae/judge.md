@@ -160,3 +160,11 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - Do not phrase found-but-unverified Demo evidence as missing Demo.
 - Do not ask the model to doubt Session ID authenticity; only present whether Session IDs were detected.
 
+## Implemented Change: Evidence Semantics for Re-Audit
+
+- `PROMPT_VERSION` is now `trae-contest-2026-v5-demo-audit-standards`.
+- `judgeOneTopic()` passes `auditDemoArtifact()` into `gatherVisualEvidence()` so optional browser/package evidence is attempted before screenshot-proxy fallback.
+- Session ID risk logic now only flags `未检测到 Session ID` when no Session ID is detected.
+- Prompt text states that Session IDs are binary evidence and that found-but-unverified Demo evidence must not be described as missing.
+- Consensus/evaluator evidence limitations now distinguish browser/package audit from first-screen screenshot-proxy evidence.
+

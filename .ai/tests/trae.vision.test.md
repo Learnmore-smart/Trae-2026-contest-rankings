@@ -52,3 +52,9 @@ Verifies the visual-evidence gathering module used by the judge pipeline.
 - Assert injected audit evidence carries `source: "browser_agent"` and does not call the vision fetch fallback.
 - Add a fallback assertion that thum.io evidence is marked `source: "screenshot_proxy"` so judge prompts can avoid calling it interactive browsing.
 
+## Implemented Change: Browser and Zip Demo Audit Coverage
+
+- Added fake-Playwright tests for `auditDemoArtifact()` opening a web Demo, clicking a likely primary control, and sending a data-URL screenshot to vision.
+- Added an in-memory stored-zip fixture proving package audit extracts `dist/index.html`, opens it through the browser adapter, and returns `package_agent` evidence.
+- Added hook/fallback tests proving injected audit evidence wins before thum.io and thum.io evidence is explicitly first-screen-only.
+

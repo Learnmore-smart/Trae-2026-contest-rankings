@@ -3,6 +3,7 @@ import { getTraeConfig } from "./config.ts";
 import { getDataConnectDb, isMissingDataConnectOperationError, nowIso } from "./dataconnect.ts";
 import { callLLMWithFallback, LLMFallbackError } from "./llm.ts";
 import { finishRun, startRun } from "./runs.ts";
+import { auditDemoArtifact } from "./demo-audit.ts";
 import { gatherVisualEvidence, type TopicVisualEvidence } from "./vision.ts";
 import { dedupeByTopicTitle } from "./dedupe.ts";
 import { isDeletedOrEmptyTopic } from "./extractors.ts";
@@ -611,7 +612,7 @@ async function judgeOneTopicConsensus(
 
 export async function judgeOneTopic(topic: TraeTopic, match: TraeMatch | null): Promise<TraeEvaluation> {
   const config = getTraeConfig();
-  const visualEvidence = await gatherVisualEvidence(topic, { config });
+  const visualEvidence = await gatherVisualEvidence(topic, { config, demoAuditFn: (candidate) => auditDemoArtifact(candidate, { config }) });
   return judgeOneTopicConsensus(topic, match, config, visualEvidence);
 }
 

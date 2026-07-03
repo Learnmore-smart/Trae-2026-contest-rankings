@@ -81,3 +81,10 @@ Gathers real visual evidence for judging: describes a topic's post images and ca
 - `describeDemoScreenshot()` should try the hook first. If it returns evidence, preserve it and do not call thum.io.
 - If the hook is absent or returns null, keep the existing thum.io screenshot-proxy fallback and label it as `screenshot_proxy`, not interactive browsing.
 - Tests must inject the hook so no network or Playwright dependency is required.
+
+## Implemented Change: Pluggable Demo Audit Evidence
+
+- `VisualEvidence` includes optional `source`, `auditStatus`, and `artifactType`.
+- `GatherVisualEvidenceOptions.demoAuditFn` lets the judge inject a browser/package auditor.
+- `describeDemoScreenshot()` tries `demoAuditFn` first, including non-web package evidence when no `demoUrl` exists.
+- thum.io fallback evidence is tagged as `source: "screenshot_proxy"`, `auditStatus: "first_screen_only"`, and `artifactType: "web"`.
