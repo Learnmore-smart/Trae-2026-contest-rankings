@@ -1,9 +1,29 @@
-node_modules
-.next
-out
-coverage
+# Dependencies
+node_modules/
+
+# Next.js / build output
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Local environment and secrets
 .env
 .env*.local
 firebase-service-account*.json
+
+# Runtime logs and process markers
 *.log
-*.tsbuildinfo
+*.pid
+*.job
+dev-server*
+logs/
+
+# Local tooling artifacts
+.agents/
+.local/
+.playwright-mcp/
+test-results/
+
+# Generated local data caches
+lib/trae/topics-cache.json

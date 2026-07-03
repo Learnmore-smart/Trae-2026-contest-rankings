@@ -1,6 +1,6 @@
 ﻿# Project Context
 
-> Last updated: 2026-06-29 | Protection: STANDARD
+> Last updated: 2026-07-03 | Protection: STANDARD
 
 ## Purpose
 
@@ -21,6 +21,7 @@ This repository hosts a public third-party AI ranking site for the TRAE AI Creat
 - Use pure helper modules for extraction, matching, and JSON validation so they can be tested without network or Firestore.
 - Public pages must render empty/error states when SQL/Data Connect credentials are missing.
 - Use Node 22 `--experimental-strip-types` and `node:test` for local pure-logic tests to avoid extra esbuild-based test dependencies on this Windows path.
+- Keep runtime artifacts out of version control: dev-server PID/job files, logs, Playwright MCP captures, test result screenshots, TypeScript build info, and scrape caches are local-only.
 
 ## Important Notes
 
@@ -28,6 +29,7 @@ This repository hosts a public third-party AI ranking site for the TRAE AI Creat
 - Do not scrape private content or bypass forum access controls.
 - Registration topics are stored and matched, but never shown as a public ranking.
 - Preliminary Demo topics are the only ranking entries.
+- Do not commit large local scrape caches such as `lib/trae/topics-cache.json`.
 
 ## Change History
 
@@ -36,4 +38,5 @@ This repository hosts a public third-party AI ranking site for the TRAE AI Creat
 | 2026-06-29 | Created project context for TRAE contest module scaffold. | Codex |
 | 2026-06-29 | Synced final architecture and verification notes. | Codex |
 | 2026-07-01 | Clarified active storage architecture as SQL-backed Firebase Data Connect instead of Firestore. | Codex |
+| 2026-07-03 | Documented repository hygiene rule for local runtime artifacts and scrape caches. | Codex |
 
