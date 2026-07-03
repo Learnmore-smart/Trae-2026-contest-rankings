@@ -74,7 +74,7 @@ test("ranking list uses row layout hooks and circular score rings", () => {
 });
 
 test("ranking rows keep the text column from collapsing", () => {
-  assert.match(css, /\.rank-row\s*{[\s\S]*?grid-template-columns:\s*3\.7rem minmax\(18rem, 1fr\) minmax\(24rem, 34rem\) minmax\(9\.5rem, auto\);/);
+  assert.match(css, /\.rank-row\s*{[\s\S]*?grid-template-columns:\s*minmax\(3\.7rem, max-content\) minmax\(18rem, 1fr\) minmax\(24rem, 34rem\) minmax\(9\.5rem, auto\);/);
   assert.match(css, /\.rank-row__score-panel\s*{[\s\S]*?min-width:\s*0;/);
   assert.match(css, /\.rank-row__summary\s*{[\s\S]*?overflow-wrap:\s*anywhere;/);
 });
@@ -84,7 +84,7 @@ test("ranking controls stay compact and cards open details directly", () => {
   assert.match(component, /ariaLabel=\{t\.chooseLanguage\}/);
   assert.match(component, /ariaLabel=\{t\.chooseTheme\}/);
   assert.match(component, /href="https:\/\/www\.rateministere\.com"/);
-  assert.match(component, /className="nav-control focus-ring"[\s\S]*<Home className="h-4 w-4" \/>[\s\S]*Home/);
+  assert.match(component, /href="https:\/\/www\.rateministere\.com"[\s\S]*className="nav-control focus-ring"[\s\S]*aria-label="Open RateMinistere home"[\s\S]*<Home className="h-4 w-4" \/>/);
   assert.match(component, /className="ranking-filters surface-panel"[\s\S]*<ViewToggle value=\{viewMode\} onChange=\{setViewMode\}/);
   assert.match(component, /const openDetail = \(\) => router\.push\(detailHref\);/);
   assert.match(component, /onClick=\{openDetail\}/);
