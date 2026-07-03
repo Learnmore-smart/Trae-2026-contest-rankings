@@ -559,13 +559,11 @@ const providerMap = {
   // avoid a Data Connect enum migration. The true endpoint is still recorded per-call
   // inside llmCallLogs (provider + baseUrl), so friend vs. direct stays auditable there.
   friend: "NVIDIA",
-  nvidia: "NVIDIA",
-  openrouter: "OPENROUTER"
+  nvidia: "NVIDIA"
 } as const;
 
 const providerRevMap = {
-  "NVIDIA": "nvidia",
-  "OPENROUTER": "openrouter"
+  "NVIDIA": "nvidia"
 } as const;
 
 const competitionLevelMap = {

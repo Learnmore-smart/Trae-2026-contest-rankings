@@ -1,4 +1,4 @@
-# tests/trae.vision.test.ts
+﻿# tests/trae.vision.test.ts
 
 > Last updated: 2026-07-01 | Protection: STANDARD
 
@@ -35,7 +35,7 @@ Regression tests for zero-budget visual evidence gathering.
 ## Important Notes / NEVER Change
 
 - Keep tests network-free by injecting `fetchFn`.
-- Do not call real NVIDIA/OpenRouter endpoints from unit tests.
+- Do not call real NVIDIA/REMOVED_PROVIDER endpoints from unit tests.
 
 ## Bug Fixes
 
@@ -53,3 +53,4 @@ Regression tests for zero-budget visual evidence gathering.
 | 2026-07-01 | Planned Kimi prompt regression for official screenshot evidence categories. | Codex |
 | 2026-07-01 | Added Kimi prompt regression for official screenshot evidence categories. | Codex |
 | 2026-07-01 | Added Kimi prompt regression for official screenshot evidence categories. | Codex |
+

@@ -32,7 +32,6 @@ enum TraeRunStatus {
 
 enum TraeAiProvider {
   NVIDIA
-  OPENROUTER
 }
 
 enum MatchMethod {

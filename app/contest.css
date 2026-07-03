@@ -701,7 +701,7 @@
 
 .rank-row {
   display: grid;
-  grid-template-columns: 3.7rem minmax(18rem, 1fr) minmax(24rem, 34rem) minmax(9.5rem, auto);
+  grid-template-columns: minmax(3.7rem, max-content) minmax(18rem, 1fr) minmax(24rem, 34rem) minmax(9.5rem, auto);
   grid-template-areas:
     "rank content score-panel actions";
   gap: 0.45rem 0.68rem;
@@ -759,8 +759,8 @@
 }
 
 .rank-row--grid .rank-row__score-row {
-  flex-wrap: wrap;
-  justify-content: flex-start;
+  flex-direction: column;
+  align-items: stretch;
   gap: 0.55rem;
   width: 100%;
 }
@@ -787,14 +787,15 @@
 }
 
 .rank-row--grid .rank-row__aspects {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.28rem;
-  flex-wrap: nowrap;
-  justify-content: flex-start;
+  width: 100%;
+  justify-items: center;
 }
 
 .rank-row--grid .rank-row__aspects .score-ring {
-  min-width: 2.6rem;
+  min-width: 0;
 }
 
 .rank-row--grid .rank-row__aspects .score-ring__track {
@@ -827,8 +828,10 @@
 
 .rank-badge {
   display: grid;
-  width: 2.9rem;
+  min-width: 2.9rem;
+  width: max-content;
   height: 2.9rem;
+  padding: 0 0.5rem;
   place-items: center;
   border: 1px solid rgba(22, 136, 168, 0.2);
   border-radius: 8px;

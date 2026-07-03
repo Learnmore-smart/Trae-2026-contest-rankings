@@ -1,6 +1,6 @@
 # lib/trae/extractors.ts
 
-> Last updated: 2026-06-29 | Protection: STANDARD
+> Last updated: 2026-07-03 | Protection: STANDARD
 
 ## Purpose
 
@@ -31,6 +31,8 @@ Extracts normalized text, links, images, attachments, Demo URLs, Session IDs, tr
 - 2026-07-01 Codex: Track all Demo-like URL candidates in `traeEvidence` while keeping `demoUrl` as the canonical first URL for existing schema/UI. This lets judge prompts say Demo links exist even when screenshot/vision automation fails.
 - 2026-07-01 Codex: Expand Demo evidence beyond web URLs. App/desktop/mobile submissions can provide downloadable artifacts (`zip`, `apk`, `ipa`, `exe`, `dmg`, etc.); WeChat mini-program submissions can provide QR/scan images. Extractors should record these as Demo evidence rather than letting the judge say "missing Demo".
 - 2026-07-01 Codex: Image extraction must include Discourse lightbox/original image sources, not only `img src`/`data-src`, because visible forum images may be stored as linked uploads or lazy-loaded attributes.
+- 2026-07-03 Codex: Topic 48365 exposes a newer Trae Work CN Session ID shape: `696411359297017:<hex>_<hex>.<hex>.<hex>:TRAE Work CN...`. The existing long-ID regex only handled a dotted numeric prefix and case-sensitive `:Trae`, while the fallback labeled matcher captured only the shared numeric prefix before `:`. Fix by recognizing the full colon-prefixed conversation ID case-insensitively before the labeled fallback can collapse four sessions into one.
+- 2026-07-03 Codex: Implemented full Trae Work CN recognition and contained-prefix filtering so the obvious numeric prefix no longer masks four distinct Session IDs.
 
 ## Important Notes / NEVER Change
 
@@ -48,3 +50,5 @@ Extracts normalized text, links, images, attachments, Demo URLs, Session IDs, tr
 | 2026-07-01 | Implemented multi-shape Demo evidence (`web_url`, `download`, `qr_or_image`) and Discourse lightbox/lazy/srcset image extraction. | Codex |
 | 2026-07-02 | Planned deleted/empty topic predicate for board filtering and judge skipping. | Codex |
 | 2026-07-02 | Implemented `isDeletedOrEmptyTopic` with conservative material-signal checks. | Codex |
+| 2026-07-03 | Planned full Trae Work CN Session ID extraction for topic 48365 regression. | Codex |
+| 2026-07-03 | Implemented full Trae Work CN Session ID extraction and contained-prefix filtering. | Codex |

@@ -99,8 +99,7 @@ function lightenEvaluation(evaluation: TraeEvaluation | null): TraeEvaluation | 
 }
 
 const providerRevMap = {
-  "NVIDIA": "nvidia",
-  "OPENROUTER": "openrouter"
+  "NVIDIA": "nvidia"
 } as const;
 
 const competitionLevelRevMap = {

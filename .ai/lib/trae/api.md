@@ -1,4 +1,4 @@
-# lib/trae/api.ts
+﻿# lib/trae/api.ts
 
 > Last updated: 2026-06-29 | Protection: STANDARD
 
@@ -124,3 +124,8 @@ Provides SQL/Data Connect read-model helpers used by public API routes and pages
 | 2026-07-02 | Planned graded-first public ranking order for all sort directions. | Codex |
 | 2026-07-02 | Implemented graded-first ranking partitioning before rank assignment and pagination. | Codex |
 | 2026-07-02 | Fixed topic detail 404s: `getTopicDetail()` now falls back to the local snapshot on empty/non-preliminary DB results, not only on thrown errors. | Codex |
+## Change Plan: Provider Map Cleanup
+
+- 2026-07-03 Codex: Remove REMOVED_PROVIDER from read-side provider reverse maps.
+- Current Data Connect rows should normalize `NVIDIA` to `nvidia`; new Friend/NVIDIA calls both persist under that enum bucket.
+

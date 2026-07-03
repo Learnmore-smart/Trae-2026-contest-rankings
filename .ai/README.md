@@ -1,10 +1,10 @@
-# README.md
+﻿# README.md
 
 > Last updated: 2026-06-29 | Protection: STANDARD
 
 ## Purpose
 
-Documents environment variables, Firestore setup, local scripts, deployment, scheduler setup, and zero-budget NVIDIA/OpenRouter backoff behavior.
+Documents environment variables, Firestore setup, local scripts, deployment, scheduler setup, and zero-budget NVIDIA/REMOVED_PROVIDER backoff behavior.
 
 ## What It Does
 
@@ -12,7 +12,7 @@ Documents environment variables, Firestore setup, local scripts, deployment, sch
 
 ## Agent Decisions / Thoughts
 
-- 2026-06-29 Codex: Planned README update from OpenRouter-only scoring to NVIDIA-first zero-budget provider order with OpenRouter free fallback only.
+- 2026-06-29 Codex: Planned README update from REMOVED_PROVIDER-only scoring to NVIDIA-first zero-budget provider order with REMOVED_PROVIDER free fallback only.
 
 ## Important Notes / NEVER Change
 
@@ -24,4 +24,9 @@ Documents environment variables, Firestore setup, local scripts, deployment, sch
 |------|--------|--------|
 | 2026-06-29 | Planned README documentation. | Codex |
 | 2026-06-29 | Planned zero-budget AI provider documentation update. | Codex |
-| 2026-06-29 | Documented NVIDIA-first zero-budget provider order, OpenRouter fallback, and `callLLMWithFallback()` behavior. | Codex |
+| 2026-06-29 | Documented NVIDIA-first zero-budget provider order, REMOVED_PROVIDER fallback, and `callLLMWithFallback()` behavior. | Codex |
+## Change Plan: Remove REMOVED_PROVIDER Documentation
+
+- 2026-07-03 Codex: Update README setup and fallback notes to Friend primary plus NVIDIA fallback only.
+- Remove REMOVED_PROVIDER keys, model defaults, and fallback claims.
+

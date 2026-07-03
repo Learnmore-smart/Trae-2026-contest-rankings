@@ -1,4 +1,4 @@
-# lib/dataconnect-generated/esm/index.esm.js
+﻿# lib/dataconnect-generated/esm/index.esm.js
 
 > Last updated: 2026-07-01 | Protection: STANDARD
 
@@ -38,3 +38,7 @@ ES module wrapper entrypoint for the local Firebase Data Connect generated Admin
 |------|--------|--------|
 | 2026-07-01 | Created doc for paged board ESM wrapper. | Codex |
 | 2026-07-01 | Added paged board ESM wrapper. | Codex |
+## Change Plan: Provider Enum Sync
+
+- 2026-07-03 Codex: Remove `REMOVED_PROVIDER` from the generated `TraeAiProvider` constant after removing it from the Data Connect schema.
+

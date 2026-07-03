@@ -6,16 +6,18 @@ import { buildLLMFallbackPlan, buildVisionLLMFallbackPlan, callLLMWithFallback, 
 type EnvPatch = Record<string, string | undefined>;
 
 const aiEnvKeys = [
+  "TRAE_FRIEND_API",
+  "TRAE_FRIEND_BASE_URL",
+  "FRIEND_PRIMARY_MODEL",
+  "FRIEND_FALLBACK_MODELS",
+  "FRIEND_IMAGE_MODEL",
+  "FRIEND_IMAGE_FALLBACK_MODEL",
   "NVIDIA_API_KEY",
   "NVIDIA_BASE_URL",
   "NVIDIA_PRIMARY_MODEL",
   "NVIDIA_FALLBACK_MODELS",
   "NVIDIA_IMAGE_MODEL",
   "NVIDIA_IMAGE_FALLBACK_MODEL",
-  "OPENROUTER_API_KEY",
-  "OPENROUTER_BASE_URL",
-  "OPENROUTER_PRIMARY_MODEL",
-  "OPENROUTER_FALLBACK_MODELS",
   "AI_PROVIDER_ORDER",
   "AI_ZERO_BUDGET_ONLY",
   "AI_RPM_LIMIT",
@@ -46,18 +48,19 @@ function withEnv<T>(patch: EnvPatch, fn: () => T): T {
 
 function zeroBudgetEnv(overrides: EnvPatch = {}): EnvPatch {
   return {
+    TRAE_FRIEND_API: "friend-key",
+    TRAE_FRIEND_BASE_URL: "https://friend.example/v1",
+    FRIEND_PRIMARY_MODEL: "z-ai/glm-5.2",
+    FRIEND_FALLBACK_MODELS: "deepseek-ai/deepseek-v4-pro,minimaxai/minimax-m3,moonshotai/kimi-k2.6",
+    FRIEND_IMAGE_MODEL: "moonshotai/kimi-k2.6",
+    FRIEND_IMAGE_FALLBACK_MODEL: "minimaxai/minimax-m3",
     NVIDIA_API_KEY: "nvidia-key",
     NVIDIA_BASE_URL: "https://integrate.api.nvidia.com/v1",
-    NVIDIA_PRIMARY_MODEL: "moonshotai/kimi-k2.6",
-    NVIDIA_FALLBACK_MODELS: "z-ai/glm-5.1,deepseek-ai/deepseek-v4-flash",
+    NVIDIA_PRIMARY_MODEL: "z-ai/glm-5.2",
+    NVIDIA_FALLBACK_MODELS: "deepseek-ai/deepseek-v4-pro,minimaxai/minimax-m3,moonshotai/kimi-k2.6",
     NVIDIA_IMAGE_MODEL: "moonshotai/kimi-k2.6",
     NVIDIA_IMAGE_FALLBACK_MODEL: "minimaxai/minimax-m3",
-    OPENROUTER_API_KEY: "openrouter-key",
-    OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1",
-    OPENROUTER_PRIMARY_MODEL: "openai/gpt-oss-120b",
-    OPENROUTER_FALLBACK_MODELS:
-      "nvidia/nemotron-3-ultra-550b-a55b:free,google/gemma-4-31b-it:free",
-    AI_PROVIDER_ORDER: "nvidia,openrouter",
+    AI_PROVIDER_ORDER: "friend,nvidia",
     AI_ZERO_BUDGET_ONLY: "true",
     AI_RPM_LIMIT: "60000",
     AI_MAX_RETRIES_PER_MODEL: "1",
@@ -73,7 +76,7 @@ describe("LLM zero-budget fallback client", () => {
     });
   });
 
-  it("defaults NVIDIA text order to DeepSeek V4 Pro, MiniMax M3, then Kimi K2.6", () => {
+  it("defaults NVIDIA text order to GLM 5.2, DeepSeek V4 Pro, MiniMax M3, then Kimi K2.6", () => {
     withEnv(
       zeroBudgetEnv({
         NVIDIA_PRIMARY_MODEL: undefined,
@@ -82,38 +85,53 @@ describe("LLM zero-budget fallback client", () => {
       () => {
         const config = getTraeConfig();
         const plan = buildLLMFallbackPlan(config);
+        // GLM 5.2 is the primary text model; DeepSeek V4 Pro is the first fallback.
         // DeepSeek V4 Flash (hangs) and GLM 5.1 (410 EOL 2026-07-02) are intentionally
         // excluded from the defaults; only verified-live models remain.
         assert.deepEqual(
           plan
             .filter((entry) => entry.provider === "nvidia")
             .map((entry) => entry.model),
-          ["deepseek-ai/deepseek-v4-pro", "minimaxai/minimax-m3", "moonshotai/kimi-k2.6"]
+          [
+            "z-ai/glm-5.2",
+            "deepseek-ai/deepseek-v4-pro",
+            "minimaxai/minimax-m3",
+            "moonshotai/kimi-k2.6"
+          ]
         );
         assert.equal(config.nvidiaImageModel, "moonshotai/kimi-k2.6");
       }
     );
   });
 
-  it("builds the NVIDIA-first, OpenRouter-second free model plan", () => {
+  it("builds the Friend-first, NVIDIA-second free model plan", () => {
     withEnv(zeroBudgetEnv(), () => {
       const plan = buildLLMFallbackPlan(getTraeConfig());
       assert.deepEqual(
         plan.map((entry) => `${entry.provider}:${entry.model}`),
         [
-          "nvidia:moonshotai/kimi-k2.6",
-          "nvidia:z-ai/glm-5.1",
-          "nvidia:deepseek-ai/deepseek-v4-flash",
-          "openrouter:openai/gpt-oss-120b",
-          "openrouter:nvidia/nemotron-3-ultra-550b-a55b:free",
-          "openrouter:google/gemma-4-31b-it:free"
+          "friend:z-ai/glm-5.2",
+          "friend:deepseek-ai/deepseek-v4-pro",
+          "friend:minimaxai/minimax-m3",
+          "friend:moonshotai/kimi-k2.6",
+          "nvidia:z-ai/glm-5.2",
+          "nvidia:deepseek-ai/deepseek-v4-pro",
+          "nvidia:minimaxai/minimax-m3",
+          "nvidia:moonshotai/kimi-k2.6"
         ]
       );
-      assert.deepEqual(new Set(plan.map((entry) => entry.provider)), new Set(["nvidia", "openrouter"]));
+      assert.deepEqual(new Set(plan.map((entry) => entry.provider)), new Set(["friend", "nvidia"]));
     });
   });
 
-  it("retries a 429 with backoff before falling back to NVIDIA GLM 5.1", async () => {
+  it("ignores stale unsupported provider-order entries", () => {
+    withEnv(zeroBudgetEnv({ AI_PROVIDER_ORDER: "legacy,friend,nvidia" }), () => {
+      const plan = buildLLMFallbackPlan(getTraeConfig());
+      assert.deepEqual([...new Set(plan.map((entry) => entry.provider))], ["friend", "nvidia"]);
+    });
+  });
+
+  it("retries a 429 with backoff before falling back to the next Friend model", async () => {
     await withEnv(zeroBudgetEnv(), async () => {
       const requests: Array<{ url: string; model: string; authorization: string | null }> = [];
       const sleeps: number[] = [];
@@ -131,7 +149,7 @@ describe("LLM zero-budget fallback client", () => {
             authorization: headers.get("authorization")
           });
 
-          if (body.model === "moonshotai/kimi-k2.6") {
+          if (body.model === "z-ai/glm-5.2") {
             return new Response("rate limited", { status: 429 });
           }
 
@@ -144,21 +162,21 @@ describe("LLM zero-budget fallback client", () => {
         }
       });
 
-      assert.equal(result.provider, "nvidia");
-      assert.equal(result.model, "z-ai/glm-5.1");
+      assert.equal(result.provider, "friend");
+      assert.equal(result.model, "deepseek-ai/deepseek-v4-pro");
       assert.deepEqual(
         requests.map((request) => request.model),
         [
-          "moonshotai/kimi-k2.6",
-          "moonshotai/kimi-k2.6",
-          "z-ai/glm-5.1"
+          "z-ai/glm-5.2",
+          "z-ai/glm-5.2",
+          "deepseek-ai/deepseek-v4-pro"
         ]
       );
       assert.equal(requests.every((request) => request.url.endsWith("/chat/completions")), true);
-      assert.equal(requests[0]?.authorization, "Bearer nvidia-key");
+      assert.equal(requests[0]?.authorization, "Bearer friend-key");
       assert.equal(sleeps.length, 1);
-      assert.equal(result.callLogs[0]?.provider, "nvidia");
-      assert.equal(result.callLogs[0]?.model, "moonshotai/kimi-k2.6");
+      assert.equal(result.callLogs[0]?.provider, "friend");
+      assert.equal(result.callLogs[0]?.model, "z-ai/glm-5.2");
       assert.equal(result.callLogs[0]?.retryCount, 0);
       assert.equal(result.callLogs[0]?.errorReason, "http_429");
       assert.equal(result.callLogs[1]?.retryCount, 1);
@@ -169,34 +187,36 @@ describe("LLM zero-budget fallback client", () => {
     });
   });
 
-  it("falls through all NVIDIA models on invalid JSON before trying OpenRouter", async () => {
+  it("falls through all Friend models on invalid JSON before trying NVIDIA", async () => {
     await withEnv(zeroBudgetEnv({ AI_MAX_RETRIES_PER_MODEL: "0" }), async () => {
-      const models: string[] = [];
+      const attempts: string[] = [];
 
       const result = await callLLMWithFallback({
         messages: [{ role: "user", content: "score this" }],
         config: getTraeConfig(),
         validateContent: (content) => JSON.parse(content) as { ok: boolean },
-        fetchFn: async (_url, init) => {
+        fetchFn: async (url, init) => {
           const body = JSON.parse(String(init?.body)) as { model: string };
-          models.push(body.model);
-          const content = body.model === "openai/gpt-oss-120b" ? JSON.stringify({ ok: true }) : "not json";
+          const provider = String(url).startsWith("https://friend.example") ? "friend" : "nvidia";
+          attempts.push(`${provider}:${body.model}`);
+          const content = provider === "nvidia" && body.model === "z-ai/glm-5.2" ? JSON.stringify({ ok: true }) : "not json";
           return Response.json({ choices: [{ message: { content } }] });
         },
         sleepFn: async () => undefined
       });
 
-      assert.equal(result.provider, "openrouter");
-      assert.equal(result.model, "openai/gpt-oss-120b");
-      assert.deepEqual(models, [
-        "moonshotai/kimi-k2.6",
-        "z-ai/glm-5.1",
-        "deepseek-ai/deepseek-v4-flash",
-        "openai/gpt-oss-120b"
+      assert.equal(result.provider, "nvidia");
+      assert.equal(result.model, "z-ai/glm-5.2");
+      assert.deepEqual(attempts, [
+        "friend:z-ai/glm-5.2",
+        "friend:deepseek-ai/deepseek-v4-pro",
+        "friend:minimaxai/minimax-m3",
+        "friend:moonshotai/kimi-k2.6",
+        "nvidia:z-ai/glm-5.2"
       ]);
       assert.deepEqual(
         result.callLogs.map((log) => log.errorReason),
-        ["invalid_json", "invalid_json", "invalid_json", null]
+        ["invalid_json", "invalid_json", "invalid_json", "invalid_json", null]
       );
     });
   });
@@ -212,16 +232,20 @@ describe("LLM zero-budget fallback client", () => {
         fetchFn: async (_url, init) => {
           const body = JSON.parse(String(init?.body)) as { model: string; reasoning_effort?: string };
           requests.push({ model: body.model, reasoningEffort: body.reasoning_effort });
-          const content = body.model === "deepseek-ai/deepseek-v4-flash" ? JSON.stringify({ ok: true }) : "not json";
+          const provider = new Headers(init?.headers).get("authorization") === "Bearer nvidia-key" ? "nvidia" : "friend";
+          const content = provider === "nvidia" && body.model === "deepseek-ai/deepseek-v4-pro" ? JSON.stringify({ ok: true }) : "not json";
           return Response.json({ choices: [{ message: { content } }] });
         },
         sleepFn: async () => undefined
       });
 
       assert.deepEqual(requests, [
+        { model: "z-ai/glm-5.2", reasoningEffort: undefined },
+        { model: "deepseek-ai/deepseek-v4-pro", reasoningEffort: undefined },
+        { model: "minimaxai/minimax-m3", reasoningEffort: undefined },
         { model: "moonshotai/kimi-k2.6", reasoningEffort: undefined },
-        { model: "z-ai/glm-5.1", reasoningEffort: undefined },
-        { model: "deepseek-ai/deepseek-v4-flash", reasoningEffort: "max" }
+        { model: "z-ai/glm-5.2", reasoningEffort: undefined },
+        { model: "deepseek-ai/deepseek-v4-pro", reasoningEffort: "max" }
       ]);
     });
   });
@@ -273,7 +297,7 @@ describe("LLM zero-budget fallback client", () => {
       await callLLMWithFallback(options);
       await callLLMWithFallback(options);
 
-      assert.deepEqual(startedModels, ["moonshotai/kimi-k2.6", "moonshotai/kimi-k2.6"]);
+      assert.deepEqual(startedModels, ["z-ai/glm-5.2", "z-ai/glm-5.2"]);
       assert.equal(sleeps.length, 1);
       assert.ok(sleeps[0] >= 1400 && sleeps[0] <= 1500, `expected about 1500ms, got ${sleeps[0]}`);
     });
@@ -289,7 +313,7 @@ describe("LLM zero-budget fallback client", () => {
         validateContent: (content) => JSON.parse(content) as { ok: boolean },
         fetchFn: async (_url, init) => {
           const body = JSON.parse(String(init?.body)) as { model: string };
-          if (body.model === "moonshotai/kimi-k2.6") {
+          if (body.model === "z-ai/glm-5.2") {
             primaryCalls += 1;
             // NVIDIA soft-throttle shape: HTTP 200 with no choices and null usage.
             return Response.json({ id: "", choices: [], created: 0, model: "", usage: null });
@@ -299,10 +323,10 @@ describe("LLM zero-budget fallback client", () => {
         sleepFn: async () => undefined
       });
 
-      // Primary was retried once (rate-limited) before falling through to GLM.
+      // Primary was retried once (rate-limited) before falling through to DeepSeek.
       assert.equal(primaryCalls, 2);
-      assert.equal(result.provider, "nvidia");
-      assert.equal(result.model, "z-ai/glm-5.1");
+      assert.equal(result.provider, "friend");
+      assert.equal(result.model, "deepseek-ai/deepseek-v4-pro");
       assert.deepEqual(
         result.callLogs.slice(0, 2).map((log) => log.errorReason),
         ["rate_limited", "rate_limited"]

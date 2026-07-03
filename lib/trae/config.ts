@@ -1,7 +1,7 @@
 import type { TraeSourceType } from "./types.ts";
 import { DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY } from "./judge-policy.ts";
 
-export type AIProvider = "friend" | "nvidia" | "openrouter";
+export type AIProvider = "friend" | "nvidia";
 
 export interface TraeConfig {
   /**
@@ -23,12 +23,6 @@ export interface TraeConfig {
   nvidiaImageModel: string;
   /** Secondary vision-capable model when the primary image model soft-throttles. */
   nvidiaImageFallbackModel: string;
-  openRouterApiKey: string | null;
-  openRouterBaseUrl: string;
-  openRouterPrimaryModel: string;
-  openRouterFallbackModels: string[];
-  openRouterSiteUrl: string;
-  openRouterAppName: string;
   aiProviderOrder: AIProvider[];
   aiZeroBudgetOnly: boolean;
   aiRpmLimit: number;
@@ -78,7 +72,7 @@ function providerOrderFromEnv(): AIProvider[] {
   const seen = new Set<AIProvider>();
   const providers = listFromEnv("AI_PROVIDER_ORDER", ["friend", "nvidia"]).filter(
     (provider): provider is AIProvider =>
-      provider === "friend" || provider === "nvidia" || provider === "openrouter"
+      provider === "friend" || provider === "nvidia"
   );
   const deduped = providers.filter((provider) => {
     if (seen.has(provider)) return false;
@@ -96,10 +90,12 @@ export function getTraeConfig(): TraeConfig {
   return {
     friendApiKey: process.env.TRAE_FRIEND_API ?? null,
     friendBaseUrl: process.env.TRAE_FRIEND_BASE_URL ?? "http://47.93.17.237:8889/v1",
-    friendPrimaryModel: process.env.FRIEND_PRIMARY_MODEL ?? "deepseek-ai/deepseek-v4-pro",
-    // deepseek-v4-flash (hangs past timeout) and glm-5.1 (410 EOL 2026-07-02) are
-    // deliberately excluded — both fail on this backend and only burn wall-clock.
+    friendPrimaryModel: process.env.FRIEND_PRIMARY_MODEL ?? "z-ai/glm-5.2",
+    // glm-5.2 is the primary text model; deepseek-v4-pro is the first fallback.
+    // deepseek-v4-flash (hangs past timeout) and glm-5.1 (410 EOL 2026-07-02) stay
+    // excluded — both fail on this backend and only burn wall-clock.
     friendFallbackModels: listFromEnv("FRIEND_FALLBACK_MODELS", [
+      "deepseek-ai/deepseek-v4-pro",
       "minimaxai/minimax-m3",
       "moonshotai/kimi-k2.6"
     ]),
@@ -107,23 +103,16 @@ export function getTraeConfig(): TraeConfig {
     friendImageFallbackModel: process.env.FRIEND_IMAGE_FALLBACK_MODEL ?? "minimaxai/minimax-m3",
     nvidiaApiKey: process.env.NVIDIA_API_KEY ?? null,
     nvidiaBaseUrl: process.env.NVIDIA_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
-    nvidiaPrimaryModel: process.env.NVIDIA_PRIMARY_MODEL ?? "deepseek-ai/deepseek-v4-pro",
-    // Same exclusions as the friend chain: flash hangs, glm-5.1 is 410 EOL.
+    nvidiaPrimaryModel: process.env.NVIDIA_PRIMARY_MODEL ?? "z-ai/glm-5.2",
+    // Mirrors the friend chain: glm-5.2 primary, deepseek-v4-pro first fallback.
+    // Same exclusions: flash hangs, glm-5.1 is 410 EOL.
     nvidiaFallbackModels: listFromEnv("NVIDIA_FALLBACK_MODELS", [
+      "deepseek-ai/deepseek-v4-pro",
       "minimaxai/minimax-m3",
       "moonshotai/kimi-k2.6"
     ]),
     nvidiaImageModel: process.env.NVIDIA_IMAGE_MODEL ?? "moonshotai/kimi-k2.6",
     nvidiaImageFallbackModel: process.env.NVIDIA_IMAGE_FALLBACK_MODEL ?? "minimaxai/minimax-m3",
-    openRouterApiKey: process.env.OPENROUTER_API_KEY ?? null,
-    openRouterBaseUrl: process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
-    openRouterPrimaryModel: process.env.OPENROUTER_PRIMARY_MODEL ?? "openai/gpt-oss-120b:free",
-    openRouterFallbackModels: listFromEnv("OPENROUTER_FALLBACK_MODELS", [
-      "nvidia/nemotron-3-ultra-550b-a55b:free",
-      "google/gemma-4-31b-it:free"
-    ]),
-    openRouterSiteUrl: process.env.OPENROUTER_SITE_URL ?? "https://rateministere.com",
-    openRouterAppName: process.env.OPENROUTER_APP_NAME ?? "RateMinistere TRAE Contest 2026",
     aiProviderOrder: providerOrderFromEnv(),
     aiZeroBudgetOnly: booleanFromEnv("AI_ZERO_BUDGET_ONLY", true),
     aiRpmLimit,

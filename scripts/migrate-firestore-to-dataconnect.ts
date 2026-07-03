@@ -107,8 +107,8 @@ function mapEvaluation(docData: any) {
   const createdAt = toIsoString(docData.createdAt) || new Date().toISOString();
 
   const providerMap = {
-    nvidia: "NVIDIA",
-    openrouter: "OPENROUTER"
+    friend: "NVIDIA",
+    nvidia: "NVIDIA"
   } as const;
   const provider = docData.provider ? (providerMap[docData.provider as keyof typeof providerMap] || null) : null;
 

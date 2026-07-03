@@ -28,7 +28,6 @@ export enum MismatchRisk {
 }
 export enum TraeAiProvider {
   NVIDIA = "NVIDIA",
-  OPENROUTER = "OPENROUTER",
 }
 export enum TraeRunStatus {
   RUNNING = "RUNNING",

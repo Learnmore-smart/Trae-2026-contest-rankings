@@ -157,7 +157,7 @@ function extractSessionIds(text: string): string[] {
 
   // Trae CN exports long conversation IDs as dotted/colon-prefixed strings that
   // are not UUIDs and do not contain the word "session".
-  const traeConversation = /(?<![A-Za-z0-9_])((?:\.\d{10,}:)?[A-Za-z0-9_-]{16,}_[A-Za-z0-9_-]{12,}(?:\.[A-Za-z0-9_-]{12,}){2})(?=:Trae\b|[\s\]\|]|$)/g;
+  const traeConversation = /(?<![A-Za-z0-9_])((?:\.?\d{10,}:)?[A-Za-z0-9_-]{16,}_[A-Za-z0-9_-]{12,}(?:\.[A-Za-z0-9_-]{12,}){2})(?=:trae\b|[\s\]\|]|$)/gi;
   for (const match of text.matchAll(traeConversation)) {
     ids.add(match[1]);
   }
@@ -185,7 +185,11 @@ function extractSessionIds(text: string): string[] {
     ids.add(match[0]);
   }
 
-  return Array.from(ids);
+  const orderedIds = Array.from(ids);
+  return orderedIds.filter(
+    (candidate, index) =>
+      !orderedIds.some((other, otherIndex) => otherIndex !== index && other.length > candidate.length && other.includes(candidate))
+  );
 }
 
 function detectTrack(title: string, text: string, tags: string[] = []): string | null {

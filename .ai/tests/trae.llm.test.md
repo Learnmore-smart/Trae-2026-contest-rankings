@@ -1,4 +1,4 @@
-# tests/trae.llm.test.ts
+﻿# tests/trae.llm.test.ts
 
 > Last updated: 2026-06-30 | Protection: STANDARD
 
@@ -8,7 +8,7 @@ Verifies the zero-budget provider-agnostic LLM fallback client, including the vi
 
 ## What It Does
 
-- Tests NVIDIA primary model before NVIDIA fallback and OpenRouter.
+- Tests NVIDIA primary model before NVIDIA fallback and REMOVED_PROVIDER.
 - Tests default NVIDIA text fallback order, image/multimodal model config, and DeepSeek reasoning effort.
 - Tests retryable 429 behavior with exponential backoff.
 - Tests invalid JSON/content validation fallback.
@@ -48,3 +48,9 @@ Verifies the zero-budget provider-agnostic LLM fallback client, including the vi
 | 2026-06-30 | Planned Kimi-first NVIDIA order tests and DeepSeek max reasoning-effort request coverage. | Codex |
 | 2026-06-30 | Added vision plan ordering/dedup tests and multimodal `callVisionLLMWithFallback` request-shape coverage. | Claude |
 | 2026-07-02 | Added shared LLM rate-limiter regression coverage. | Codex |
+## Change Plan: Friend/NVIDIA Tests Only
+
+- 2026-07-03 Codex: Update fixtures to remove REMOVED_PROVIDER env vars and use `AI_PROVIDER_ORDER=friend,nvidia`.
+- Assert the fallback plan includes all Friend text models before all NVIDIA text models.
+- Assert invalid Friend responses fall through to NVIDIA, not REMOVED_PROVIDER.
+

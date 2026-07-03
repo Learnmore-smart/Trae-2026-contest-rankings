@@ -1,4 +1,4 @@
-# lib/trae/judge.ts
+﻿# lib/trae/judge.ts
 
 > Last updated: 2026-07-02 | Protection: STANDARD
 
@@ -36,7 +36,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 ## Agent Decisions / Thoughts
 
 - 2026-06-29 Codex: Treat compliance as risk context inside scoring details, not as a separate public audit page.
-- 2026-06-29 Codex: Planned migration from OpenRouter-only judge calls to NVIDIA-first free endpoint fallback with OpenRouter free models only after NVIDIA fails.
+- 2026-06-29 Codex: Planned migration from REMOVED_PROVIDER-only judge calls to NVIDIA-first free endpoint fallback with REMOVED_PROVIDER free models only after NVIDIA fails.
 - 2026-06-29 Codex: Persist cumulative token usage in a model/provider keyed Firestore collection by incrementing input/output totals after each judged or failed model call.
 - 2026-06-30 Codex: AI scoring must stay on the zero-budget LLM fallback path while all persistence goes through Data Connect mutations.
 - 2026-06-30 Codex: Data Connect `UpsertEvaluation` owns `createdAt` through `createdAt_expr: "request.time"`; judge code must send only declared mutation variables and must not spread `TraeEvaluation` directly into the mutation payload.
@@ -72,9 +72,9 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 
 | Date | Change | Author |
 |------|--------|--------|
-| 2026-06-29 | Planned OpenRouter judge module. | Codex |
+| 2026-06-29 | Planned REMOVED_PROVIDER judge module. | Codex |
 | 2026-06-29 | Planned zero-budget provider fallback migration. | Codex |
-| 2026-06-29 | Replaced direct OpenRouter calls with `callLLMWithFallback()` and stored provider/call-log metadata on success and failure evaluations. | Codex |
+| 2026-06-29 | Replaced direct REMOVED_PROVIDER calls with `callLLMWithFallback()` and stored provider/call-log metadata on success and failure evaluations. | Codex |
 | 2026-06-29 | Implemented Firestore token usage aggregation for judge model calls. | Codex |
 | 2026-06-30 | Planned Data Connect judge persistence verification. | Codex |
 | 2026-06-30 | Verified offline LLM fallback tests; live judge run was blocked by escalation usage limits. | Codex |
@@ -144,3 +144,8 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - No new Data Connect schema/persistence: visual evidence is recomputed on every `judgeOneTopic()` call (not cached on the topic row) to avoid a schema migration + generated-SDK regeneration in this pass. Acceptable at this scale; a future pass could cache it on `Topic.traeEvidence` (already a flexible `Any` column) keyed by `contentHash`/`demoUrl` if re-judge volume makes the repeated vision calls costly.
 - Both vision calls (`describeTopicImages`, `describeDemoScreenshot`) swallow their own failures and resolve to `null` — a throttled/broken vision model degrades gracefully back to the old honest "not performed" disclaimer instead of failing the whole judge run.
 - Known limitation, stated plainly rather than silently: this captures a single above-the-fold screenshot of the demo's homepage, not a multi-page click-through. It answers "is this obviously just a static/marketing page" but not "does every internal flow work." Real Playwright-based click-through automation remains a possible future upgrade, gated to the Cloud Run Job path only (see `Dockerfile`/README's Cloud Run Job section) since it cannot run in a Vercel serverless function.
+## Change Plan: Remove REMOVED_PROVIDER Persistence Mapping
+
+- 2026-07-03 Codex: Remove REMOVED_PROVIDER from provider maps used by evaluation persistence and reverse mapping.
+- New evaluations should only originate from `friend` or `nvidia` runtime providers and persist as `NVIDIA`.
+

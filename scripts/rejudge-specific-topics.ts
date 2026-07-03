@@ -12,8 +12,8 @@ loadEnvConfig(process.cwd());
 const targetIds = ["52174", "52192"];
 
 const providerMap = {
-  nvidia: "NVIDIA",
-  openrouter: "OPENROUTER"
+  friend: "NVIDIA",
+  nvidia: "NVIDIA"
 } as const;
 
 const competitionLevelMap = {

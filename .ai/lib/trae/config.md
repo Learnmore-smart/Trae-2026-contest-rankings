@@ -1,4 +1,4 @@
-# lib/trae/config.ts
+﻿# lib/trae/config.ts
 
 > Last updated: 2026-07-02 | Protection: STANDARD
 
@@ -8,7 +8,7 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 
 ## What It Does
 
-- Supplies defaults for the Friend gateway (new-api, OpenAI-compatible), NVIDIA, and OpenRouter endpoint model names, limits, rate limits, and forum URLs.
+- Supplies defaults for the Friend gateway (new-api, OpenAI-compatible), NVIDIA, and REMOVED_PROVIDER endpoint model names, limits, rate limits, and forum URLs.
 - Supplies the Friend endpoint (`TRAE_FRIEND_API` key, `TRAE_FRIEND_BASE_URL`, `FRIEND_PRIMARY_MODEL`, `FRIEND_FALLBACK_MODELS`, `FRIEND_IMAGE_MODEL`, `FRIEND_IMAGE_FALLBACK_MODEL`). It proxies the same NVIDIA-family model IDs at higher rate limits and is the default primary provider (`AI_PROVIDER_ORDER=friend,nvidia`). Persisted as `NVIDIA` in Data Connect (no enum migration); the true endpoint stays visible in per-call `llmCallLogs`.
 - Supplies `aiRpmLimit` (`AI_RPM_LIMIT`, default 40) for shared LLM request-start pacing.
 - Supplies `judgeConcurrency` (`TRAE_JUDGE_CONCURRENCY`, default from `DEFAULT_JUDGE_CONCURRENCY`, currently 8) for bounded topic-level judge parallelism.
@@ -31,7 +31,7 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 ## Agent Decisions / Thoughts
 
 - 2026-06-29 Codex: Store defaults in code for non-secret values only; secrets remain required at execution time.
-- 2026-06-29 Codex: Planned zero-budget AI provider config with NVIDIA first, OpenRouter second, no paid direct model-provider API, and no billing-dependent fallback.
+- 2026-06-29 Codex: Planned zero-budget AI provider config with NVIDIA first, REMOVED_PROVIDER second, no paid direct model-provider API, and no billing-dependent fallback.
 - 2026-06-30 Codex: Live NVIDIA checks showed `moonshotai/kimi-k2.6`, `z-ai/glm-5.1`, and `deepseek-ai/deepseek-v4-flash` work on the text JSON path; MiniMax M3 exists but returns NVIDIA's HTTP-200 empty-choices soft throttle in current tests.
 - 2026-06-30 Codex: Text judging should prefer Kimi K2.6 > GLM 5.1 > DeepSeek V4 Flash. DeepSeek should only be the last fallback and should request reasoning effort `max`, not `high`.
 - 2026-07-01 Codex: Throughput defaults now come from `lib/trae/judge-policy.ts`; owner requested `100 / 20`, with env vars remaining optional overrides for local and job runs.
@@ -50,8 +50,8 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-06-29 | Planned config reader. | Codex |
-| 2026-06-29 | Planned zero-budget NVIDIA/OpenRouter provider config update. | Codex |
-| 2026-06-29 | Implemented NVIDIA/OpenRouter free endpoint config, provider order, RPM/retry/timeout controls, and removed OpenRouter-specific daily cap/RPM config. | Codex |
+| 2026-06-29 | Planned zero-budget NVIDIA/REMOVED_PROVIDER provider config update. | Codex |
+| 2026-06-29 | Implemented NVIDIA/REMOVED_PROVIDER free endpoint config, provider order, RPM/retry/timeout controls, and removed REMOVED_PROVIDER-specific daily cap/RPM config. | Codex |
 | 2026-06-29 | Default NVIDIA fallback models now kimi-k2.6, deepseek-v4-flash, minimax-m3 (primary stays deepseek-v4-pro). | Claude |
 | 2026-06-30 | Planned NVIDIA text order update to DeepSeek V4 Pro, GLM 5.1, DeepSeek V4 Flash, with Kimi K2.6 kept as image/multimodal config. | Codex |
 | 2026-06-30 | Implemented `nvidiaImageModel` config and updated default NVIDIA text fallbacks to GLM 5.1 then DeepSeek V4 Flash. | Codex |
@@ -64,6 +64,7 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 | 2026-07-02 | Removed `judgeStrategy` config and the `TRAE_JUDGE_STRATEGY` env knob. | Codex |
 | 2026-07-02 | Implemented config defaults for 40 rpm judging: `AI_RPM_LIMIT=40`, `TRAE_JUDGE_CONCURRENCY=8`, and overnight-sized judge batches. | Codex |
 | 2026-07-02 | Added Friend gateway provider (primary); model chains now DeepSeek V4 Pro → MiniMax M3 → Kimi K2.6 on friend then nvidia. Dropped GLM 5.1 (410 EOL) and DeepSeek V4 Flash (hangs). | Claude |
+| 2026-07-03 | Promoted GLM 5.2 (`z-ai/glm-5.2`) to primary text model on both friend and nvidia chains; DeepSeek V4 Pro demoted to first fallback → MiniMax M3 → Kimi K2.6. Image models unchanged. | Claude |
 
 ## Planned Change: Judge Concurrency Config
 
@@ -91,3 +92,10 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 - 2026-07-02 Codex: Changed the hard-coded `AI_RPM_LIMIT` fallback from 30 to 40 to match the owner's current quota.
 - `TRAE_MAX_JUDGE_PER_RUN` remains a cap because `judgeChangedTraeTopics()` intentionally slices the queue for finite CLI/job/admin runs. The code default is now an overnight-sized batch so scheduled judging can drain thousands of newly scraped 初赛 topics.
 - Clarify that scraping discovers/upserts all configured 初赛 posts, but judging only processes topics selected by mode (`unjudged`, `changed`, or `low-confidence`) and then capped by `max`.
+## Change Plan: Remove REMOVED_PROVIDER
+
+- 2026-07-03 Codex: Owner requested REMOVED_PROVIDER be deleted entirely because its models are no longer acceptable.
+- Remove REMOVED_PROVIDER fields from `TraeConfig`, env parsing, defaults, and `AIProvider`.
+- Restrict `AI_PROVIDER_ORDER` to `friend,nvidia`; invalid or empty values still fall back to `friend,nvidia`.
+- Keep Friend and NVIDIA text model chains mirrored with `z-ai/glm-5.2` as primary and DeepSeek V4 Pro as first fallback.
+

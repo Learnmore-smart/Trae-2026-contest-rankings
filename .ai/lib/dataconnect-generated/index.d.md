@@ -1,4 +1,4 @@
-# lib/dataconnect-generated/index.d.ts
+﻿# lib/dataconnect-generated/index.d.ts
 
 > Last updated: 2026-07-01 | Protection: STANDARD
 
@@ -38,3 +38,7 @@ Type declarations for the local Firebase Data Connect generated Admin SDK packag
 |------|--------|--------|
 | 2026-07-01 | Created doc for paged board generated declarations. | Codex |
 | 2026-07-01 | Added paged board declaration surface. | Codex |
+## Change Plan: Provider Enum Sync
+
+- 2026-07-03 Codex: Remove `TraeAiProvider.REMOVED_PROVIDER` from declarations after removing it from the Data Connect schema.
+

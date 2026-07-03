@@ -1,6 +1,6 @@
 # lib/trae/vision.ts
 
-> Last updated: 2026-06-30 | Protection: STANDARD
+> Last updated: 2026-07-03 | Protection: STANDARD
 
 ## Purpose
 
@@ -8,7 +8,7 @@ Gathers real visual evidence for judging: describes a topic's post images and ca
 
 ## What It Does
 
-- `describeTopicImages()`: sends up to 4 of a topic's `imageUrls` (capped for token/cost control) as `image_url` parts to `callVisionLLMWithFallback()`, asking for an objective 2-4 sentence Chinese summary of what's actually shown (real product UI vs. marketing/concept art, completion quality). Returns `null` (never throws) when there are no images or every vision model call fails.
+- `describeTopicImages()`: sends all selected topic images across bounded batches of up to 4 `image_url` parts per request to `callVisionLLMWithFallback()`, asking for objective Chinese summaries of what's actually shown (real product UI vs. marketing/concept art, completion quality). Returns `null` (never throws) when there are no images or every vision model call fails.
 - `describeDemoScreenshot()`: if the topic has a `demoUrl`, builds a screenshot URL via `buildDemoScreenshotUrl()` and sends it as a single `image_url` part, asking whether the rendered page is a real interactive product, a static/marketing landing page, or broken/blank/error. Returns `null` on no demo URL or total failure.
 - `buildDemoScreenshotUrl()`: wraps the demo URL with `https://image.thum.io/get/width/1200/noanimate/<url>` — a free, no-API-key screenshot proxy. thum.io fetches the target page server-side; we never connect to the (attacker-influenceable) demo URL ourselves. Rejects non-http(s) schemes.
 - `gatherVisualEvidence()`: runs both calls concurrently and returns `{imageEvidence, demoEvidence}`, each independently nullable.
@@ -19,7 +19,7 @@ Gathers real visual evidence for judging: describes a topic's post images and ca
 | Name | Type | Description |
 |------|------|-------------|
 | `gatherVisualEvidence` | function | Runs image + demo vision concurrently; the one function `judge.ts` calls. |
-| `describeTopicImages` | function | Vision-describes up to 4 post images. |
+| `describeTopicImages` | function | Vision-describes selected post images across bounded batches. |
 | `describeDemoScreenshot` | function | Screenshots + vision-describes the demo URL. |
 | `buildDemoScreenshotUrl` | function | Builds the thum.io screenshot URL for a demo link (or `null` if not http/https). |
 
@@ -37,6 +37,7 @@ Gathers real visual evidence for judging: describes a topic's post images and ca
 - 2026-07-01 Codex: Visual selection should also infer QR/miniprogram priority from legacy topic text and image filenames when `traeEvidence.visualDemoImageUrls` is absent, so old rows can be rejudged without losing the likely demo-access image under the 4-image cap.
 - 2026-07-01 Codex: Official screenshot evidence should be evaluated as ordinary uploaded screenshots, not only web Demo browsing. The vision prompt should explicitly ask Kimi to distinguish whether images show Trae usage/development process and whether images show the finished Demo/product interface.
 - 2026-07-01 Codex: Implemented explicit Kimi wording for official screenshot evidence categories in `describeTopicImages()`.
+- 2026-07-03 Codex: Topic 48365 shows a common contest-post layout: finished product screenshots first, Trae development-process screenshots later under the TRAE practice section. The old first-4-image cap could send only product screenshots to Kimi and cause a false "no Trae process screenshot" conclusion. Implemented all-image batching: keep each request capped at four images, but send every uploaded image across multiple vision calls.
 
 ## Important Notes / NEVER Change
 
@@ -55,6 +56,16 @@ Gathers real visual evidence for judging: describes a topic's post images and ca
 | 2026-07-01 | Planned explicit Kimi image-review wording for official screenshot evidence categories. | Codex |
 | 2026-07-01 | Implemented Kimi image-review wording for official screenshot evidence categories. | Codex |
 | 2026-07-01 | Implemented explicit Kimi image-review wording for Trae usage screenshots and finished Demo/product screenshots. | Codex |
+| 2026-07-03 | Planned all-image vision coverage so later Trae process screenshots reach Kimi. | Codex |
+| 2026-07-03 | Implemented bounded image batching and combined per-batch summaries. | Codex |
+
+## Implemented Change: All-Image Vision Batching
+
+- Keeps each vision request bounded to four `image_url` parts.
+- Covers every uploaded image by splitting the selected URL list into batches.
+- Preserves QR/demo-access prioritization first, then includes all remaining images in original order.
+- Merges per-batch summaries with batch labels so the judge prompt can see that all post images were inspected.
+- Continues on batch failure; one bad image batch no longer erases successful evidence from other batches.
 
 ## Planned Change: Visual Demo Image Priority
 

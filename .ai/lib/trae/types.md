@@ -1,4 +1,4 @@
-# lib/trae/types.ts
+﻿# lib/trae/types.ts
 
 > Last updated: 2026-06-29 | Protection: STANDARD
 
@@ -51,3 +51,9 @@ Defines shared TypeScript types and Zod schemas for TRAE topics, matches, evalua
 | 2026-07-01 | Added optional `demoUrlCount` and `detectedDemoUrls` to `TraeEvidence`. | Codex |
 | 2026-07-01 | Planned optional generalized Demo evidence fields. | Codex |
 | 2026-07-01 | Added optional generalized Demo evidence fields: `hasDemoEvidence`, `demoEvidenceTypes`, `downloadDemoUrls`, and `visualDemoImageUrls`. | Codex |
+## Change Plan: Provider Type Narrowing
+
+- 2026-07-03 Codex: Remove `REMOVED_PROVIDER` from `TraeAIProvider`.
+- Runtime call logs should only emit `friend` or `nvidia`.
+- Data Connect adapters continue to persist the supported provider bucket as `NVIDIA`.
+

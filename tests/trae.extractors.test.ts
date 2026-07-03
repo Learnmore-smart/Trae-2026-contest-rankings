@@ -60,6 +60,27 @@ describe("extractTopicSignals", () => {
     assert.equal(signals.traeEvidence.hasThreeSessionIds, true);
   });
 
+  it("extracts all Trae Work CN session IDs from topic 48365 text", () => {
+    const ids = [
+      "696411359297017:46c12d442fb045ed6e8a479a11ee4fe2_6a326fb35617cfc45020219e.6a326fc4c65a8d012854b1a7.6a326fb35617cfc45020219f",
+      "696411359297017:6c88b8258720fc755fb7e2e9908b3ab4_6a326fb35617cfc45020219e.6a32b951c55e06f95e2bdf47.6a32b951d9038949edf9748e",
+      "696411359297017:e62da6940258ac25f717757a41a3ae06_6a326fb35617cfc45020219e.6a3a92065be2f62e4122627e.6a3a92063d3038c1df12b491",
+      "696411359297017:a14a0470f12a73e62495e6548b83f1e5_6a326fb35617cfc45020219e.6a3ea15da1a8da4d9d65f473.6a3ea15d482fd83b909ec551"
+    ];
+    const text = `
+      建立创意方案 Session ID: ${ids[0]}:TRAE Work CN.0.1.23.no_sid.no_ppe.T(2026/6/17 18:15:01)
+      生成初步Demo Session ID: ${ids[1]}:TRAE Work CN.0.1.23.no_sid.no_ppe.T(2026/6/17 23:17:51)
+      调整任务排序方式与信息一致性 Session ID: ${ids[2]}:TRAE Work CN.0.1.23.no_sid.no_ppe.T(2026/6/23 22:07:05)
+      添加“组织”页面 Session ID: ${ids[3]}:TRAE Work CN.0.1.23.no_sid.no_ppe.T(2026/6/27 00:00:13)
+    `;
+
+    const signals = extractTopicSignals({ title: "任大师", text });
+
+    assert.deepEqual(signals.sessionIds, ids);
+    assert.equal(signals.traeEvidence.sessionIdCount, 4);
+    assert.equal(signals.traeEvidence.hasThreeSessionIds, true);
+  });
+
   it("tracks all demo-like links while keeping the canonical demo URL", () => {
     const html = `
       <a href="https://forum.trae.cn/t/internal/123">internal forum link</a>

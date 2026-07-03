@@ -12,16 +12,18 @@ import type { TraeTopic } from "../lib/trae/types.ts";
 type EnvPatch = Record<string, string | undefined>;
 
 const aiEnvKeys = [
+  "TRAE_FRIEND_API",
+  "TRAE_FRIEND_BASE_URL",
+  "FRIEND_PRIMARY_MODEL",
+  "FRIEND_FALLBACK_MODELS",
+  "FRIEND_IMAGE_MODEL",
+  "FRIEND_IMAGE_FALLBACK_MODEL",
   "NVIDIA_API_KEY",
   "NVIDIA_BASE_URL",
   "NVIDIA_PRIMARY_MODEL",
   "NVIDIA_FALLBACK_MODELS",
   "NVIDIA_IMAGE_MODEL",
   "NVIDIA_IMAGE_FALLBACK_MODEL",
-  "OPENROUTER_API_KEY",
-  "OPENROUTER_BASE_URL",
-  "OPENROUTER_PRIMARY_MODEL",
-  "OPENROUTER_FALLBACK_MODELS",
   "AI_PROVIDER_ORDER",
   "AI_ZERO_BUDGET_ONLY",
   "AI_RPM_LIMIT",
@@ -52,17 +54,19 @@ function withEnv<T>(patch: EnvPatch, fn: () => T): T {
 
 function zeroBudgetEnv(overrides: EnvPatch = {}): EnvPatch {
   return {
+    TRAE_FRIEND_API: "friend-key",
+    TRAE_FRIEND_BASE_URL: "https://friend.example/v1",
+    FRIEND_PRIMARY_MODEL: "z-ai/glm-5.2",
+    FRIEND_FALLBACK_MODELS: "deepseek-ai/deepseek-v4-pro,minimaxai/minimax-m3,moonshotai/kimi-k2.6",
+    FRIEND_IMAGE_MODEL: "moonshotai/kimi-k2.6",
+    FRIEND_IMAGE_FALLBACK_MODEL: "minimaxai/minimax-m3",
     NVIDIA_API_KEY: "nvidia-key",
     NVIDIA_BASE_URL: "https://integrate.api.nvidia.com/v1",
-    NVIDIA_PRIMARY_MODEL: "moonshotai/kimi-k2.6",
-    NVIDIA_FALLBACK_MODELS: "z-ai/glm-5.1,deepseek-ai/deepseek-v4-flash",
+    NVIDIA_PRIMARY_MODEL: "z-ai/glm-5.2",
+    NVIDIA_FALLBACK_MODELS: "deepseek-ai/deepseek-v4-pro,minimaxai/minimax-m3,moonshotai/kimi-k2.6",
     NVIDIA_IMAGE_MODEL: "moonshotai/kimi-k2.6",
     NVIDIA_IMAGE_FALLBACK_MODEL: "minimaxai/minimax-m3",
-    OPENROUTER_API_KEY: "openrouter-key",
-    OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1",
-    OPENROUTER_PRIMARY_MODEL: "openai/gpt-oss-120b",
-    OPENROUTER_FALLBACK_MODELS: "nvidia/nemotron-3-ultra-550b-a55b:free,google/gemma-4-31b-it:free",
-    AI_PROVIDER_ORDER: "nvidia,openrouter",
+    AI_PROVIDER_ORDER: "friend,nvidia",
     AI_ZERO_BUDGET_ONLY: "true",
     AI_RPM_LIMIT: "30",
     AI_MAX_RETRIES_PER_MODEL: "0",
@@ -178,24 +182,26 @@ describe("describeTopicImages", () => {
     });
   });
 
-  it("caps image count at 4 to bound tokens/cost", async () => {
+  it("sends all post images across bounded batches so later process screenshots are visible", async () => {
     await withEnv(zeroBudgetEnv(), async () => {
-      const manyImages = Array.from({ length: 8 }, (_, i) => `https://a.test/${i}.png`);
-      const requests: Array<Array<{ type: string }>> = [];
+      const manyImages = Array.from({ length: 9 }, (_, i) => `https://a.test/${i}.png`);
+      const sentUrls: string[] = [];
       await describeTopicImages(
         { ...baseTopic, imageUrls: manyImages },
         {
           config: getTraeConfig(),
           fetchFn: async (_url, init) => {
-            const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ type: string }> }> };
-            requests.push(body.messages[0]?.content ?? []);
+            const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ type: string; image_url?: { url: string } }> }> };
+            for (const part of body.messages[0]?.content ?? []) {
+              if (part.type === "image_url" && part.image_url?.url) sentUrls.push(part.image_url.url);
+            }
             return visionResponse("ok");
-          }
+          },
+          sleepFn: async () => undefined
         }
       );
 
-      const imageParts = requests[0]?.filter((part) => part.type === "image_url") ?? [];
-      assert.equal(imageParts.length, 4);
+      assert.deepEqual(sentUrls, manyImages);
     });
   });
 
@@ -232,9 +238,15 @@ describe("describeTopicImages", () => {
         }
       );
 
-      assert.equal(evidence?.summary, "qr first");
+      assert.equal(evidence?.summary, "图片批次 1/2: qr first\n图片批次 2/2: qr first");
       assert.equal(sentUrls[0], "https://a.test/qr.png");
-      assert.equal(sentUrls.length, 4);
+      assert.deepEqual(sentUrls, [
+        "https://a.test/qr.png",
+        "https://a.test/screenshot-1.png",
+        "https://a.test/screenshot-2.png",
+        "https://a.test/screenshot-3.png",
+        "https://a.test/screenshot-4.png"
+      ]);
     });
   });
 
@@ -268,9 +280,15 @@ describe("describeTopicImages", () => {
         }
       );
 
-      assert.equal(evidence?.summary, "legacy qr first");
+      assert.equal(evidence?.summary, "图片批次 1/2: legacy qr first\n图片批次 2/2: legacy qr first");
       assert.equal(sentUrls[0], "https://a.test/miniprogram-qr.png");
-      assert.equal(sentUrls.length, 4);
+      assert.deepEqual(sentUrls, [
+        "https://a.test/miniprogram-qr.png",
+        "https://a.test/screenshot-1.png",
+        "https://a.test/screenshot-2.png",
+        "https://a.test/screenshot-3.png",
+        "https://a.test/screenshot-4.png"
+      ]);
     });
   });
 
@@ -335,7 +353,8 @@ describe("describeDemoScreenshot", () => {
           const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ type: string; image_url?: { url: string } }> }> };
           sentImageUrl = body.messages[0]?.content.find((part) => part.type === "image_url")?.image_url?.url;
           return visionResponse("这是一个静态营销落地页。");
-        }
+        },
+        sleepFn: async () => undefined
       });
 
       assert.equal(sentImageUrl, "https://image.thum.io/get/width/1200/noanimate/https://warmguide.netlify.app/");
@@ -371,7 +390,8 @@ describe("gatherVisualEvidence", () => {
           const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ type: string }> }> };
           const isDemo = body.messages[0]?.content.length === 2;
           return visionResponse(isDemo ? "demo summary" : "image summary");
-        }
+        },
+        sleepFn: async () => undefined
       });
 
       assert.equal(evidence.imageEvidence?.summary, "image summary");

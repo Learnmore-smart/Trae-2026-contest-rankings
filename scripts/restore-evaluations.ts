@@ -8,8 +8,8 @@ const { loadEnvConfig } = nextEnv;
 loadEnvConfig(process.cwd());
 
 const providerMap = {
-  nvidia: "NVIDIA",
-  openrouter: "OPENROUTER"
+  friend: "NVIDIA",
+  nvidia: "NVIDIA"
 } as const;
 
 const competitionLevelMap = {

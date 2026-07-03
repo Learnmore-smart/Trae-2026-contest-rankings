@@ -84,12 +84,6 @@ export function buildLLMFallbackPlan(config = getTraeConfig()): LLMFallbackPlanE
       apiKey: config.nvidiaApiKey,
       baseUrl: config.nvidiaBaseUrl,
       models: [config.nvidiaPrimaryModel, ...config.nvidiaFallbackModels]
-    },
-    openrouter: {
-      provider: "openrouter",
-      apiKey: config.openRouterApiKey,
-      baseUrl: config.openRouterBaseUrl,
-      models: [config.openRouterPrimaryModel, ...config.openRouterFallbackModels]
     }
   };
 
@@ -165,8 +159,6 @@ export async function callLLMWithFallback<TParsed = string>({
         temperature,
         responseFormat,
         timeoutMs: config.aiRequestTimeoutMs,
-        openRouterSiteUrl: config.openRouterSiteUrl,
-        openRouterAppName: config.openRouterAppName,
         retryCount,
         validateContent,
         fetchFn
@@ -242,8 +234,6 @@ interface CallOneModelOptions<TParsed> {
   temperature: number;
   responseFormat: "json_object" | "text";
   timeoutMs: number;
-  openRouterSiteUrl: string;
-  openRouterAppName: string;
   retryCount: number;
   validateContent?: (content: string) => TParsed;
   fetchFn: typeof fetch;
@@ -267,8 +257,6 @@ async function callOneModel<TParsed>({
   temperature,
   responseFormat,
   timeoutMs,
-  openRouterSiteUrl,
-  openRouterAppName,
   retryCount,
   validateContent,
   fetchFn
@@ -282,7 +270,7 @@ async function callOneModel<TParsed>({
     const response = await fetchFn(chatCompletionsUrl(entry.baseUrl), {
       method: "POST",
       signal: controller.signal,
-      headers: buildHeaders(entry, openRouterSiteUrl, openRouterAppName),
+      headers: buildHeaders(entry),
       body: JSON.stringify(buildChatCompletionRequestBody(entry, messages, temperature, responseFormat))
     });
     rawResponse = await response.text();
@@ -352,20 +340,11 @@ function isDeepSeekModel(model: string): boolean {
   return model.toLowerCase().startsWith("deepseek-ai/");
 }
 
-function buildHeaders(
-  entry: LLMFallbackPlanEntry,
-  openRouterSiteUrl: string,
-  openRouterAppName: string
-): Headers {
-  const headers = new Headers({
+function buildHeaders(entry: LLMFallbackPlanEntry): Headers {
+  return new Headers({
     Authorization: `Bearer ${entry.apiKey}`,
     "Content-Type": "application/json"
   });
-  if (entry.provider === "openrouter") {
-    headers.set("HTTP-Referer", openRouterSiteUrl);
-    headers.set("X-Title", openRouterAppName);
-  }
-  return headers;
 }
 
 function chatCompletionsUrl(baseUrl: string): string {

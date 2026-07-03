@@ -1,4 +1,4 @@
-# Project Context
+﻿# Project Context
 
 > Last updated: 2026-06-29 | Protection: STANDARD
 
@@ -24,7 +24,7 @@ This repository hosts a public third-party AI ranking site for the TRAE AI Creat
 
 ## Important Notes
 
-- Do not expose OpenRouter or admin secrets to client code.
+- Do not expose REMOVED_PROVIDER or admin secrets to client code.
 - Do not scrape private content or bypass forum access controls.
 - Registration topics are stored and matched, but never shown as a public ranking.
 - Preliminary Demo topics are the only ranking entries.
@@ -36,3 +36,4 @@ This repository hosts a public third-party AI ranking site for the TRAE AI Creat
 | 2026-06-29 | Created project context for TRAE contest module scaffold. | Codex |
 | 2026-06-29 | Synced final architecture and verification notes. | Codex |
 | 2026-07-01 | Clarified active storage architecture as SQL-backed Firebase Data Connect instead of Firestore. | Codex |
+
