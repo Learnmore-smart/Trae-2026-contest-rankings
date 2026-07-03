@@ -36,6 +36,8 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 - 2026-07-02 Codex: Updated `UserTopicSubmit` to read `GET /api/trae-contest/submit` on mount and poll while `running`, so refreshing the page during a submitted-topic crawl still shows the crawler state.
 - 2026-07-02 Codex: Add a rightmost navbar home anchor to `https://www.rateministere.com` using the existing compact `nav-control` visual style and a lucide `Home` icon only. Keep it after language/theme controls so it is the far-right control.
 - 2026-07-02 Codex: Filter/sort/page-size query changes should show ranking skeleton rows while the replacement page loads, but same-query refreshes from run completion or submitted-topic reloads should keep current rows visible.
+- 2026-07-03 Codex: User provided the official TRAE AI Creativity Contest banner at `public/Banner-Trae-contest-2026.jpg`. Add it as an actual landing hero banner image, using the existing `API_BASE` prefix so the asset works with the configured `/trae-contest-2026` base path.
+- 2026-07-03 Codex: Implemented the official banner as a first child of `.landing-hero` using `next/image`, with intrinsic 3000x600 dimensions, priority loading, responsive sizes, and alt text. Existing scoring, ranking, run, and submission controls remain unchanged.
 
 ## Bug Fix Plan: Stats Request Must Survive Topic Deadline
 
@@ -95,6 +97,8 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 | 2026-07-02 | Implemented rightmost RateMinistere home link in navbar with icon-only label. | Codex |
 | 2026-07-02 | Planned filter-change skeleton state while preserving same-query background row refreshes. | Codex |
 | 2026-07-02 | Implemented last-loaded query tracking so filter/query changes show skeleton rows while same-query refreshes keep rows visible. | Codex |
+| 2026-07-03 | Planned official contest banner image in the landing hero. | Codex |
+| 2026-07-03 | Implemented official contest banner image above the hero command deck. | Codex |
 
 ## Change Plan: Public Run Starts Scoring Immediately
 

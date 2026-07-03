@@ -210,6 +210,23 @@
   box-shadow: var(--shadow-soft);
 }
 
+.contest-official-banner {
+  width: 100%;
+  aspect-ratio: 5 / 1;
+  margin: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  background: var(--image-placeholder);
+}
+
+.contest-official-banner img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
 .hero-command-deck {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(22rem, 0.75fr);

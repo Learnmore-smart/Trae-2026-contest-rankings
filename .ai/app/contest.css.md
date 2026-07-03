@@ -32,6 +32,8 @@ Styles the public contest landing, navigation, ranking toolbar, page controls, a
 - 2026-07-02 Codex: Add `user-crawl-panel` styles that fit both the landing side rail and ranking surface without introducing a large marketing-style block. Keep the input/button responsive and readable in light/dark themes.
 - 2026-07-02 Codex: Implemented `ranking-page-switch` styling with text buttons, a stronger surface, disabled states, and a mobile full-width layout.
 - 2026-07-02 Codex: Implemented `user-crawl-panel` styling with stable input/button sizing, success/error message colors, and a mobile stacked layout.
+- 2026-07-03 Codex: Style the official 3000x600 contest banner as a full-width media strip above the command deck. Preserve the existing command-center layout and mobile overflow protections below it.
+- 2026-07-03 Codex: Implemented `.contest-official-banner` as a 5:1 full-width media strip with a placeholder background and contained image sizing via `object-fit: cover`.
 
 ## Important Notes / NEVER Change
 
@@ -53,3 +55,5 @@ Styles the public contest landing, navigation, ranking toolbar, page controls, a
 | 2026-07-02 | Planned compact user-submitted topic crawl form styles. | Codex |
 | 2026-07-02 | Implemented visible page-switch styles and mobile fallback. | Codex |
 | 2026-07-02 | Implemented user-submitted topic crawl form styles. | Codex |
+| 2026-07-03 | Planned official contest banner media strip styling. | Codex |
+| 2026-07-03 | Implemented official contest banner media strip styles. | Codex |

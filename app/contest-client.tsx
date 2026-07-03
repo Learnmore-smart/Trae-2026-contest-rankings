@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -1289,6 +1290,18 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
         {activeTab === "landing" ? (
           <div className="landing-shell">
             <section className="landing-hero">
+              <figure className="contest-official-banner">
+                <Image
+                  src={`${API_BASE}/Banner-Trae-contest-2026.jpg`}
+                  alt="TRAE AI Creativity Contest official banner"
+                  width={3000}
+                  height={600}
+                  priority
+                  sizes="(max-width: 1480px) 100vw, 1480px"
+                  className="contest-official-banner__image"
+                  decoding="async"
+                />
+              </figure>
               <div className="hero-command-deck">
                 <div className="landing-hero-copy">
                   <p className="kicker">{t.heroKicker}</p>

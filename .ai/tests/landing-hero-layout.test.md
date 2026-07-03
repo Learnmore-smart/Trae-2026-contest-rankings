@@ -34,6 +34,8 @@ Guards the landing hero markup and CSS hooks used by the annotated container lay
 - 2026-06-30 Codex: Contest-specific layout CSS now lives in `app/contest.css`, while global tokens and imports remain in `app/globals.css`; tests should combine both sources for layout assertions.
 - 2026-07-01 Codex: Add a focused source-level guard for the ranking row collapse. The browser symptom comes from CSS grid sizing, so the test should assert the score-panel has explicit bounded width constraints rather than snapshotting the full row.
 - 2026-07-02 Codex: Add a focused source-level guard that the navbar exposes the rightmost RateMinistere home link with the shared `nav-control` styling and the requested external href.
+- 2026-07-03 Codex: Add a source-level guard for the official contest banner path and stable `.contest-official-banner` hooks so future hero edits do not drop the provided asset.
+- 2026-07-03 Codex: Implemented source-level assertions for the base-path-prefixed banner src, accessible alt text, 5:1 CSS ratio, and image object-fit behavior.
 
 ## Mobile Layout Repair Note
 
@@ -77,3 +79,5 @@ Guards the landing hero markup and CSS hooks used by the annotated container lay
 | 2026-07-01 | Added regression guard for bounded ranking row desktop columns and summary wrapping. | Codex |
 | 2026-07-02 | Planned navbar home link source guard. | Codex |
 | 2026-07-02 | Added navbar home link source guard. | Codex |
+| 2026-07-03 | Planned official contest banner regression guard. | Codex |
+| 2026-07-03 | Added official contest banner regression guard. | Codex |

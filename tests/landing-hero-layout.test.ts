@@ -13,6 +13,9 @@ const theme = existsSync(themePath) ? readFileSync(themePath, "utf8") : "";
 
 test("landing hero exposes the command-center layout hooks", () => {
   assert.match(component, /className="[^"]*\btech-shell\b[^"]*"/);
+  assert.match(component, /className="contest-official-banner"/);
+  assert.match(component, /src=\{`\$\{API_BASE\}\/Banner-Trae-contest-2026\.jpg`\}/);
+  assert.match(component, /alt="TRAE AI Creativity Contest official banner"/);
   assert.match(component, /className="landing-hero-copy"/);
   assert.match(component, /className="landing-hero-title/);
   assert.match(component, /className="landing-hero-side"/);
@@ -26,6 +29,8 @@ test("landing hero exposes the command-center layout hooks", () => {
 
 test("landing hero CSS renders a command deck with a right-side control rail", () => {
   assert.match(css, /\.landing-hero\s*{[\s\S]*?align-items:\s*start;/);
+  assert.match(css, /\.contest-official-banner\s*{[\s\S]*?aspect-ratio:\s*5\s*\/\s*1;/);
+  assert.match(css, /\.contest-official-banner img\s*{[\s\S]*?object-fit:\s*cover;/);
   assert.match(css, /\.hero-command-deck\s*{[\s\S]*?display:\s*grid;/);
   assert.match(css, /\.hero-signal-strip\s*{[\s\S]*?grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/);
   assert.match(css, /\.landing-hero-side\s*{[\s\S]*?grid-column:\s*2;/);
