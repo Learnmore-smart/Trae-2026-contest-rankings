@@ -16,7 +16,14 @@ export interface TraeConfig {
   /** Vision-capable model on the friend endpoint (used before falling back to NVIDIA vision). */
   friendImageModel: string;
   friendImageFallbackModel: string;
+  /** First NVIDIA key; kept for callers that only need a single key. Equals nvidiaApiKeys[0]. */
   nvidiaApiKey: string | null;
+  /**
+   * All configured NVIDIA keys: NVIDIA_API_KEY plus NVIDIA_API_KEY_2..N (and commas
+   * within any of them). Each key carries its own rate-limit budget, so N keys give
+   * N × aiRpmLimit total throughput. The client round-robins across them.
+   */
+  nvidiaApiKeys: string[];
   nvidiaBaseUrl: string;
   nvidiaPrimaryModel: string;
   nvidiaFallbackModels: string[];
@@ -25,8 +32,12 @@ export interface TraeConfig {
   nvidiaImageFallbackModel: string;
   aiProviderOrder: AIProvider[];
   aiZeroBudgetOnly: boolean;
+  /** Requests-per-minute ceiling enforced PER API KEY (not globally). 40 keys × 40 rpm = 1600 rpm total. */
   aiRpmLimit: number;
+  /** Retry budget for non-rate-limit transient errors (5xx/timeout/network/bad JSON) before falling to the next model. */
   aiMaxRetriesPerModel: number;
+  /** Retry budget for rate limits (HTTP 429 + NVIDIA soft-429). 0 = unlimited: retry (rotating keys) until it clears. */
+  aiMaxRateLimitRetries: number;
   aiRequestTimeoutMs: number;
   judgeConcurrency: number;
   scraperUserAgent: string;
@@ -68,6 +79,27 @@ function booleanFromEnv(name: string, fallback: boolean): boolean {
   return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
 }
 
+/**
+ * Collects every NVIDIA key: NVIDIA_API_KEY, then NVIDIA_API_KEY_2..N (numbered
+ * suffixes are how a second 40-rpm key is added). Commas inside any single value
+ * are also split, so "k1,k2" works too. Deduped, empties dropped, order preserved.
+ */
+function collectNvidiaApiKeys(): string[] {
+  const keys: string[] = [];
+  const push = (raw: string | undefined) => {
+    if (!raw) return;
+    for (const part of raw.split(",")) {
+      const key = part.trim();
+      if (key) keys.push(key);
+    }
+  };
+  push(process.env.NVIDIA_API_KEY);
+  for (let index = 2; index <= 20; index += 1) {
+    push(process.env[`NVIDIA_API_KEY_${index}`]);
+  }
+  return [...new Set(keys)];
+}
+
 function providerOrderFromEnv(): AIProvider[] {
   const seen = new Set<AIProvider>();
   const providers = listFromEnv("AI_PROVIDER_ORDER", ["friend", "nvidia"]).filter(
@@ -84,8 +116,11 @@ function providerOrderFromEnv(): AIProvider[] {
 
 export function getTraeConfig(): TraeConfig {
   const aiMaxRetriesPerModel = Math.max(0, Math.floor(numberFromEnv("AI_MAX_RETRIES_PER_MODEL", 2)));
+  // 0 = unlimited (retry rate limits until they clear); >0 caps it and then falls to the next model.
+  const aiMaxRateLimitRetries = Math.max(0, Math.floor(numberFromEnv("AI_MAX_RATE_LIMIT_RETRIES", 0)));
   const aiRequestTimeoutMs = Math.max(1, Math.floor(numberFromEnv("AI_REQUEST_TIMEOUT_MS", 120_000)));
   const aiRpmLimit = Math.max(1, Math.floor(numberFromEnv("AI_RPM_LIMIT", 40)));
+  const nvidiaApiKeys = collectNvidiaApiKeys();
 
   return {
     friendApiKey: process.env.TRAE_FRIEND_API ?? null,
@@ -101,7 +136,8 @@ export function getTraeConfig(): TraeConfig {
     ]),
     friendImageModel: process.env.FRIEND_IMAGE_MODEL ?? "moonshotai/kimi-k2.6",
     friendImageFallbackModel: process.env.FRIEND_IMAGE_FALLBACK_MODEL ?? "minimaxai/minimax-m3",
-    nvidiaApiKey: process.env.NVIDIA_API_KEY ?? null,
+    nvidiaApiKey: nvidiaApiKeys[0] ?? null,
+    nvidiaApiKeys,
     nvidiaBaseUrl: process.env.NVIDIA_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
     nvidiaPrimaryModel: process.env.NVIDIA_PRIMARY_MODEL ?? "z-ai/glm-5.2",
     // Mirrors the friend chain: glm-5.2 primary, deepseek-v4-pro first fallback.
@@ -117,6 +153,7 @@ export function getTraeConfig(): TraeConfig {
     aiZeroBudgetOnly: booleanFromEnv("AI_ZERO_BUDGET_ONLY", true),
     aiRpmLimit,
     aiMaxRetriesPerModel,
+    aiMaxRateLimitRetries,
     aiRequestTimeoutMs,
     judgeConcurrency: Math.max(1, Math.floor(numberFromEnv("TRAE_JUDGE_CONCURRENCY", DEFAULT_JUDGE_CONCURRENCY))),
     scraperUserAgent:

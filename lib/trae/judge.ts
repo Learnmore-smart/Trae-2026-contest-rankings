@@ -10,6 +10,7 @@ import { isDeletedOrEmptyTopic } from "./extractors.ts";
 import {
   getBoardData as getBoardDataQuery,
   getBoardPage as getBoardPageQuery,
+  getTopicDetail as getTopicDetailQuery,
   upsertEvaluation,
   updateTopicEvaluationState,
   upsertModelTokenUsage,
@@ -711,6 +712,25 @@ async function recordTokenUsage(callLogs: TraeLLMCallLog[]): Promise<void> {
   }
 }
 
+/** Store a successful evaluation and flip the topic to JUDGED. Shared by the batch worker and the single-topic re-judge. */
+async function persistJudgedTopic(dc: unknown, topicId: string, evaluation: TraeEvaluation): Promise<void> {
+  await recordTokenUsage(evaluation.llmCallLogs ?? []);
+  await upsertEvaluation(dc as any, toUpsertEvaluationVariables(evaluation));
+  await updateTopicEvaluationState(dc as any, {
+    id: topicId,
+    status: "JUDGED",
+    totalScore: evaluation.totalScore,
+    innovationScore: evaluation.innovationScore,
+    practicalityScore: evaluation.practicalityScore,
+    completionScore: evaluation.completionScore,
+    designScore: evaluation.designScore,
+    complianceRiskScore: evaluation.complianceRiskScore,
+    directionConsistencyScore: evaluation.directionConsistencyScore ?? null,
+    confidenceScore: evaluation.confidenceScore,
+    competitionLevel: competitionLevelMap[evaluation.competitionLevel]
+  } as any);
+}
+
 export interface JudgeOptions {
   mode?: JudgeMode;
   max?: number;
@@ -860,24 +880,7 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
     await runWithConcurrency(topics, concurrency, async (topicObj) => {
       try {
         const evaluation = await judgeOneTopic(topicObj.topic, topicObj.match);
-        await recordTokenUsage(evaluation.llmCallLogs ?? []);
-
-        await upsertEvaluation(dc as any, toUpsertEvaluationVariables(evaluation));
-
-        await updateTopicEvaluationState(dc as any, {
-          id: topicObj.topic.id,
-          status: "JUDGED",
-          totalScore: evaluation.totalScore,
-          innovationScore: evaluation.innovationScore,
-          practicalityScore: evaluation.practicalityScore,
-          completionScore: evaluation.completionScore,
-          designScore: evaluation.designScore,
-          complianceRiskScore: evaluation.complianceRiskScore,
-          directionConsistencyScore: evaluation.directionConsistencyScore ?? null,
-          confidenceScore: evaluation.confidenceScore,
-          competitionLevel: competitionLevelMap[evaluation.competitionLevel]
-        } as any);
-
+        await persistJudgedTopic(dc, topicObj.topic.id, evaluation);
         evaluatedCount += 1;
       } catch (error) {
         failedCount += 1;
@@ -978,4 +981,52 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
     });
     throw error;
   }
+}
+
+export type RejudgeResult =
+  | { status: "ok"; evaluation: TraeEvaluation }
+  | { status: "not_found" }
+  | { status: "empty" };
+
+function mapDbTopicForJudge(dbTopic: any): TraeTopic {
+  return {
+    ...dbTopic,
+    sourceType: dbTopic.sourceType.toLowerCase(),
+    status: dbTopic.status.toLowerCase(),
+    competitionLevel: dbTopic.competitionLevel ? competitionLevelRevMap[dbTopic.competitionLevel as keyof typeof competitionLevelRevMap] : null,
+    evaluatedAt: dbTopic.evaluatedAt ?? null,
+    createdAtExternal: dbTopic.createdAtExternal ?? null,
+    lastActivityAtExternal: dbTopic.lastActivityAtExternal ?? null
+  } as any;
+}
+
+function mapDbMatchForJudge(match: any): TraeMatch | null {
+  if (!match) return null;
+  return {
+    ...match,
+    matchMethod: match.matchMethod.toLowerCase(),
+    mismatchRisk: match.mismatchRisk.toLowerCase()
+  } as any;
+}
+
+/**
+ * Re-run the multi-evaluator judge for a single preliminary topic on demand and persist
+ * the fresh evaluation. Powers the public "re-score" button on the detail page. Reads the
+ * topic live from Data Connect so it always scores the latest scraped content rather than a
+ * lightened board copy. Returns a discriminated result so the caller can map a missing id
+ * (404) apart from an empty/deleted post (skip, never spend LLM calls on it).
+ */
+export async function rejudgeTopicById(id: string): Promise<RejudgeResult> {
+  const dc = getDataConnectDb();
+  const res = await getTopicDetailQuery(dc as any, { id });
+  const dbTopic = res.data.topic;
+  if (!dbTopic || dbTopic.sourceType !== "PRELIMINARY") return { status: "not_found" };
+
+  const topic = mapDbTopicForJudge(dbTopic);
+  if (isDeletedOrEmptyTopic(topic)) return { status: "empty" };
+
+  const match = mapDbMatchForJudge(dbTopic.match_on_preliminaryTopic ?? null);
+  const evaluation = await judgeOneTopic(topic, match);
+  await persistJudgedTopic(dc, topic.id, evaluation);
+  return { status: "ok", evaluation };
 }

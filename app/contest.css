@@ -1215,6 +1215,10 @@
     min-width: 0 !important;
   }
 
+  .ranking-filters .search-field {
+    flex: none;
+  }
+
   .ranking-filters .relative {
     min-width: 0 !important;
   }
@@ -1318,6 +1322,7 @@
   .user-crawl-panel__input,
   .user-crawl-panel__button {
     width: 100%;
+    flex: none;
   }
 
   .phase-switch {

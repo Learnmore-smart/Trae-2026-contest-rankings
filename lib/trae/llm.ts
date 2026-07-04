@@ -15,7 +15,8 @@ export interface LLMFallbackPlanEntry {
   provider: TraeAIProvider;
   model: string;
   baseUrl: string;
-  apiKey: string | null;
+  /** One or more keys for this provider. The client round-robins across them and paces each independently. */
+  apiKeys: string[];
 }
 
 export interface LLMCallResult<TParsed = unknown> {
@@ -35,6 +36,14 @@ export interface CallLLMWithFallbackOptions<TParsed = string> {
   validateContent?: (content: string) => TParsed;
   fetchFn?: typeof fetch;
   sleepFn?: (delayMs: number) => Promise<void>;
+  /**
+   * When true (default), rate limits (HTTP 429 + soft-429) are retried — rotating keys —
+   * until they clear, per aiMaxRateLimitRetries: a must-succeed judge call never gives up
+   * on a throttle. When false, a rate limit is treated as an ordinary fall-through reason
+   * (bounded by aiMaxRetriesPerModel, then next model) — used by best-effort vision, which
+   * would rather drop to the secondary model or return null than block on a throttle.
+   */
+  retryRateLimitsUntilCleared?: boolean;
   /** Override the provider/model plan (used by callVisionLLMWithFallback for vision-capable models only). */
   plan?: LLMFallbackPlanEntry[];
 }
@@ -62,10 +71,23 @@ export class LLMFallbackError extends Error {
   }
 }
 
-const sharedLLMRateLimiter: LLMRateLimiterState = {
-  nextStartAtMs: 0,
-  queue: Promise.resolve()
-};
+// One rate limiter per API key. Each key gets its own aiRpmLimit budget, so two
+// keys run at 2× the throughput of one — the client round-robins requests across
+// them (see nextKeyIndex). Keyed by the raw key string; a handful of entries max.
+const llmRateLimiters = new Map<string, LLMRateLimiterState>();
+
+// Round-robin cursor shared across all concurrent calls, so a burst of judge
+// workers spreads evenly over every key instead of stampeding the first one.
+let keyRotationCursor = 0;
+function nextKeyIndex(): number {
+  const index = keyRotationCursor;
+  keyRotationCursor = (keyRotationCursor + 1) % Number.MAX_SAFE_INTEGER;
+  return index;
+}
+
+function friendApiKeys(config: TraeConfig): string[] {
+  return config.friendApiKey ? [config.friendApiKey] : [];
+}
 
 export function buildLLMFallbackPlan(config = getTraeConfig()): LLMFallbackPlanEntry[] {
   if (!config.aiZeroBudgetOnly) {
@@ -75,13 +97,13 @@ export function buildLLMFallbackPlan(config = getTraeConfig()): LLMFallbackPlanE
   const providerConfigs: Record<AIProvider, Omit<LLMFallbackPlanEntry, "model"> & { models: string[] }> = {
     friend: {
       provider: "friend",
-      apiKey: config.friendApiKey,
+      apiKeys: friendApiKeys(config),
       baseUrl: config.friendBaseUrl,
       models: [config.friendPrimaryModel, ...config.friendFallbackModels]
     },
     nvidia: {
       provider: "nvidia",
-      apiKey: config.nvidiaApiKey,
+      apiKeys: config.nvidiaApiKeys,
       baseUrl: config.nvidiaBaseUrl,
       models: [config.nvidiaPrimaryModel, ...config.nvidiaFallbackModels]
     }
@@ -91,7 +113,7 @@ export function buildLLMFallbackPlan(config = getTraeConfig()): LLMFallbackPlanE
     const providerConfig = providerConfigs[provider];
     return providerConfig.models.filter(Boolean).map((model) => ({
       provider: providerConfig.provider,
-      apiKey: providerConfig.apiKey,
+      apiKeys: providerConfig.apiKeys,
       baseUrl: providerConfig.baseUrl,
       model
     }));
@@ -105,11 +127,12 @@ export function buildLLMFallbackPlan(config = getTraeConfig()): LLMFallbackPlanE
  * best-effort, so a friend-endpoint miss simply falls through to NVIDIA / null.
  */
 export function buildVisionLLMFallbackPlan(config = getTraeConfig()): LLMFallbackPlanEntry[] {
+  const friendKeys = friendApiKeys(config);
   const candidates: LLMFallbackPlanEntry[] = [
-    { provider: "friend", apiKey: config.friendApiKey, baseUrl: config.friendBaseUrl, model: config.friendImageModel },
-    { provider: "friend", apiKey: config.friendApiKey, baseUrl: config.friendBaseUrl, model: config.friendImageFallbackModel },
-    { provider: "nvidia", apiKey: config.nvidiaApiKey, baseUrl: config.nvidiaBaseUrl, model: config.nvidiaImageModel },
-    { provider: "nvidia", apiKey: config.nvidiaApiKey, baseUrl: config.nvidiaBaseUrl, model: config.nvidiaImageFallbackModel }
+    { provider: "friend", apiKeys: friendKeys, baseUrl: config.friendBaseUrl, model: config.friendImageModel },
+    { provider: "friend", apiKeys: friendKeys, baseUrl: config.friendBaseUrl, model: config.friendImageFallbackModel },
+    { provider: "nvidia", apiKeys: config.nvidiaApiKeys, baseUrl: config.nvidiaBaseUrl, model: config.nvidiaImageModel },
+    { provider: "nvidia", apiKeys: config.nvidiaApiKeys, baseUrl: config.nvidiaBaseUrl, model: config.nvidiaImageFallbackModel }
   ];
   const seen = new Set<string>();
   return candidates.filter((entry) => {
@@ -131,13 +154,15 @@ export async function callLLMWithFallback<TParsed = string>({
   sleepFn = async (delayMs) => {
     await sleep(delayMs);
   },
+  retryRateLimitsUntilCleared = true,
   plan
 }: CallLLMWithFallbackOptions<TParsed>): Promise<LLMCallResult<TParsed>> {
   const callLogs: TraeLLMCallLog[] = [];
   const resolvedPlan = plan ?? buildLLMFallbackPlan(config);
 
   for (const entry of resolvedPlan) {
-    if (!entry.apiKey) {
+    const apiKeys = entry.apiKeys.filter(Boolean);
+    if (apiKeys.length === 0) {
       callLogs.push({
         provider: entry.provider,
         model: entry.model,
@@ -151,19 +176,28 @@ export async function callLLMWithFallback<TParsed = string>({
       continue;
     }
 
-    for (let retryCount = 0; retryCount <= config.aiMaxRetriesPerModel; retryCount += 1) {
-      await waitForLLMRateLimit(config.aiRpmLimit, sleepFn);
+    let attemptIndex = 0;
+    let otherRetries = 0;
+    let rateLimitRetries = 0;
+    let keyCursor = nextKeyIndex();
+    let advanceToNextModel = false;
+
+    while (!advanceToNextModel) {
+      const apiKey = apiKeys[keyCursor % apiKeys.length];
+      await waitForLLMRateLimit(apiKey, config.aiRpmLimit, sleepFn);
       const attempt = await callOneModel({
         entry,
+        apiKey,
         messages,
         temperature,
         responseFormat,
         timeoutMs: config.aiRequestTimeoutMs,
-        retryCount,
+        retryCount: attemptIndex,
         validateContent,
         fetchFn
       });
       callLogs.push(attempt.log);
+      attemptIndex += 1;
 
       if (attempt.ok) {
         return {
@@ -175,14 +209,34 @@ export async function callLLMWithFallback<TParsed = string>({
         };
       }
 
-      if (
-        retryCount < config.aiMaxRetriesPerModel &&
-        isRetryableError(attempt.log.errorReason)
-      ) {
-        await sleepFn(backoffDelayMs(retryCount, attempt.log.errorReason));
+      // A rate limit is a per-key/account condition, not a model failure, so we do
+      // NOT fall through to the next model (same account = same limit). Instead we
+      // rotate to the next key and keep retrying until it clears. Default budget is
+      // unlimited (aiMaxRateLimitRetries === 0) so a throttled re-judge waits it out
+      // rather than downgrading an already-scored topic to JUDGE_ERROR. Best-effort
+      // callers (vision) set retryRateLimitsUntilCleared=false to fall through instead.
+      if (retryRateLimitsUntilCleared && isRateLimitError(attempt.log.errorReason)) {
+        rateLimitRetries += 1;
+        keyCursor += 1;
+        if (config.aiMaxRateLimitRetries > 0 && rateLimitRetries > config.aiMaxRateLimitRetries) {
+          advanceToNextModel = true;
+          continue;
+        }
+        await sleepFn(rateLimitBackoffMs(rateLimitRetries));
         continue;
       }
-      break;
+
+      // Other transient errors (5xx / timeout / network / bad JSON) — and rate limits
+      // for best-effort callers — get a bounded per-model budget, then fall through to
+      // the next model in the plan.
+      if (otherRetries < config.aiMaxRetriesPerModel && isRetryableError(attempt.log.errorReason)) {
+        otherRetries += 1;
+        keyCursor += 1;
+        await sleepFn(backoffDelayMs(otherRetries - 1, attempt.log.errorReason));
+        continue;
+      }
+
+      advanceToNextModel = true;
     }
   }
 
@@ -208,14 +262,24 @@ export function formatLLMCallFailureSummary(callLogs: readonly TraeLLMCallLog[],
   return lines.join("\n");
 }
 
+function rateLimiterForKey(apiKey: string): LLMRateLimiterState {
+  let state = llmRateLimiters.get(apiKey);
+  if (!state) {
+    state = { nextStartAtMs: 0, queue: Promise.resolve() };
+    llmRateLimiters.set(apiKey, state);
+  }
+  return state;
+}
+
 async function waitForLLMRateLimit(
+  apiKey: string,
   rpmLimit: number,
-  sleepFn: (delayMs: number) => Promise<void>,
-  state = sharedLLMRateLimiter
+  sleepFn: (delayMs: number) => Promise<void>
 ): Promise<void> {
   const intervalMs = 60_000 / Math.max(1, Math.floor(rpmLimit));
   if (intervalMs <= 1) return;
 
+  const state = rateLimiterForKey(apiKey);
   const previousQueue = state.queue.catch(() => undefined);
   const currentQueue = previousQueue.then(async () => {
     const now = Date.now();
@@ -236,19 +300,23 @@ async function waitForLLMRateLimit(
  * instead of strict JSON, since vision descriptions are prose, not schema-bound.
  */
 export async function callVisionLLMWithFallback<TParsed = string>(
-  options: Omit<CallLLMWithFallbackOptions<TParsed>, "plan" | "responseFormat">
+  options: Omit<CallLLMWithFallbackOptions<TParsed>, "plan" | "responseFormat" | "retryRateLimitsUntilCleared">
 ): Promise<LLMCallResult<TParsed>> {
   const config = options.config ?? getTraeConfig();
   return callLLMWithFallback({
     ...options,
     config,
     responseFormat: "text",
+    // Vision is best-effort: a throttled primary model should drop to the secondary
+    // vision model (or return null), never block the judge pipeline waiting it out.
+    retryRateLimitsUntilCleared: false,
     plan: buildVisionLLMFallbackPlan(config)
   });
 }
 
 interface CallOneModelOptions<TParsed> {
   entry: LLMFallbackPlanEntry;
+  apiKey: string;
   messages: LLMMessage[];
   temperature: number;
   responseFormat: "json_object" | "text";
@@ -272,6 +340,7 @@ type CallOneModelResult<TParsed> =
 
 async function callOneModel<TParsed>({
   entry,
+  apiKey,
   messages,
   temperature,
   responseFormat,
@@ -289,7 +358,7 @@ async function callOneModel<TParsed>({
     const response = await fetchFn(chatCompletionsUrl(entry.baseUrl), {
       method: "POST",
       signal: controller.signal,
-      headers: buildHeaders(entry),
+      headers: buildHeaders(apiKey),
       body: JSON.stringify(buildChatCompletionRequestBody(entry, messages, temperature, responseFormat))
     });
     rawResponse = await response.text();
@@ -359,9 +428,9 @@ function isDeepSeekModel(model: string): boolean {
   return model.toLowerCase().startsWith("deepseek-ai/");
 }
 
-function buildHeaders(entry: LLMFallbackPlanEntry): Headers {
+function buildHeaders(apiKey: string): Headers {
   return new Headers({
-    Authorization: `Bearer ${entry.apiKey}`,
+    Authorization: `Bearer ${apiKey}`,
     "Content-Type": "application/json"
   });
 }
@@ -447,10 +516,14 @@ function httpErrorReason(status: number): string {
   return `http_${status}`;
 }
 
+/** HTTP 429 and NVIDIA's soft-429 (HTTP 200 with empty choices) — a per-key rate limit. */
+function isRateLimitError(errorReason: string | null): boolean {
+  return errorReason === "http_429" || errorReason === "rate_limited";
+}
+
 function isRetryableError(errorReason: string | null): boolean {
   return (
-    errorReason === "http_429" ||
-    errorReason === "rate_limited" ||
+    isRateLimitError(errorReason) ||
     errorReason === "http_5xx" ||
     errorReason === "timeout" ||
     errorReason === "network_error" ||
@@ -462,8 +535,18 @@ function isRetryableError(errorReason: string | null): boolean {
 function backoffDelayMs(retryCount: number, errorReason: string | null): number {
   // Rate limits need a wider window to clear NVIDIA's burst limiter than a
   // transient network blip does, so start their backoff higher.
-  const baseMs = errorReason === "http_429" || errorReason === "rate_limited" ? 2000 : 1000;
+  const baseMs = isRateLimitError(errorReason) ? 2000 : 1000;
   return Math.min(30_000, baseMs * 2 ** retryCount);
+}
+
+/**
+ * Backoff between rate-limit retries. Plateaus at 15s so an unlimited retry loop
+ * (aiMaxRateLimitRetries === 0) settles into a steady wait-and-rotate cadence
+ * instead of exploding: 2s, 4s, 8s, 15s, 15s, …
+ */
+function rateLimitBackoffMs(retryNumber: number): number {
+  const exponent = Math.min(Math.max(0, retryNumber - 1), 3);
+  return Math.min(15_000, 2_000 * 2 ** exponent);
 }
 
 function isAbortError(error: unknown): boolean {

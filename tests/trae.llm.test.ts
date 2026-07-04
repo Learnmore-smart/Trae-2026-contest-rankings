@@ -20,6 +20,7 @@ const aiEnvKeys = [
   "FRIEND_IMAGE_MODEL",
   "FRIEND_IMAGE_FALLBACK_MODEL",
   "NVIDIA_API_KEY",
+  "NVIDIA_API_KEY_2",
   "NVIDIA_BASE_URL",
   "NVIDIA_PRIMARY_MODEL",
   "NVIDIA_FALLBACK_MODELS",
@@ -29,6 +30,7 @@ const aiEnvKeys = [
   "AI_ZERO_BUDGET_ONLY",
   "AI_RPM_LIMIT",
   "AI_MAX_RETRIES_PER_MODEL",
+  "AI_MAX_RATE_LIMIT_RETRIES",
   "AI_REQUEST_TIMEOUT_MS"
 ];
 
@@ -138,10 +140,11 @@ describe("LLM zero-budget fallback client", () => {
     });
   });
 
-  it("retries a 429 with backoff before falling back to the next Friend model", async () => {
+  it("retries a rate-limited model until it clears instead of failing over to the next model", async () => {
     await withEnv(zeroBudgetEnv(), async () => {
       const requests: Array<{ url: string; model: string; authorization: string | null }> = [];
       const sleeps: number[] = [];
+      let primaryCalls = 0;
 
       const result = await callLLMWithFallback({
         messages: [{ role: "user", content: "score this" }],
@@ -157,7 +160,9 @@ describe("LLM zero-budget fallback client", () => {
           });
 
           if (body.model === "z-ai/glm-5.2") {
-            return new Response("rate limited", { status: 429 });
+            primaryCalls += 1;
+            // Two 429s in a row, then the limit clears — the client must wait it out.
+            if (primaryCalls <= 2) return new Response("rate limited", { status: 429 });
           }
 
           return Response.json({
@@ -169,29 +174,55 @@ describe("LLM zero-budget fallback client", () => {
         }
       });
 
+      // A rate limit is not a model failure, so it stays on the primary model and
+      // succeeds there rather than burning a fallback model on a transient throttle.
       assert.equal(result.provider, "friend");
-      assert.equal(result.model, "deepseek-ai/deepseek-v4-pro");
+      assert.equal(result.model, "z-ai/glm-5.2");
       assert.deepEqual(
         requests.map((request) => request.model),
-        [
-          "z-ai/glm-5.2",
-          "z-ai/glm-5.2",
-          "deepseek-ai/deepseek-v4-pro"
-        ]
+        ["z-ai/glm-5.2", "z-ai/glm-5.2", "z-ai/glm-5.2"]
       );
       assert.equal(requests.every((request) => request.url.endsWith("/chat/completions")), true);
-      assert.equal(requests[0]?.authorization, "Bearer friend-key");
-      assert.equal(sleeps.length, 1);
-      assert.equal(result.callLogs[0]?.provider, "friend");
-      assert.equal(result.callLogs[0]?.model, "z-ai/glm-5.2");
-      assert.equal(result.callLogs[0]?.retryCount, 0);
-      assert.equal(result.callLogs[0]?.errorReason, "http_429");
-      assert.equal(result.callLogs[1]?.retryCount, 1);
-      assert.equal(result.callLogs[1]?.errorReason, "http_429");
-      assert.equal(result.callLogs[2]?.errorReason, null);
+      assert.equal(requests.every((request) => request.authorization === "Bearer friend-key"), true);
+      assert.equal(sleeps.length, 2);
+      assert.deepEqual(
+        result.callLogs.map((log) => log.errorReason),
+        ["http_429", "http_429", null]
+      );
+      assert.deepEqual(
+        result.callLogs.map((log) => log.retryCount),
+        [0, 1, 2]
+      );
       assert.match(result.callLogs[2]?.rawResponse ?? "", /choices/);
       assert.deepEqual(result.parsed, { ok: true });
     });
+  });
+
+  it("gives up on a rate-limited model after AI_MAX_RATE_LIMIT_RETRIES and falls through", async () => {
+    await withEnv(
+      zeroBudgetEnv({ AI_PROVIDER_ORDER: "nvidia", AI_MAX_RATE_LIMIT_RETRIES: "2" }),
+      async () => {
+        const models: string[] = [];
+
+        const result = await callLLMWithFallback({
+          messages: [{ role: "user", content: "score this" }],
+          config: getTraeConfig(),
+          validateContent: (content) => JSON.parse(content) as { ok: boolean },
+          fetchFn: async (_url, init) => {
+            const body = JSON.parse(String(init?.body)) as { model: string };
+            models.push(body.model);
+            if (body.model === "z-ai/glm-5.2") return new Response("rate limited", { status: 429 });
+            return Response.json({ choices: [{ message: { content: JSON.stringify({ ok: true }) } }] });
+          },
+          sleepFn: async () => undefined
+        });
+
+        // Primary tried once + 2 capped retries = 3 attempts, then falls through.
+        assert.equal(models.filter((model) => model === "z-ai/glm-5.2").length, 3);
+        assert.equal(result.provider, "nvidia");
+        assert.equal(result.model, "deepseek-ai/deepseek-v4-pro");
+      }
+    );
   });
 
   it("falls through all Friend models on invalid JSON before trying NVIDIA", async () => {
@@ -291,7 +322,7 @@ describe("LLM zero-budget fallback client", () => {
               provider: "friend",
               model: "z-ai/glm-5.2",
               baseUrl: "http://127.0.0.1:8889/v1",
-              apiKey: "friend-key"
+              apiKeys: ["friend-key"]
             }
           ],
           fetchFn: async () => {
@@ -378,8 +409,8 @@ describe("LLM zero-budget fallback client", () => {
     });
   });
 
-  it("treats an HTTP 200 empty-choices reply as a retryable rate limit", async () => {
-    await withEnv(zeroBudgetEnv({ AI_MAX_RETRIES_PER_MODEL: "1" }), async () => {
+  it("treats an HTTP 200 empty-choices reply as a rate limit and retries the same model until it clears", async () => {
+    await withEnv(zeroBudgetEnv(), async () => {
       let primaryCalls = 0;
 
       const result = await callLLMWithFallback({
@@ -391,23 +422,58 @@ describe("LLM zero-budget fallback client", () => {
           if (body.model === "z-ai/glm-5.2") {
             primaryCalls += 1;
             // NVIDIA soft-throttle shape: HTTP 200 with no choices and null usage.
-            return Response.json({ id: "", choices: [], created: 0, model: "", usage: null });
+            if (primaryCalls <= 2) return Response.json({ id: "", choices: [], created: 0, model: "", usage: null });
           }
           return Response.json({ choices: [{ message: { content: JSON.stringify({ ok: true }) } }] });
         },
         sleepFn: async () => undefined
       });
 
-      // Primary was retried once (rate-limited) before falling through to DeepSeek.
-      assert.equal(primaryCalls, 2);
+      // Two soft-429s, then success on the SAME model — never falls through to DeepSeek.
+      assert.equal(primaryCalls, 3);
       assert.equal(result.provider, "friend");
-      assert.equal(result.model, "deepseek-ai/deepseek-v4-pro");
+      assert.equal(result.model, "z-ai/glm-5.2");
       assert.deepEqual(
-        result.callLogs.slice(0, 2).map((log) => log.errorReason),
-        ["rate_limited", "rate_limited"]
+        result.callLogs.map((log) => log.errorReason),
+        ["rate_limited", "rate_limited", null]
       );
       assert.deepEqual(result.parsed, { ok: true });
     });
+  });
+
+  it("round-robins across multiple NVIDIA keys so each carries its own rpm budget", async () => {
+    await withEnv(
+      zeroBudgetEnv({
+        AI_PROVIDER_ORDER: "nvidia",
+        AI_RPM_LIMIT: "40",
+        NVIDIA_API_KEY: "nvidia-key-1",
+        NVIDIA_API_KEY_2: "nvidia-key-2"
+      }),
+      async () => {
+        const config = getTraeConfig();
+        assert.deepEqual(config.nvidiaApiKeys, ["nvidia-key-1", "nvidia-key-2"]);
+
+        const auths: string[] = [];
+        const options = {
+          messages: [{ role: "user" as const, content: "score this" }],
+          config,
+          validateContent: (content: string) => JSON.parse(content) as { ok: boolean },
+          fetchFn: (async (_url: string | URL, init?: RequestInit) => {
+            auths.push(new Headers(init?.headers).get("authorization") ?? "");
+            return Response.json({ choices: [{ message: { content: JSON.stringify({ ok: true }) } }] });
+          }) as unknown as typeof fetch,
+          sleepFn: async () => undefined
+        };
+
+        await callLLMWithFallback(options);
+        await callLLMWithFallback(options);
+
+        // Consecutive calls land on different keys (round-robin), and both keys are used.
+        assert.equal(new Set(auths).size, 2);
+        assert.ok(auths.includes("Bearer nvidia-key-1"));
+        assert.ok(auths.includes("Bearer nvidia-key-2"));
+      }
+    );
   });
 
   it("builds the vision plan friend-first, then nvidia, from the image + fallback models", () => {

@@ -167,6 +167,8 @@ const COPY = {
     lastUpdated: "最后更新",
     search: "搜索作品 / 作者 / 赛道 / 标签",
     clearSearch: "清除搜索",
+    searchAction: "搜索",
+    loading: "加载榜单中…",
     track: "赛道",
     sort: "排序",
     pageSize: "每页",
@@ -273,6 +275,8 @@ const COPY = {
     lastUpdated: "Last updated",
     search: "Search project / author / track / tag",
     clearSearch: "Clear search",
+    searchAction: "Search",
+    loading: "Loading rankings…",
     track: "Track",
     sort: "Sort",
     pageSize: "Rows",
@@ -1033,12 +1037,19 @@ function LockedPanel({ phase, language }: { phase: Exclude<Phase, "prelim">; lan
   );
 }
 
-function LoadingGrid({ viewMode }: { viewMode: ViewMode }) {
+function LoadingGrid({ viewMode, language }: { viewMode: ViewMode; language: ContestLanguage }) {
+  const t = COPY[language];
   return (
-    <div className={viewMode === "grid" ? "ranking-grid" : "ranking-list"}>
-      {Array.from({ length: 6 }).map((_, index) => (
-        <div key={index} className="skeleton-block h-32 animate-pulse rounded-md" />
-      ))}
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-3 text-sm text-slate-400">
+        <Loader2 className="h-5 w-5 shrink-0 animate-spin text-cyan-300" />
+        <span>{t.loading}</span>
+      </div>
+      <div className={viewMode === "grid" ? "ranking-grid" : "ranking-list"}>
+        {Array.from({ length: 6 }).map((_, index) => (
+          <div key={index} className="skeleton-block h-32 animate-pulse rounded-md" />
+        ))}
+      </div>
     </div>
   );
 }
@@ -1123,6 +1134,7 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
   const [items, setItems] = useState<RankingItem[]>([]);
   const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
+  const [pendingQ, setPendingQ] = useState("");
   const [track, setTrack] = useState("全部赛道");
   const [sort, setSort] = useState<SortValue>("total");
   const [sortDir, setSortDir] = useState<SortDirection>("desc");
@@ -1130,6 +1142,7 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
   const [pageSize, setPageSize] = useState(DEFAULT_RANKING_PAGE_SIZE);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [loading, setLoading] = useState(true);
+  const [statsLoaded, setStatsLoaded] = useState(false);
   const [loadedQueryString, setLoadedQueryString] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("prelim");
@@ -1165,6 +1178,7 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
           if (!statsResponse.ok) return;
           const statsPayload = (await statsResponse.json()) as StatsPayload;
           setStats(statsPayload);
+          setStatsLoaded(true);
         })
         .catch(() => undefined);
 
@@ -1225,6 +1239,8 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
   const runControl = <RunButton language={language} onCompleted={load} />;
   const themeIcon = theme === "dark" ? <Moon className="h-4 w-4" /> : theme === "light" ? <Sun className="h-4 w-4" /> : <Monitor className="h-4 w-4" />;
   const showQueryChangeSkeleton = loading && queryString !== loadedQueryString;
+  const fmtN = (value: number | null | undefined) => !statsLoaded ? "…" : fmtInteger(value ?? 0, language);
+  const fmtD = (value: string | null | undefined) => !statsLoaded ? "…" : fmtDate(value, language);
 
   return (
     <main className="score-grid tech-shell min-h-screen text-slate-100">
@@ -1246,10 +1262,10 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
         <div className="site-nav__group site-nav__group--right">
           <div className="nav-metrics">
             <span>
-              {t.tokens} {fmtInteger(totalTokens, language)}
-              <span className="nav-metrics__detail text-slate-500"> · {t.tokensIn} {fmtInteger(stats?.totalInputTokens, language)} / {t.tokensOut} {fmtInteger(stats?.totalOutputTokens, language)}</span>
+              {t.tokens} {fmtN(totalTokens)}
+              <span className="nav-metrics__detail text-slate-500"> · {t.tokensIn} {fmtN(stats?.totalInputTokens)} / {t.tokensOut} {fmtN(stats?.totalOutputTokens)}</span>
             </span>
-            <span>{t.online}: {fmtInteger(stats?.onlineCount, language)}</span>
+            <span>{t.online}: {fmtN(stats?.onlineCount)}</span>
           </div>
           <NavMenu
             ariaLabel={t.chooseLanguage}
@@ -1310,15 +1326,15 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
                   <div className="hero-signal-strip" aria-label="Contest signals">
                     <div>
                       <span>{t.scoredProgress}</span>
-                      <strong>{fmtInteger(progressDone, language)}/{fmtInteger(progressTotal, language)}</strong>
+                      <strong>{fmtN(progressDone)}/{fmtN(progressTotal)}</strong>
                     </div>
                     <div>
                       <span>{t.tokens}</span>
-                      <strong>{fmtInteger(totalTokens, language)}</strong>
+                      <strong>{fmtN(totalTokens)}</strong>
                     </div>
                     <div>
                       <span>{t.online}</span>
-                      <strong>{fmtInteger(stats?.onlineCount, language)}</strong>
+                      <strong>{fmtN(stats?.onlineCount)}</strong>
                     </div>
                   </div>
                 </div>
@@ -1326,19 +1342,19 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
                   <div className="telemetry-grid" aria-label="Contest telemetry">
                     <div>
                       <span>{t.scoredProgress}</span>
-                      <strong>{fmtInteger(progressDone, language)}/{fmtInteger(progressTotal, language)}</strong>
+                      <strong>{fmtN(progressDone)}/{fmtN(progressTotal)}</strong>
                     </div>
                     <div>
                       <span>{t.tokens}</span>
-                      <strong>{fmtInteger(totalTokens, language)}</strong>
+                      <strong>{fmtN(totalTokens)}</strong>
                     </div>
                     <div>
                       <span>{t.online}</span>
-                      <strong>{fmtInteger(stats?.onlineCount, language)}</strong>
+                      <strong>{fmtN(stats?.onlineCount)}</strong>
                     </div>
                     <div>
                       <span>{t.lastUpdated}</span>
-                      <strong>{fmtDate(stats?.lastUpdatedAt, language)}</strong>
+                      <strong>{fmtD(stats?.lastUpdatedAt)}</strong>
                     </div>
                   </div>
                   <div className="purpose-panel">
@@ -1366,8 +1382,8 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
             <section className="ranking-toolbar surface-panel">
               <div>
                 <p className="kicker">{t.navRanking}</p>
-                <h1 className="mt-1 text-3xl font-black text-white">{t.scoredProgress} {fmtInteger(progressDone, language)}/{fmtInteger(progressTotal, language)}</h1>
-                <p className="mt-2 text-sm text-slate-500">{t.lastUpdated}: {fmtDate(stats?.lastUpdatedAt, language)}</p>
+                <h1 className="mt-1 text-3xl font-black text-white">{t.scoredProgress} {fmtN(progressDone)}/{fmtN(progressTotal)}</h1>
+                <p className="mt-2 text-sm text-slate-500">{t.lastUpdated}: {fmtD(stats?.lastUpdatedAt)}</p>
               </div>
               <div className="phase-switch" role="tablist" aria-label="Contest phase">
                 {[
@@ -1389,31 +1405,43 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
             {phase === "prelim" ? (
               <>
                 <section className="ranking-filters surface-panel">
-                  <label className="search-field control-field flex min-h-10 items-center gap-2 px-3 text-sm text-slate-300">
-                    <Search className="h-4 w-4 text-cyan-300" />
+                  <form
+                    className="search-field control-field flex min-h-10 items-center gap-2 px-3 text-sm text-slate-300"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      setPage(1);
+                      setQ(pendingQ);
+                    }}
+                  >
+                    <Search className="h-4 w-4 shrink-0 text-cyan-300" aria-hidden />
                     <input
-                      value={q}
-                      onChange={(event) => {
-                        setPage(1);
-                        setQ(event.target.value);
-                      }}
+                      value={pendingQ}
+                      onChange={(event) => setPendingQ(event.target.value)}
                       placeholder={t.search}
+                      aria-label={t.search}
                       className="w-full bg-transparent text-white outline-none placeholder:text-slate-500"
                     />
-                    {q ? (
+                    {(pendingQ || q) ? (
                       <button
                         type="button"
                         onClick={() => {
+                          setPendingQ("");
                           setPage(1);
                           setQ("");
                         }}
                         aria-label={t.clearSearch}
-                        className="text-slate-500 transition hover:text-white"
+                        className="shrink-0 text-slate-500 transition hover:text-white"
                       >
                         <X className="h-4 w-4" />
                       </button>
                     ) : null}
-                  </label>
+                    <button
+                      type="submit"
+                      className="shrink-0 border-l border-white/10 pl-2 text-xs font-bold text-cyan-300 transition hover:text-cyan-200"
+                    >
+                      {t.searchAction}
+                    </button>
+                  </form>
                   <Dropdown
                     icon={<Tag className="h-4 w-4" />}
                     label={t.track}
@@ -1461,7 +1489,7 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
                 <div className="ranking-inline-meta">
                   <div className="ranking-inline-meta__stats">
                     <span>{fmtInteger(total, language)} {t.totalResults}</span>
-                    <span>{t.scoredProgress} {fmtInteger(progressDone, language)}/{fmtInteger(progressTotal, language)}</span>
+                    <span>{t.scoredProgress} {fmtN(progressDone)}/{fmtN(progressTotal)}</span>
                   </div>
                   <div
                     className="ranking-page-switch"
@@ -1501,9 +1529,9 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
                 ) : null}
 
                 {loading && items.length === 0 ? (
-                  <LoadingGrid viewMode={viewMode} />
+                  <LoadingGrid viewMode={viewMode} language={language} />
                 ) : showQueryChangeSkeleton ? (
-                  <LoadingGrid viewMode={viewMode} />
+                  <LoadingGrid viewMode={viewMode} language={language} />
                 ) : items.length === 0 ? (
                   <EmptyState language={language} onRun={runControl} />
                 ) : (

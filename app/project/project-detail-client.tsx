@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, ShieldAlert, Sparkles, Globe, Sun, Moon, Monitor } from "lucide-react";
+import { ArrowLeft, ExternalLink, ShieldAlert, Sparkles, Globe, Sun, Moon, Monitor, RefreshCw, Loader2 } from "lucide-react";
 import { useContestLanguage, type ContestLanguage } from "../i18n";
 import { useContestTheme, type ContestTheme } from "../theme";
 import { NavMenu } from "../contest-client";
@@ -32,6 +32,16 @@ const COPY = {
     scoredAt: "评分时间",
     source: "原帖链接",
     demo: "Demo 体验",
+    rejudge: "重新评分",
+    rejudging: "评分中…",
+    rejudgeConfirm: "使用 AI 重新评分该作品？这可能需要 30 秒左右。",
+    rejudgeSuccess: "评分已更新。",
+    rejudgeFailed: "重新评分失败，请稍后再试。",
+    rejudgeCooldown: "刚刚已重新评分，请稍后再试。",
+    rejudgeBusy: "评分服务繁忙，请稍后再试。",
+    rejudgeInFlight: "该作品正在重新评分，请稍候。",
+    rejudgeNotFound: "作品不存在或不是初赛作品。",
+    rejudgeEmpty: "该作品内容为空或已删除，无法评分。",
     totalScore: "综合分",
     confidence: "置信度",
     dimensions: {
@@ -57,7 +67,8 @@ const COPY = {
     unmatched: "暂未匹配到报名帖，不代表未报名，可能是用户名或标题无法自动匹配。",
     model: "使用模型",
     promptVersion: "评分版本",
-    unofficial: "本站非 TRAE 官方评分。"
+    unofficial: "本站非 TRAE 官方评分。",
+    loading: "加载中…"
   },
   en: {
     settings: "Settings",
@@ -80,6 +91,16 @@ const COPY = {
     scoredAt: "Scored at",
     source: "Original post",
     demo: "Try Demo",
+    rejudge: "Re-score",
+    rejudging: "Scoring…",
+    rejudgeConfirm: "Re-score this project with AI? This may take around 30 seconds.",
+    rejudgeSuccess: "Score updated.",
+    rejudgeFailed: "Re-scoring failed. Please try again later.",
+    rejudgeCooldown: "Just re-scored. Please try again shortly.",
+    rejudgeBusy: "Scoring service is busy. Please try again later.",
+    rejudgeInFlight: "This project is already being re-scored. Please wait.",
+    rejudgeNotFound: "Project not found or not a preliminary entry.",
+    rejudgeEmpty: "This project has no content or was deleted; it cannot be scored.",
     totalScore: "Total score",
     confidence: "Confidence",
     dimensions: {
@@ -105,7 +126,8 @@ const COPY = {
     unmatched: "No signup post has been matched yet. This does not mean the project did not sign up; the username or title may not be automatically matchable.",
     model: "Model",
     promptVersion: "Scoring version",
-    unofficial: "This site is not official TRAE scoring."
+    unofficial: "This site is not official TRAE scoring.",
+    loading: "Loading…"
   }
 };
 
@@ -154,6 +176,29 @@ function TextList({ title, items, emptyLabel }: { title: string; items?: string[
   );
 }
 
+type Copy = (typeof COPY)[ContestLanguage];
+
+function rejudgeNoticeTone(code: string | undefined): "info" | "error" {
+  return code === "cooldown" || code === "busy" || code === "in_flight" ? "info" : "error";
+}
+
+function rejudgeNoticeText(code: string | undefined, t: Copy): string {
+  switch (code) {
+    case "cooldown":
+      return t.rejudgeCooldown;
+    case "busy":
+      return t.rejudgeBusy;
+    case "in_flight":
+      return t.rejudgeInFlight;
+    case "not_found":
+      return t.rejudgeNotFound;
+    case "empty":
+      return t.rejudgeEmpty;
+    default:
+      return t.rejudgeFailed;
+  }
+}
+
 export default function ProjectDetailClient({ id }: { id: string }) {
   const { language, setLanguage } = useContestLanguage();
   const { theme, setTheme } = useContestTheme();
@@ -161,6 +206,8 @@ export default function ProjectDetailClient({ id }: { id: string }) {
   const [item, setItem] = useState<RankingItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [rejudging, setRejudging] = useState(false);
+  const [rejudgeNotice, setRejudgeNotice] = useState<{ tone: "success" | "info" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -183,6 +230,31 @@ export default function ProjectDetailClient({ id }: { id: string }) {
       cancelled = true;
     };
   }, [id, t.loadError, t.notFound, t.unknownError]);
+
+  async function handleRejudge() {
+    if (rejudging) return;
+    if (!window.confirm(t.rejudgeConfirm)) return;
+    setRejudging(true);
+    setRejudgeNotice(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/trae-contest/topics/${encodeURIComponent(id)}/rejudge`, {
+        method: "POST"
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { ok?: boolean; item?: RankingItem | null; error?: string; code?: string }
+        | null;
+      if (response.ok && payload?.item) {
+        setItem(payload.item);
+        setRejudgeNotice({ tone: "success", text: t.rejudgeSuccess });
+        return;
+      }
+      setRejudgeNotice({ tone: rejudgeNoticeTone(payload?.code), text: rejudgeNoticeText(payload?.code, t) });
+    } catch {
+      setRejudgeNotice({ tone: "error", text: t.rejudgeFailed });
+    } finally {
+      setRejudging(false);
+    }
+  }
 
   const themeIcon = theme === "dark" ? <Moon className="h-4 w-4" /> : theme === "light" ? <Sun className="h-4 w-4" /> : <Monitor className="h-4 w-4" />;
 
@@ -221,7 +293,12 @@ export default function ProjectDetailClient({ id }: { id: string }) {
           </div>
         </div>
 
-        {loading ? <div className="skeleton-block mt-8 h-96 animate-pulse rounded-lg" /> : null}
+        {loading ? (
+          <div className="mt-8 flex items-center gap-3 py-24 text-sm text-slate-400">
+            <Loader2 className="h-5 w-5 shrink-0 animate-spin text-cyan-300" />
+            <span>{t.loading}</span>
+          </div>
+        ) : null}
         {error ? (
           <div role="alert" className="mt-8 rounded-lg border border-rose-300 bg-white p-8 font-semibold text-rose-900 shadow-sm dark:border-rose-300/25 dark:bg-rose-400/10 dark:text-rose-100">
             {error}
@@ -254,7 +331,31 @@ export default function ProjectDetailClient({ id }: { id: string }) {
                         {t.demo}
                       </a>
                     ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void handleRejudge()}
+                      disabled={rejudging}
+                      aria-busy={rejudging}
+                      className="control-button"
+                    >
+                      {rejudging ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      {rejudging ? t.rejudging : t.rejudge}
+                    </button>
                   </div>
+                  {rejudgeNotice ? (
+                    <p
+                      role="status"
+                      className={`mt-3 text-sm font-semibold ${
+                        rejudgeNotice.tone === "success"
+                          ? "text-emerald-700 dark:text-emerald-300"
+                          : rejudgeNotice.tone === "info"
+                            ? "text-amber-700 dark:text-amber-200"
+                            : "text-rose-700 dark:text-rose-300"
+                      }`}
+                    >
+                      {rejudgeNotice.text}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="rounded-lg border border-[#f4c96b]/30 bg-[#f4c96b]/10 p-5 text-center">
                   <div className="text-xs text-amber-800 dark:text-amber-100">{t.totalScore}</div>

@@ -1,6 +1,6 @@
 ﻿# lib/trae/config.ts
 
-> Last updated: 2026-07-02 | Protection: STANDARD
+> Last updated: 2026-07-04 | Protection: STANDARD
 
 ## Purpose
 
@@ -8,9 +8,11 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 
 ## What It Does
 
-- Supplies defaults for the Friend gateway (new-api, OpenAI-compatible), NVIDIA, and REMOVED_PROVIDER endpoint model names, limits, rate limits, and forum URLs.
+- Supplies defaults for the Friend gateway (new-api, OpenAI-compatible), NVIDIA endpoint model names, limits, rate limits, and forum URLs.
 - Supplies the Friend endpoint (`TRAE_FRIEND_API` key, `TRAE_FRIEND_BASE_URL`, `FRIEND_PRIMARY_MODEL`, `FRIEND_FALLBACK_MODELS`, `FRIEND_IMAGE_MODEL`, `FRIEND_IMAGE_FALLBACK_MODEL`). It proxies the same NVIDIA-family model IDs at higher rate limits and is the default primary provider (`AI_PROVIDER_ORDER=friend,nvidia`). Persisted as `NVIDIA` in Data Connect (no enum migration); the true endpoint stays visible in per-call `llmCallLogs`.
-- Supplies `aiRpmLimit` (`AI_RPM_LIMIT`, default 40) for shared LLM request-start pacing.
+- Supplies all NVIDIA keys from `NVIDIA_API_KEY`, `NVIDIA_API_KEY_2`..`NVIDIA_API_KEY_20`, and comma-separated values in those env vars.
+- Supplies `aiRpmLimit` (`AI_RPM_LIMIT`, default 40) as a per-key LLM request-start ceiling, not a global ceiling.
+- Supplies `aiMaxRateLimitRetries` (`AI_MAX_RATE_LIMIT_RETRIES`, default 0) where 0 means unlimited rate-limit retries.
 - Supplies `judgeConcurrency` (`TRAE_JUDGE_CONCURRENCY`, default from `DEFAULT_JUDGE_CONCURRENCY`, currently 8) for bounded topic-level judge parallelism.
 - Does not expose a judge strategy switch. Scoring quality requires the four-evaluator plus consensus referee path only.
 - Tunes the matcher's forum signup lookups: `maxForumLookupsPerRun` (env `TRAE_MAX_FORUM_LOOKUPS_PER_RUN`, default `0` = unlimited), `forumLookupConcurrency` (`TRAE_FORUM_LOOKUP_CONCURRENCY`, default 16), `forumMinRequestMs` per-host start spacing (`TRAE_FORUM_MIN_REQUEST_MS`, default 150), and `forumMaxRetries` (`TRAE_FORUM_MAX_RETRIES`, default 5). Defaults favor fastest convergence; the forum host is the only real limiter (Retry-After + host-wide cooldown + backoff cover throttling).
@@ -22,7 +24,7 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 
 | Name | Type | Description |
 |------|------|-------------|
-| `getTraeConfig` | function | Returns normalized configuration. |
+| `getTraeConfig` | function | Returns normalized configuration, including `nvidiaApiKeys` and `aiMaxRateLimitRetries`. |
 
 ## Dependencies
 
@@ -39,6 +41,7 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 - 2026-07-02 Codex: Owner rejected keeping the single-LLM strategy at all. Remove `JudgeStrategy`, `judgeStrategy`, and `TRAE_JUDGE_STRATEGY` from config.
 - 2026-07-02 Codex: Owner confirmed the provider quota is 40 rpm. Since each consensus team starts 5 LLM calls, default judging should use 8 topic teams and rely on the shared LLM limiter to pace starts at 40/minute.
 - 2026-07-02 Claude: Added the Friend gateway as primary provider (`AI_PROVIDER_ORDER=friend,nvidia`). Live checks on 2026-07-02: `deepseek-ai/deepseek-v4-pro` (primary, ~49s reasoning latency), `minimaxai/minimax-m3`, and `moonshotai/kimi-k2.6` all return valid JSON on both endpoints. Removed `z-ai/glm-5.1` (HTTP 410 EOL 2026-07-02T00:00:00Z on the shared backend) and `deepseek-ai/deepseek-v4-flash` (hangs past the request timeout) from every fallback chain — both only burned wall-clock. Keep `AI_REQUEST_TIMEOUT_MS=120000`: deepseek-v4-pro legitimately needs ~49s, so a shorter timeout would kill real calls.
+- 2026-07-04 Claude/Codex: User added a second NVIDIA key and wants 429s to retry instead of failing scored posts. Config now collects multiple NVIDIA keys, keeps `nvidiaApiKey` as first-key compatibility, treats `AI_RPM_LIMIT` as per-key capacity, and adds `AI_MAX_RATE_LIMIT_RETRIES=0` as unlimited retry budget.
 
 ## Important Notes / NEVER Change
 
@@ -65,6 +68,7 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 | 2026-07-02 | Implemented config defaults for 40 rpm judging: `AI_RPM_LIMIT=40`, `TRAE_JUDGE_CONCURRENCY=8`, and overnight-sized judge batches. | Codex |
 | 2026-07-02 | Added Friend gateway provider (primary); model chains now DeepSeek V4 Pro → MiniMax M3 → Kimi K2.6 on friend then nvidia. Dropped GLM 5.1 (410 EOL) and DeepSeek V4 Flash (hangs). | Claude |
 | 2026-07-03 | Promoted GLM 5.2 (`z-ai/glm-5.2`) to primary text model on both friend and nvidia chains; DeepSeek V4 Pro demoted to first fallback → MiniMax M3 → Kimi K2.6. Image models unchanged. | Claude |
+| 2026-07-04 | Added multi-key NVIDIA config and unlimited rate-limit retry budget. | Claude/Codex |
 
 ## Planned Change: Judge Concurrency Config
 

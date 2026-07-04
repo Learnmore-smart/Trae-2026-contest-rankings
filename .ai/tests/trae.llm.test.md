@@ -1,6 +1,6 @@
 ﻿# tests/trae.llm.test.ts
 
-> Last updated: 2026-06-30 | Protection: STANDARD
+> Last updated: 2026-07-04 | Protection: STANDARD
 
 ## Purpose
 
@@ -8,9 +8,11 @@ Verifies the zero-budget provider-agnostic LLM fallback client, including the vi
 
 ## What It Does
 
-- Tests NVIDIA primary model before NVIDIA fallback and REMOVED_PROVIDER.
-- Tests default NVIDIA text fallback order, image/multimodal model config, and DeepSeek reasoning effort.
-- Tests retryable 429 behavior with exponential backoff.
+- Tests Friend-first, then NVIDIA, zero-budget fallback behavior.
+- Tests default Friend/NVIDIA text fallback order, image/multimodal model config, and DeepSeek reasoning effort.
+- Tests that 429 and NVIDIA soft-429 responses retry the same model until the throttle clears instead of immediately falling through.
+- Tests the optional cap for rate-limit retries and the fallback behavior after that cap.
+- Tests round-robin use of multiple NVIDIA keys so each key carries its own RPM budget.
 - Tests invalid JSON/content validation fallback.
 - Tests missing provider keys are logged and never introduce paid providers.
 - Tests extraction of input/output token usage from OpenAI-compatible responses.
@@ -31,6 +33,7 @@ Verifies the zero-budget provider-agnostic LLM fallback client, including the vi
 - 2026-06-30 Codex: Update regression coverage for the revised NVIDIA text order `kimi-k2.6 -> glm-5.1 -> deepseek-v4-flash`; assert only DeepSeek fallback requests include `reasoning_effort: "max"`.
 - 2026-07-02 Codex: Added a red/green test for pacing consecutive real model attempts at 1500ms when `AI_RPM_LIMIT=40`.
 - 2026-07-04 Codex: Added regression coverage for sanitized fetch error details and compact failure summaries so CLI callers can print actionable provider/model diagnostics.
+- 2026-07-04 Claude/Codex: Added regression coverage for non-destructive 429 handling: unlimited same-model retry by default, capped fallback when configured, and two-key NVIDIA rotation.
 
 ## Important Notes / NEVER Change
 
@@ -50,6 +53,7 @@ Verifies the zero-budget provider-agnostic LLM fallback client, including the vi
 | 2026-06-30 | Added vision plan ordering/dedup tests and multimodal `callVisionLLMWithFallback` request-shape coverage. | Claude |
 | 2026-07-02 | Added shared LLM rate-limiter regression coverage. | Codex |
 | 2026-07-04 | Added regression tests for LLM failure details and summary formatting. | Codex |
+| 2026-07-04 | Added rate-limit retry-until-clear, capped retry fallback, and NVIDIA key-rotation tests. | Claude/Codex |
 ## Change Plan: Friend/NVIDIA Tests Only
 
 - 2026-07-03 Codex: Update fixtures to remove REMOVED_PROVIDER env vars and use `AI_PROVIDER_ORDER=friend,nvidia`.
