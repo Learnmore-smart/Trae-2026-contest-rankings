@@ -27,6 +27,7 @@ Guards public contest routing and workflow safety invariants.
 - Verifies ascending ranking order keeps graded rows before ungraded rows.
 - Verifies the public project detail page does not expose raw AI scoring input/output records.
 - Verifies the public user-topic submit route exists, validates TRAE links through the scraper helper, crawls as preliminary, refreshes the board, and is wired from the client form.
+- Verifies the public project detail re-score action uses non-blocking toast feedback instead of `window.confirm`.
 
 ## Public API
 
@@ -64,6 +65,7 @@ Guards public contest routing and workflow safety invariants.
 - 2026-07-02 Codex: Implemented the guard for `__traeTopicSubmit`, `GET`, background `runSubmittedTopic`, strict fetch options, and client-side status `GET` polling.
 - 2026-07-02 Codex: Add source-level guard requiring normalized-title dedupe to be wired into both public ranking and judge candidate selection.
 - 2026-07-02 Codex: Add guards for query-change skeleton state and graded-first ordering, covering the specific regression where low-to-high sort can put pending rows first.
+- 2026-07-04 Codex: Add a source-level guard that public re-score starts immediately, displays the start toast copy, and does not use a blocking confirmation dialog.
 
 ## Important Notes / NEVER Change
 
@@ -113,6 +115,8 @@ Guards public contest routing and workflow safety invariants.
 | 2026-07-02 | Implemented filter-change skeleton and ascending graded-first ordering regression guards. | Codex |
 | 2026-07-03 | Planned RSC suffix normalization guard for clicked project detail navigation. | Codex |
 | 2026-07-03 | Implemented RSC suffix helper and route/API source guards. | Codex |
+| 2026-07-04 | Planned non-blocking public re-score toast guard. | Codex |
+| 2026-07-04 | Implemented non-blocking public re-score toast guard. | Codex |
 
 ## Bug Fix Plan: Clicked Detail Cards Must Not Keep `.rsc` In Topic IDs
 

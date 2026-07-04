@@ -13,6 +13,7 @@ Renders full AI scoring details for one preliminary Demo topic.
 - Handles missing evaluation or missing match without crashing.
 - Uses the shared contest language and theme settings so detail pages follow the ranking page preferences.
 - Keeps public detail pages focused on user-facing scoring results and does not render saved raw AI scoring input/output records.
+- Lets users start a public re-score without a blocking browser confirmation and shows toast-style status feedback.
 
 ## Public API
 
@@ -36,6 +37,7 @@ Renders full AI scoring details for one preliminary Demo topic.
 - 2026-07-01 Codex: The root-level route must use the configured Next.js base path when fetching API data, otherwise deployed detail pages under `/trae-contest-2026` request the wrong API URL and display a false not-found state.
 - 2026-07-01 Codex: Error panels must be readable in both light and dark themes; avoid red translucent text-on-red combinations.
 - 2026-07-01 Codex: The previously public AI I/O audit section is being removed from the detail page because raw prompts and model output should not be exposed in the public project detail experience.
+- 2026-07-04 Codex: Public re-score should be an immediate action with non-blocking toast feedback; remove `window.confirm` and show "评分已经开始，请耐心等待" as soon as the request starts.
 
 ## Important Notes / NEVER Change
 
@@ -49,6 +51,8 @@ Renders full AI scoring details for one preliminary Demo topic.
 | 2026-07-01 | Added root-level detail client documentation before fixing deployed detail API path and readable error state. | Codex |
 | 2026-07-01 | Implemented base-path API fetch, readable error state, and AI input/output rendering. | Codex |
 | 2026-07-01 | Planned removal of the public AI scoring audit input/output section. | Codex |
+| 2026-07-04 | Planned non-blocking toast feedback for public re-score starts. | Codex |
+| 2026-07-04 | Implemented re-score start toast and removed browser confirmation. | Codex |
 
 ## Change Plan: AI I/O Implementation Alignment
 
@@ -61,3 +65,11 @@ Renders full AI scoring details for one preliminary Demo topic.
 - Keep all user-facing scoring summary, dimensions, strengths, weaknesses, suggestions, compliance risks, match information, model, and prompt version metadata intact.
 - Also remove now-unused copy labels for the audit section so the detail client no longer carries dead UI strings.
 - Implemented removal of the public raw AI I/O audit section.
+
+## Change Plan: Re-score Start Toast
+
+- 2026-07-04 Codex: Remove the blocking browser confirmation from `handleRejudge()` so clicking the public re-score button immediately starts the POST.
+- Show an info toast/status message with Chinese copy `评分已经开始，请耐心等待` and English equivalent before awaiting the API response.
+- Keep existing success/failure/cooldown messages so the start toast is replaced by the final request outcome.
+- Add a source-level regression guard that rejects `window.confirm`/`rejudgeConfirm` and requires the new start toast copy.
+- Implemented with a fixed top-right toast using the existing `rejudgeNotice` state.

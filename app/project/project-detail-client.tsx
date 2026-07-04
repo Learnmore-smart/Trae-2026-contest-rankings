@@ -34,7 +34,7 @@ const COPY = {
     demo: "Demo 体验",
     rejudge: "重新评分",
     rejudging: "评分中…",
-    rejudgeConfirm: "使用 AI 重新评分该作品？这可能需要 30 秒左右。",
+    rejudgeStarted: "评分已经开始，请耐心等待",
     rejudgeSuccess: "评分已更新。",
     rejudgeFailed: "重新评分失败，请稍后再试。",
     rejudgeCooldown: "刚刚已重新评分，请稍后再试。",
@@ -93,7 +93,7 @@ const COPY = {
     demo: "Try Demo",
     rejudge: "Re-score",
     rejudging: "Scoring…",
-    rejudgeConfirm: "Re-score this project with AI? This may take around 30 seconds.",
+    rejudgeStarted: "Scoring has started. Please wait.",
     rejudgeSuccess: "Score updated.",
     rejudgeFailed: "Re-scoring failed. Please try again later.",
     rejudgeCooldown: "Just re-scored. Please try again shortly.",
@@ -233,9 +233,8 @@ export default function ProjectDetailClient({ id }: { id: string }) {
 
   async function handleRejudge() {
     if (rejudging) return;
-    if (!window.confirm(t.rejudgeConfirm)) return;
     setRejudging(true);
-    setRejudgeNotice(null);
+    setRejudgeNotice({ tone: "info", text: t.rejudgeStarted });
     try {
       const response = await fetch(`${API_BASE}/api/trae-contest/topics/${encodeURIComponent(id)}/rejudge`, {
         method: "POST"
@@ -342,20 +341,6 @@ export default function ProjectDetailClient({ id }: { id: string }) {
                       {rejudging ? t.rejudging : t.rejudge}
                     </button>
                   </div>
-                  {rejudgeNotice ? (
-                    <p
-                      role="status"
-                      className={`mt-3 text-sm font-semibold ${
-                        rejudgeNotice.tone === "success"
-                          ? "text-emerald-700 dark:text-emerald-300"
-                          : rejudgeNotice.tone === "info"
-                            ? "text-amber-700 dark:text-amber-200"
-                            : "text-rose-700 dark:text-rose-300"
-                      }`}
-                    >
-                      {rejudgeNotice.text}
-                    </p>
-                  ) : null}
                 </div>
                 <div className="rounded-lg border border-[#f4c96b]/30 bg-[#f4c96b]/10 p-5 text-center">
                   <div className="text-xs text-amber-800 dark:text-amber-100">{t.totalScore}</div>
@@ -442,6 +427,20 @@ export default function ProjectDetailClient({ id }: { id: string }) {
             <footer className="surface-panel mt-6 p-4 text-sm text-slate-400">
               {t.model}: {item.evaluation?.model ?? t.unrated} · {t.promptVersion}: {item.evaluation?.promptVersion ?? "N/A"} · {t.unofficial}
             </footer>
+          </div>
+        ) : null}
+        {rejudgeNotice ? (
+          <div
+            role="status"
+            className={`fixed right-4 top-4 z-50 max-w-sm rounded-lg border px-4 py-3 text-sm font-semibold shadow-xl backdrop-blur sm:right-6 sm:top-6 ${
+              rejudgeNotice.tone === "success"
+                ? "border-emerald-300/50 bg-emerald-50 text-emerald-900 dark:border-emerald-300/30 dark:bg-emerald-400/15 dark:text-emerald-100"
+                : rejudgeNotice.tone === "info"
+                  ? "border-amber-300/60 bg-amber-50 text-amber-900 dark:border-amber-300/30 dark:bg-amber-400/15 dark:text-amber-100"
+                  : "border-rose-300/60 bg-rose-50 text-rose-900 dark:border-rose-300/30 dark:bg-rose-400/15 dark:text-rose-100"
+            }`}
+          >
+            {rejudgeNotice.text}
           </div>
         ) : null}
       </div>

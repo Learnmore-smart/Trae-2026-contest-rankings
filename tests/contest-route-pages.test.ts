@@ -119,6 +119,16 @@ test("project detail does not expose saved AI scoring input and output", () => {
   assert.doesNotMatch(detailClient, /rawModelResponse/);
 });
 
+test("project detail re-score starts with a non-blocking toast", () => {
+  const detailClient = read(projectDetailClientPath);
+
+  assert.doesNotMatch(detailClient, /window\.confirm/);
+  assert.doesNotMatch(detailClient, /rejudgeConfirm/);
+  assert.match(detailClient, /rejudgeStarted: "评分已经开始，请耐心等待"/);
+  assert.match(detailClient, /setRejudgeNotice\(\{ tone: "info", text: t\.rejudgeStarted \}\);/);
+  assert.match(detailClient, /className=\{`fixed right-4 top-4 z-50/);
+});
+
 test("data connect nested topic reads stay below deadline-prone size", () => {
   const queries = read(dataConnectQueriesPath);
   const boardQuery = queries.match(/query GetBoardData[\s\S]*?\n}/)?.[0] ?? "";
