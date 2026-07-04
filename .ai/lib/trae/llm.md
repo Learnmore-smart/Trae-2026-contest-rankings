@@ -14,6 +14,8 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 - Treats NVIDIA's HTTP 200 + empty `choices` reply (a soft 429) as a retryable `rate_limited` error.
 - Adds NVIDIA DeepSeek reasoning effort `max` for DeepSeek V4 fallback calls, leaving Kimi and GLM request bodies unchanged.
 - Records provider, model, latency, retry count, error reason, and raw response for every attempt.
+- Records sanitized thrown-error details for network/timeout attempts.
+- Exports `formatLLMCallFailureSummary()` so CLI callers can print compact provider/model diagnostics without exposing secrets.
 - Rejects paid provider fallbacks by construction.
 - `LLMMessage.content` accepts either a plain string or an array of `{type: "text"}` / `{type: "image_url"}` parts, so callers can send multimodal vision requests through the same request builder.
 - `responseFormat` option (default `"json_object"`) controls whether `response_format: {type: "json_object"}` is sent; vision calls use `"text"` since descriptions are prose, not schema-bound JSON.
@@ -43,6 +45,7 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 - 2026-06-30 Claude: Verified live against the real NVIDIA endpoint that `moonshotai/kimi-k2.6` and `minimaxai/minimax-m3` both accept `image_url` content pointing at a remote HTTPS URL (no base64 upload needed) and return accurate descriptions — this is what makes `lib/trae/vision.ts` possible without adding a screenshot-hosting step.
 - 2026-06-30 Claude: Kept the vision plan NVIDIA-only (no REMOVED_PROVIDER fallback) since only two NVIDIA models are verified vision-capable; guessing at REMOVED_PROVIDER free-tier vision support risked a confusing silent failure instead of the clean "not performed" degradation.
 - 2026-07-02 Claude: Root-caused the judge stall — since ~2026-07-02T00:00Z every evaluator call failed (NVIDIA 429 on kimi/deepseek, GLM 5.1 410 EOL, REMOVED_PROVIDER free daily cap exhausted). Added the Friend gateway as the primary provider and routed vision friend-first too, so all LLM traffic shares one fast endpoint. `friend` is a distinct runtime provider but persists as `NVIDIA` (proxies the same models) to avoid a Data Connect enum migration; the real endpoint stays in per-call logs. Verified live: a `json_object` evaluator call now succeeds on attempt #1 via `friend:deepseek-ai/deepseek-v4-pro`.
+- 2026-07-04 Codex: Local `.local/trae-post-improver.ts` failure previously collapsed to "All zero-budget LLM models failed" without the per-model reasons. Kept fallback behavior unchanged, but now preserves sanitized fetch exception details and exports a compact call-log formatter for CLI error output.
 
 ## Important Notes / NEVER Change
 
@@ -71,6 +74,7 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 | 2026-07-02 | Implemented shared `AI_RPM_LIMIT` request-start pacing for all LLM attempts. | Codex |
 | 2026-07-02 | Added Friend gateway as default primary provider (text + vision); dropped GLM 5.1 (410 EOL) and DeepSeek V4 Flash (hangs) from all chains. | Claude |
 | 2026-07-03 | GLM 5.2 (`z-ai/glm-5.2`) is now the primary text model on friend + nvidia; DeepSeek V4 Pro is the first text fallback. | Claude |
+| 2026-07-04 | Implemented sanitized LLM failure summaries for local CLI diagnostics. | Codex |
 ## Change Plan: Friend And NVIDIA Only
 
 - 2026-07-03 Codex: Remove REMOVED_PROVIDER from the provider config map, fallback plan, request option plumbing, and header builder.

@@ -51,6 +51,9 @@ Scrapes public TRAE Discourse category and topic data for signup and preliminary
 - 2026-07-02 Codex: Tighten submitted-topic crawling so it only accepts actual preliminary posts. Root cause: `/submit` validated the topic URL host/path, then called `fetchTopic("preliminary", ref)` without checking the Discourse topic category. Fix by adding a fetch option that requires the real forum category text to include `大赛初赛专区`; do not rely on URL slugs or numeric category ids.
 - 2026-07-02 Codex: Implemented `isSubmittedPreliminaryTopicPayload()` and `FetchTopicOptions.requirePreliminaryCategory`. JSON category-named fields may pass directly; otherwise the submitted-topic path fetches the HTML topic page and checks the page title/category text before upserting.
 
+- 2026-07-04 Codex: Session/evidence extraction fixes currently do not propagate if title/text/demoUrl hash is unchanged. Root cause: `upsertTopic()` exits early on equal `contentHash`, so corrected `sessionIds` and `traeEvidence` never write to Data Connect and `updatedAt` never moves beyond an old evaluation. Fix by comparing material extracted fields (`sessionIds`, evidence, images, attachments, track/tags) and upserting when they differ even if `contentHash` is identical. Preserve already judged status so public scored count does not drop; `changed` judge mode will pick up the newer `updatedAt`.
+- 2026-07-04 Codex: Implemented exported pure helper `hasTopicMaterialChange()` and changed `upsertTopic()` to use it before returning `unchanged`. The helper compares content hash plus extracted material metadata with stable object-key ordering.
+
 ## Planned Fix: Submitted Topic Category HTML
 
 - 2026-07-02 Codex: User-submitted preliminary topic 66965 still failed validation. Root cause evidence: Discourse JSON only exposes `category_id: 40`, while the public crawler HTML title uses `... - 【大赛初赛专区】 - ...` and meta/category elements expose the category text. Fix plan: keep the verdict text-based, but read explicit HTML category/title/meta signals instead of requiring a slash before the category segment.
@@ -66,6 +69,11 @@ Scrapes public TRAE Discourse category and topic data for signup and preliminary
 - Do not bypass auth, CAPTCHA, robots, or other access restrictions.
 - Only public category/topic URLs may be fetched.
 - Tests for raw JSON sanitization must not hit the network or Data Connect.
+
+## Planned Fix: Metadata-Only Topic Updates
+
+- 2026-07-04 Codex: Corrected Session ID extraction would not update old topics because `upsertTopic()` only compared `contentHash`, which excludes session/evidence metadata. Add a pure material-metadata comparison and keep already judged status while still upserting changed session/evidence fields.
+- 2026-07-04 Codex: Implemented and verified with `tests/trae.scraper.test.ts`; same hash + more Session IDs now counts as material change, equivalent metadata remains unchanged.
 
 ## Bug Fixes
 
@@ -97,3 +105,5 @@ Scrapes public TRAE Discourse category and topic data for signup and preliminary
 | 2026-07-02 | Implemented preliminary-category text validation for user-submitted topic crawls. | Codex |
 | 2026-07-02 | Planned robust HTML category text validation for real submitted topic pages. | Codex |
 | 2026-07-02 | Implemented robust HTML category text validation for real submitted topic pages. | Codex |
+| 2026-07-04 | Planned metadata-change upsert so session/evidence fixes persist and can be rejudged. | Codex |
+| 2026-07-04 | Implemented metadata-change upsert helper and verified full test/type/lint suite. | Codex |

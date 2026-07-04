@@ -189,6 +189,25 @@ export async function callLLMWithFallback<TParsed = string>({
   throw new LLMFallbackError("All zero-budget LLM models failed.", callLogs);
 }
 
+export function formatLLMCallFailureSummary(callLogs: readonly TraeLLMCallLog[], maxEntries = 12): string {
+  const failedLogs = callLogs.filter((log) => log.errorReason);
+  const logsToShow = failedLogs.length > 0 ? failedLogs : callLogs;
+  if (logsToShow.length === 0) return "No LLM attempts were recorded.";
+
+  const lines = logsToShow.slice(0, maxEntries).map((log, index) => {
+    const prefix = `${index + 1}. ${log.provider}:${log.model} retry=${log.retryCount} ${log.errorReason ?? "ok"} ${log.latencyMs}ms`;
+    const detail = llmLogDetail(log);
+    return detail ? `${prefix} - ${detail}` : prefix;
+  });
+
+  const omittedCount = logsToShow.length - lines.length;
+  if (omittedCount > 0) {
+    lines.push(`... ${omittedCount} more attempt(s) omitted.`);
+  }
+
+  return lines.join("\n");
+}
+
 async function waitForLLMRateLimit(
   rpmLimit: number,
   sleepFn: (delayMs: number) => Promise<void>,
@@ -307,7 +326,7 @@ async function callOneModel<TParsed>({
     }
   } catch (error) {
     const errorReason = isAbortError(error) ? "timeout" : "network_error";
-    return failedAttempt(entry, startedAt, retryCount, errorReason, rawResponse);
+    return failedAttempt(entry, startedAt, retryCount, errorReason, rawResponse, undefined, describeThrownError(error));
   } finally {
     globalThis.clearTimeout(timeout);
   }
@@ -403,7 +422,8 @@ function failedAttempt(
   retryCount: number,
   errorReason: string,
   rawResponse: string,
-  tokenUsage = { inputTokens: 0, outputTokens: 0 }
+  tokenUsage = { inputTokens: 0, outputTokens: 0 },
+  errorDetails?: string
 ): CallOneModelResult<never> {
   return {
     ok: false,
@@ -413,6 +433,7 @@ function failedAttempt(
       latencyMs: Date.now() - startedAt,
       retryCount,
       errorReason,
+      errorDetails,
       inputTokens: tokenUsage.inputTokens,
       outputTokens: tokenUsage.outputTokens,
       rawResponse
@@ -447,4 +468,44 @@ function backoffDelayMs(retryCount: number, errorReason: string | null): number 
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
+}
+
+function llmLogDetail(log: TraeLLMCallLog): string {
+  if (log.errorDetails) return truncateDiagnostic(log.errorDetails);
+  if (log.rawResponse) return truncateDiagnostic(log.rawResponse);
+  return "";
+}
+
+function describeThrownError(error: unknown): string {
+  const parts: string[] = [];
+  appendErrorDetails(parts, error);
+  if (typeof error === "object" && error !== null && "cause" in error) {
+    appendErrorDetails(parts, (error as { cause?: unknown }).cause);
+  }
+  return truncateDiagnostic(parts.join("; "));
+}
+
+function appendErrorDetails(parts: string[], error: unknown): void {
+  if (!error) return;
+  if (error instanceof Error) {
+    const code = typeof (error as Error & { code?: unknown }).code === "string" ? (error as Error & { code: string }).code : null;
+    parts.push([error.message, code].filter(Boolean).join(" "));
+    return;
+  }
+  if (typeof error === "string") {
+    parts.push(error);
+    return;
+  }
+  parts.push(String(error));
+}
+
+function truncateDiagnostic(value: string, maxLength = 500): string {
+  const sanitized = value
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/((?:api[_-]?key|access_token|token)=)[^&\s]+/gi, "$1[redacted]")
+    .replace(/sk-[A-Za-z0-9_-]{12,}/g, "sk-[redacted]")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (sanitized.length <= maxLength) return sanitized;
+  return `${sanitized.slice(0, maxLength - 1)}…`;
 }

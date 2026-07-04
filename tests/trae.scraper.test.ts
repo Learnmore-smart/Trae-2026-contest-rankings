@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  hasTopicMaterialChange,
   isRankableDiscourseTopic,
   isSubmittedPreliminaryTopicPayload,
   nextScrapedTopicStatus,
@@ -151,5 +152,45 @@ describe("nextScrapedTopicStatus", () => {
 
   it("keeps signup scrape updates out of the judge queue", () => {
     assert.equal(nextScrapedTopicStatus("signup", "SCRAPED"), "scraped");
+  });
+});
+
+describe("hasTopicMaterialChange", () => {
+  it("treats newly detected session ids as material even when contentHash is unchanged", () => {
+    const existing = {
+      contentHash: "same-hash",
+      sessionIds: ["sess_alpha_00000001"],
+      traeEvidence: { sessionIdCount: 1, hasThreeSessionIds: false }
+    };
+    const incoming = {
+      contentHash: "same-hash",
+      sessionIds: ["sess_alpha_00000001", "sess_beta_00000002", "sess_gamma_00000003"],
+      traeEvidence: { sessionIdCount: 3, hasThreeSessionIds: true }
+    };
+
+    assert.equal(hasTopicMaterialChange(existing, incoming), true);
+  });
+
+  it("does not treat equivalent extracted metadata as changed", () => {
+    const existing = {
+      contentHash: "same-hash",
+      sessionIds: ["sess_alpha_00000001", "sess_beta_00000002"],
+      imageUrls: ["https://forum.trae.cn/uploads/a.png"],
+      attachmentUrls: [],
+      tags: ["demo"],
+      track: "software",
+      traeEvidence: { sessionIdCount: 2, hasThreeSessionIds: false, processKeywords: ["TRAE"] }
+    };
+    const incoming = {
+      contentHash: "same-hash",
+      sessionIds: ["sess_alpha_00000001", "sess_beta_00000002"],
+      imageUrls: ["https://forum.trae.cn/uploads/a.png"],
+      attachmentUrls: [],
+      tags: ["demo"],
+      track: "software",
+      traeEvidence: { sessionIdCount: 2, hasThreeSessionIds: false, processKeywords: ["TRAE"] }
+    };
+
+    assert.equal(hasTopicMaterialChange(existing, incoming), false);
   });
 });

@@ -39,14 +39,14 @@ async function runCronTask(task: string): Promise<NextResponse> {
     return NextResponse.json({ ok: true, result });
   }
   if (task === "judge") {
-    const result = await judgeChangedTraeTopics({ mode: "unjudged" });
+    const result = await judgeChangedTraeTopics({ mode: "changed" });
     await refreshSnapshot();
     return NextResponse.json({ ok: true, result });
   }
   if (task === "run-all") {
     await scrapeAllTraeSources();
     await runTraeMatching();
-    const result = await judgeChangedTraeTopics({ mode: "unjudged" });
+    const result = await judgeChangedTraeTopics({ mode: "changed" });
     await refreshSnapshot();
     return NextResponse.json({ ok: true, result });
   }

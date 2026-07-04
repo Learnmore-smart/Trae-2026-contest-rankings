@@ -127,6 +127,8 @@ Guards public contest routing and workflow safety invariants.
 - 2026-07-01 Codex: Add a source-level guard that public run keeps `scrapeAllTraeSources()` and `runTraeMatching()`, starts a bounded unjudged judge batch before scrape completes, and runs a second bounded unjudged batch after match.
 - Guard the public run optimistic client status so users see scoring started immediately.
 - Implemented source-level assertions for public judge constants, scrape/match preservation, immediate and post-match judge calls, and optimistic judge status.
+- 2026-07-04 Codex: Update this guard to require `changed` judge mode and changed-named helper calls so the public button re-detects/rejudges old scoring results after extraction metadata changes.
+- 2026-07-04 Codex: Implemented route guards for public run and cron changed-mode judging; red failed on existing `unjudged`, green passes after route updates.
 
 ## Change Plan: Shared Judge Policy Guard
 

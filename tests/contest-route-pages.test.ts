@@ -17,6 +17,7 @@ const nextConfigPath = join(process.cwd(), "next.config.mjs");
 const topicsRoutePath = join(process.cwd(), "app/api/trae-contest/topics/route.ts");
 const topicDetailRoutePath = join(process.cwd(), "app/api/trae-contest/topics/[id]/route.ts");
 const runRoutePath = join(process.cwd(), "app/api/trae-contest/run/route.ts");
+const cronRoutePath = join(process.cwd(), "app/api/trae-contest/cron/[task]/route.ts");
 const submitRoutePath = join(process.cwd(), "app/api/trae-contest/submit/route.ts");
 const judgePolicyPath = join(process.cwd(), "lib/trae/judge-policy.ts");
 const judgePath = join(process.cwd(), "lib/trae/judge.ts");
@@ -404,15 +405,23 @@ test("public run status reports bounded judging batch counts", () => {
   assert.doesNotMatch(route, /const PUBLIC_JUDGE_CONCURRENCY =/);
   assert.match(route, /await scrapeAllTraeSources\(\);/);
   assert.match(route, /await runTraeMatching\(\);/);
-  assert.match(route, /return judgeChangedTraeTopics\(\{\s*mode: "unjudged",\s*max: DEFAULT_JUDGE_BATCH_MAX,\s*concurrency: DEFAULT_JUDGE_CONCURRENCY\s*\}\);/);
-  assert.match(route, /const immediateJudge = judgeUnjudgedBatch\(\);/);
-  assert.match(route, /const postMatchJudgeResult = await judgeUnjudgedBatch\(\);/);
+  assert.match(route, /return judgeChangedTraeTopics\(\{\s*mode: "changed",\s*max: DEFAULT_JUDGE_BATCH_MAX,\s*concurrency: DEFAULT_JUDGE_CONCURRENCY\s*\}\);/);
+  assert.match(route, /const immediateJudge = judgeChangedBatch\(\);/);
+  assert.match(route, /const postMatchJudgeResult = await judgeChangedBatch\(\);/);
   assert.match(route, /await Promise\.all\(\[scrapeAndMatch, immediateJudge\]\);/);
   assert.match(route, /judgeResult\.evaluatedCount/);
   assert.match(route, /judgeResult\.failedCount/);
   assert.match(client, /setStatus\(\{ running: true, phase: "judge", startedAt: null, finishedAt: null, message: t\.judging, error: null \}\);/);
   assert.match(client, /cooldown \? t\.cooldown : status\?\.message \?\? phaseMessage\(phase, language\)/);
   assert.match(client, /phase === "error" && status\?\.error/);
+});
+
+test("cron judge tasks rejudge changed topics, not only unjudged topics", () => {
+  const route = read(cronRoutePath);
+
+  assert.match(route, /task === "judge"[\s\S]*?judgeChangedTraeTopics\(\{ mode: "changed" \}\)/);
+  assert.match(route, /task === "run-all"[\s\S]*?judgeChangedTraeTopics\(\{ mode: "changed" \}\)/);
+  assert.doesNotMatch(route, /judgeChangedTraeTopics\(\{ mode: "unjudged" \}\)/);
 });
 
 test("topic detail falls back to local cache when Data Connect returns no row", async () => {

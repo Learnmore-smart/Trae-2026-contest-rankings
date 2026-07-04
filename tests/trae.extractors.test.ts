@@ -81,6 +81,35 @@ describe("extractTopicSignals", () => {
     assert.equal(signals.traeEvidence.hasThreeSessionIds, true);
   });
 
+  it("extracts multiple plain session ids after a single label", () => {
+    const ids = [
+      "sess_alpha_00000001",
+      "sess_beta_00000002",
+      "sess_gamma_00000003",
+      "sess_delta_00000004",
+      "sess_epsilon_00000005",
+      "sess_zeta_00000006",
+      "sess_eta_00000007",
+      "sess_theta_00000008",
+      "sess_iota_00000009",
+      "sess_kappa_00000010"
+    ];
+    const text = `
+      TRAE Session IDs:
+      ${ids.slice(0, 4).join(" ")}
+
+      ${ids.slice(4, 7).join(", ")}
+
+      ${ids.slice(7).join("\n")}
+    `;
+
+    const signals = extractTopicSignals({ title: "Many plain sessions", text });
+
+    assert.deepEqual(signals.sessionIds, ids);
+    assert.equal(signals.traeEvidence.sessionIdCount, ids.length);
+    assert.equal(signals.traeEvidence.hasThreeSessionIds, true);
+  });
+
   it("tracks all demo-like links while keeping the canonical demo URL", () => {
     const html = `
       <a href="https://forum.trae.cn/t/internal/123">internal forum link</a>

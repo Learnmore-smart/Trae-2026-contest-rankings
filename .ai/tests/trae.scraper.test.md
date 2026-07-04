@@ -44,6 +44,11 @@ Regression coverage for TRAE scraper normalization behavior.
 
 - Tests should not hit the network or Data Connect.
 
+## Planned Change: Metadata-Only Topic Updates
+
+- 2026-07-04 Codex: Add pure helper coverage for metadata-only topic changes. A stored topic with the same `contentHash` but fewer `sessionIds` must not be treated as unchanged, otherwise extractor fixes never reach Data Connect and old evaluations never become eligible for `changed` rejudge.
+- Implemented: red failed on missing `hasTopicMaterialChange` export; green verifies metadata-only Session ID changes are material and equivalent metadata is stable.
+
 ## Change History
 
 | Date | Change | Author |
@@ -60,3 +65,5 @@ Regression coverage for TRAE scraper normalization behavior.
 | 2026-07-02 | Planned short TRAE topic URL parser coverage for user-submitted crawls. | Codex |
 | 2026-07-02 | Planned real crawler HTML category-title regression coverage. | Codex |
 | 2026-07-02 | Implemented real crawler HTML category-title regression coverage. | Codex |
+| 2026-07-04 | Planned metadata-only topic change regression coverage. | Codex |
+| 2026-07-04 | Implemented metadata-only topic change regression coverage and verified red-to-green. | Codex |

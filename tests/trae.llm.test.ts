@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getTraeConfig } from "../lib/trae/config.ts";
-import { buildLLMFallbackPlan, buildVisionLLMFallbackPlan, callLLMWithFallback, callVisionLLMWithFallback } from "../lib/trae/llm.ts";
+import {
+  buildLLMFallbackPlan,
+  buildVisionLLMFallbackPlan,
+  callLLMWithFallback,
+  callVisionLLMWithFallback,
+  formatLLMCallFailureSummary,
+  LLMFallbackError
+} from "../lib/trae/llm.ts";
 
 type EnvPatch = Record<string, string | undefined>;
 
@@ -271,6 +278,74 @@ describe("LLM zero-budget fallback client", () => {
       assert.equal(result.callLogs[0]?.inputTokens, 321);
       assert.equal(result.callLogs[0]?.outputTokens, 45);
     });
+  });
+
+  it("records sanitized fetch error details on network failures", async () => {
+    await withEnv(zeroBudgetEnv(), async () => {
+      await assert.rejects(
+        callLLMWithFallback({
+          messages: [{ role: "user", content: "score this" }],
+          config: { ...getTraeConfig(), aiMaxRetriesPerModel: 0 },
+          plan: [
+            {
+              provider: "friend",
+              model: "z-ai/glm-5.2",
+              baseUrl: "http://127.0.0.1:8889/v1",
+              apiKey: "friend-key"
+            }
+          ],
+          fetchFn: async () => {
+            const cause = new Error("connect ECONNREFUSED 127.0.0.1:8889") as Error & { code?: string };
+            cause.code = "ECONNREFUSED";
+            const error = new TypeError("fetch failed") as TypeError & { cause?: unknown };
+            error.cause = cause;
+            throw error;
+          },
+          sleepFn: async () => undefined
+        }),
+        (error) => {
+          assert.ok(error instanceof LLMFallbackError);
+          const log = error.callLogs[0];
+          assert.equal(log?.provider, "friend");
+          assert.equal(log?.model, "z-ai/glm-5.2");
+          assert.equal(log?.errorReason, "network_error");
+          assert.match(log?.errorDetails ?? "", /fetch failed/);
+          assert.match(log?.errorDetails ?? "", /ECONNREFUSED/);
+          return true;
+        }
+      );
+    });
+  });
+
+  it("formats compact LLM failure summaries for CLI diagnostics", () => {
+    const summary = formatLLMCallFailureSummary([
+      {
+        provider: "friend",
+        model: "z-ai/glm-5.2",
+        latencyMs: 12,
+        retryCount: 0,
+        errorReason: "network_error",
+        errorDetails: "fetch failed; ECONNREFUSED connect ECONNREFUSED 127.0.0.1:8889",
+        inputTokens: 0,
+        outputTokens: 0,
+        rawResponse: ""
+      },
+      {
+        provider: "nvidia",
+        model: "deepseek-ai/deepseek-v4-pro",
+        latencyMs: 34,
+        retryCount: 1,
+        errorReason: "http_401",
+        inputTokens: 0,
+        outputTokens: 0,
+        rawResponse: "{\"error\":{\"message\":\"invalid api key\"}}"
+      }
+    ]);
+
+    assert.match(summary, /friend:z-ai\/glm-5\.2 retry=0 network_error/);
+    assert.match(summary, /fetch failed/);
+    assert.match(summary, /nvidia:deepseek-ai\/deepseek-v4-pro retry=1 http_401/);
+    assert.match(summary, /invalid api key/);
   });
 
   it("paces consecutive model attempts by AI_RPM_LIMIT", async () => {

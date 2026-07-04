@@ -50,9 +50,9 @@ function getState(): PipelineState {
   return globalState.__traePipeline;
 }
 
-function judgeUnjudgedBatch(): Promise<JudgeBatchResult> {
+function judgeChangedBatch(): Promise<JudgeBatchResult> {
   return judgeChangedTraeTopics({
-    mode: "unjudged",
+    mode: "changed",
     max: DEFAULT_JUDGE_BATCH_MAX,
     concurrency: DEFAULT_JUDGE_CONCURRENCY
   });
@@ -75,7 +75,7 @@ async function runPipeline(state: PipelineState): Promise<void> {
 
   try {
     set({ phase: "judge", message: "正在评分现有未评分作品，同时抓取公开帖子…" });
-    const immediateJudge = judgeUnjudgedBatch();
+    const immediateJudge = judgeChangedBatch();
     const scrapeAndMatch = (async () => {
       set({ phase: "scrape", message: "正在抓取报名与初赛专区，同时评分未评分作品…" });
       await scrapeAllTraeSources();
@@ -87,7 +87,7 @@ async function runPipeline(state: PipelineState): Promise<void> {
     const [, immediateJudgeResult] = await Promise.all([scrapeAndMatch, immediateJudge]);
 
     set({ phase: "judge", message: "正在评分新匹配的未评分作品…" });
-    const postMatchJudgeResult = await judgeUnjudgedBatch();
+    const postMatchJudgeResult = await judgeChangedBatch();
     const judgeResult = mergeJudgeResults([immediateJudgeResult, postMatchJudgeResult]);
 
     // Refresh the board snapshot so the next public load reads 1 doc instead of re-scanning

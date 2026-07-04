@@ -33,6 +33,8 @@ Extracts normalized text, links, images, attachments, Demo URLs, Session IDs, tr
 - 2026-07-01 Codex: Image extraction must include Discourse lightbox/original image sources, not only `img src`/`data-src`, because visible forum images may be stored as linked uploads or lazy-loaded attributes.
 - 2026-07-03 Codex: Topic 48365 exposes a newer Trae Work CN Session ID shape: `696411359297017:<hex>_<hex>.<hex>.<hex>:TRAE Work CN...`. The existing long-ID regex only handled a dotted numeric prefix and case-sensitive `:Trae`, while the fallback labeled matcher captured only the shared numeric prefix before `:`. Fix by recognizing the full colon-prefixed conversation ID case-insensitively before the labeled fallback can collapse four sessions into one.
 - 2026-07-03 Codex: Implemented full Trae Work CN recognition and contained-prefix filtering so the obvious numeric prefix no longer masks four distinct Session IDs.
+- 2026-07-04 Codex: New user report says a post with around ten Session IDs only detected one. Root cause hypothesis: the labeled matcher only captures the first token after `Session ID:`; if the user writes one heading/label and then pastes many valid IDs on following lines, unlabeled IDs are ignored unless they happen to match the Trae conversation shape. Fix by scanning labeled Session ID blocks for multiple ID-like tokens while keeping false-positive filters and order-stable dedupe.
+- 2026-07-04 Codex: Implemented labeled-block Session ID scanning. Red verified `tests/trae.extractors.test.ts` initially returned only the first `sess_*` ID; green verified all ten IDs and evidence counts are preserved.
 
 ## Important Notes / NEVER Change
 
@@ -52,3 +54,5 @@ Extracts normalized text, links, images, attachments, Demo URLs, Session IDs, tr
 | 2026-07-02 | Implemented `isDeletedOrEmptyTopic` with conservative material-signal checks. | Codex |
 | 2026-07-03 | Planned full Trae Work CN Session ID extraction for topic 48365 regression. | Codex |
 | 2026-07-03 | Implemented full Trae Work CN Session ID extraction and contained-prefix filtering. | Codex |
+| 2026-07-04 | Planned multi-ID extraction after a single Session label. | Codex |
+| 2026-07-04 | Implemented multi-ID extraction after a single Session label and verified full tests. | Codex |

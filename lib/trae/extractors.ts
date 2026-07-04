@@ -152,6 +152,44 @@ function isExcludedSessionCandidate(value: string): boolean {
   return /^(http|https|github|vercel|netlify|preview|detail|image|picture|avatar|active)/i.test(value);
 }
 
+function cleanSessionCandidate(value: string): string {
+  return value
+    .trim()
+    .replace(/^[\s[("'`{<]+/, "")
+    .replace(/[\s\])"'`}>.,;|]+$/g, "");
+}
+
+function addSessionCandidate(ids: Set<string>, value: string): void {
+  const candidate = cleanSessionCandidate(value);
+  if (!candidate || isExcludedSessionCandidate(candidate)) return;
+  ids.add(candidate);
+}
+
+function isLikelyLabeledSessionCandidate(value: string): boolean {
+  const candidate = cleanSessionCandidate(value);
+  if (candidate.length < 8 || isExcludedSessionCandidate(candidate)) return false;
+  if (/^[0-9]+$/.test(candidate)) return false;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidate)) return true;
+  if (/^(?:trae[-_]?)?session[-_]/i.test(candidate)) return true;
+  if (/(?:\.?\d{10,}:)?[A-Za-z0-9_-]{16,}_[A-Za-z0-9_-]{12,}(?:\.[A-Za-z0-9_-]{12,}){2}/i.test(candidate)) return true;
+  return candidate.length >= 12 && /[0-9]/.test(candidate) && /[_:-]/.test(candidate);
+}
+
+function addSessionCandidatesFromLabeledBlocks(ids: Set<string>, text: string): void {
+  const label = /\b(?:key\s+)?sessions?\s*ids?\b\s*[:：#-]*/gi;
+  const token = /(?:\.?\d{10,}:)?[A-Za-z0-9][A-Za-z0-9_-]{7,}(?:\.[A-Za-z0-9_-]{8,})*/g;
+
+  for (const match of text.matchAll(label)) {
+    const start = (match.index ?? 0) + match[0].length;
+    const block = text.slice(start, start + 2000);
+    for (const tokenMatch of block.matchAll(token)) {
+      if (isLikelyLabeledSessionCandidate(tokenMatch[0])) {
+        addSessionCandidate(ids, tokenMatch[0]);
+      }
+    }
+  }
+}
+
 function extractSessionIds(text: string): string[] {
   const ids = new Set<string>();
 
@@ -159,8 +197,10 @@ function extractSessionIds(text: string): string[] {
   // are not UUIDs and do not contain the word "session".
   const traeConversation = /(?<![A-Za-z0-9_])((?:\.?\d{10,}:)?[A-Za-z0-9_-]{16,}_[A-Za-z0-9_-]{12,}(?:\.[A-Za-z0-9_-]{12,}){2})(?=:trae\b|[\s\]\|]|$)/gi;
   for (const match of text.matchAll(traeConversation)) {
-    ids.add(match[1]);
+    addSessionCandidate(ids, match[1]);
   }
+
+  addSessionCandidatesFromLabeledBlocks(ids, text);
 
   // 1. Lenient labeled matching:
   // Match session/会话/uuid/id/编号, followed by optional numbers/letters/symbols, then a string of 8+ alphanumeric/dash/underscore characters
@@ -176,13 +216,13 @@ function extractSessionIds(text: string): string[] {
   // 2. Direct session patterns (e.g. trae-session-xxx, session-xxx, trae_session_xxx, session_xxx)
   const direct = /\b(?:trae[-_]?)?session[-_]?[A-Za-z0-9_-]{8,}\b/gi;
   for (const match of text.matchAll(direct)) {
-    ids.add(match[0]);
+    addSessionCandidate(ids, match[0]);
   }
 
   // 3. Standard UUIDs
   const uuidRegex = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
   for (const match of text.matchAll(uuidRegex)) {
-    ids.add(match[0]);
+    addSessionCandidate(ids, match[0]);
   }
 
   const orderedIds = Array.from(ids);

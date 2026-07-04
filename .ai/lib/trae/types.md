@@ -33,6 +33,7 @@ Defines shared TypeScript types and Zod schemas for TRAE topics, matches, evalua
 - 2026-06-29 Codex: Added token usage fields to call logs, a Firestore token usage document type, and aggregate stats totals without exposing provider/model names in the public payload.
 - 2026-07-01 Codex: Extend `TraeEvidence` with optional Demo candidate metadata (`demoUrlCount`, `detectedDemoUrls`) without changing the persisted `demoUrl` field. Data Connect stores `traeEvidence` as flexible JSON/Any, so old rows remain valid and new scrapes can provide richer prompt context.
 - 2026-07-01 Codex: Add optional generalized Demo evidence metadata (`hasDemoEvidence`, `demoEvidenceTypes`, download URLs, visual demo image URLs) so scoring can distinguish "no web URL" from "no Demo evidence".
+- 2026-07-04 Codex: Added optional sanitized `errorDetails` to `TraeLLMCallLog` so local CLI failures can show network/auth/provider details without exposing request headers or API keys.
 
 ## Important Notes / NEVER Change
 
@@ -51,6 +52,7 @@ Defines shared TypeScript types and Zod schemas for TRAE topics, matches, evalua
 | 2026-07-01 | Added optional `demoUrlCount` and `detectedDemoUrls` to `TraeEvidence`. | Codex |
 | 2026-07-01 | Planned optional generalized Demo evidence fields. | Codex |
 | 2026-07-01 | Added optional generalized Demo evidence fields: `hasDemoEvidence`, `demoEvidenceTypes`, `downloadDemoUrls`, and `visualDemoImageUrls`. | Codex |
+| 2026-07-04 | Added optional sanitized LLM call `errorDetails` for failed attempts. | Codex |
 ## Change Plan: Provider Type Narrowing
 
 - 2026-07-03 Codex: Remove `REMOVED_PROVIDER` from `TraeAIProvider`.

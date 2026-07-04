@@ -24,6 +24,13 @@ Verifies deterministic extraction of Demo URLs, images, Session IDs, and materia
 - Red verified: the test initially returned only `696411359297017`.
 - Green verified: `node --experimental-strip-types --test tests/trae.extractors.test.ts` extracts all four full IDs and passes.
 
+## Planned Change: One Session Label With Many IDs
+
+- Add a red regression for common forum formatting where the author writes `Session ID:` once and then pastes many IDs on separate lines, with optional blank lines, or separated by spaces/commas.
+- Expected behavior: all IDs are extracted, stable order is preserved, and `traeEvidence.sessionIdCount` matches the full list.
+- This covers the user report of roughly ten submitted Session IDs being detected as only one.
+- Implemented: red returned only the first ID; green returns all ten and sets `hasThreeSessionIds`.
+
 ## Dependencies
 
 - Internal: `lib/trae/extractors`.
@@ -39,3 +46,5 @@ Verifies deterministic extraction of Demo URLs, images, Session IDs, and materia
 | 2026-07-02 | Implemented deleted/empty predicate unit tests. | Codex |
 | 2026-07-03 | Planned topic 48365 full Trae Work CN Session ID regression. | Codex |
 | 2026-07-03 | Implemented topic 48365 Session ID regression and verified red-to-green. | Codex |
+| 2026-07-04 | Planned one-label-many-session-ids regression. | Codex |
+| 2026-07-04 | Implemented one-label-many-session-ids regression and verified red-to-green. | Codex |

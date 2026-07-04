@@ -64,3 +64,11 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 - Keep the public behavior the same: judge existing backlog immediately, scrape/match concurrently, then judge newly matched backlog.
 - Implemented by importing the shared constants and passing them into `judgeChangedTraeTopics()`.
 - 2026-07-01 Codex: With shared defaults raised to `100 / 20`, public run should still use `mode: "unjudged"` so it advances the public scored count before optional stale-score rejudges.
+
+## Planned Fix: Automatic Rejudge For Extractor Updates
+
+- 2026-07-04 Codex: User report says Session ID detection under-counted a submitted post and asked for either a manual re-detect button or automatic re-scoring of old-system scores.
+- Root cause: public run only calls `mode: "unjudged"`, so already-scored topics whose extracted evidence changed are not rejudged by the public button. `changed` mode already covers unjudged topics, prompt-version mismatches, judge errors, and topics with `updatedAt` newer than the latest evaluation.
+- Fix strategy: switch the public immediate and post-match judge passes to `mode: "changed"` after scraper upsert begins bumping `updatedAt` for session/evidence changes. This keeps one public button but makes it a real re-detect/re-score path.
+- Regression risk: keep the in-flight lock, cooldown, and bounded batch/concurrency. Do not reset judged status during scrape.
+- Implemented: renamed the public helper to `judgeChangedBatch()` and both immediate/post-match passes now call `judgeChangedTraeTopics({ mode: "changed", max: DEFAULT_JUDGE_BATCH_MAX, concurrency: DEFAULT_JUDGE_CONCURRENCY })`.

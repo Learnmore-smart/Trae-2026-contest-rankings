@@ -547,6 +547,51 @@ export function nextScrapedTopicStatus(sourceType: TraeSourceType, existingStatu
     : "needs_judging";
 }
 
+type TopicMaterialSnapshot = {
+  contentHash?: unknown;
+  demoUrl?: unknown;
+  track?: unknown;
+  tags?: unknown;
+  attachmentUrls?: unknown;
+  imageUrls?: unknown;
+  sessionIds?: unknown;
+  traeEvidence?: unknown;
+};
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+function materialSnapshot(value: TopicMaterialSnapshot): string {
+  return stableJson({
+    contentHash: typeof value.contentHash === "string" ? value.contentHash : null,
+    demoUrl: typeof value.demoUrl === "string" ? value.demoUrl : null,
+    track: typeof value.track === "string" ? value.track : null,
+    tags: stringArray(value.tags),
+    attachmentUrls: stringArray(value.attachmentUrls),
+    imageUrls: stringArray(value.imageUrls),
+    sessionIds: stringArray(value.sessionIds),
+    traeEvidence: value.traeEvidence ?? null
+  });
+}
+
+export function hasTopicMaterialChange(existing: TopicMaterialSnapshot | null | undefined, incoming: TopicMaterialSnapshot): boolean {
+  if (!existing) return true;
+  return materialSnapshot(existing) !== materialSnapshot(incoming);
+}
+
 function topicToVariables(topic: TraeTopic, status: keyof typeof topicStatusMap) {
   return {
     id: topic.id,
@@ -602,7 +647,7 @@ export async function upsertTopic(topic: TraeTopic): Promise<"created" | "update
     return "created";
   }
 
-  if (existing.contentHash === topic.contentHash) {
+  if (!hasTopicMaterialChange(existing, topic)) {
     return "unchanged";
   }
 

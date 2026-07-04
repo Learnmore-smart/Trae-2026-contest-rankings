@@ -85,6 +85,7 @@ export interface TraeLLMCallLog {
   latencyMs: number;
   retryCount: number;
   errorReason: string | null;
+  errorDetails?: string;
   inputTokens: number;
   outputTokens: number;
   rawResponse: string;
