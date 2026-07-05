@@ -897,8 +897,8 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
 
         const hadValidScore =
           topicObj.topic.status === "judged" &&
-          typeof topicObj.topic.totalScore === "number" &&
-          topicObj.topic.totalScore >= 0;
+          typeof topicObj.latestEvaluation?.totalScore === "number" &&
+          topicObj.latestEvaluation.totalScore >= 0;
         if (hadValidScore) return;
 
         const errorText = error instanceof Error ? error.message : String(error);
