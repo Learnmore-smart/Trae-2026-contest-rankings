@@ -173,10 +173,10 @@ export default function AdminClient() {
         </Link>
 
         <header className="surface-panel-strong mt-6 p-6 sm:p-8">
-          <p className="eyebrow">Operator console</p>
+          <p className="kicker">Operator console</p>
           <div className="mt-3 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <h1 className="text-4xl font-black text-white sm:text-5xl">TRAE 评分榜运行台</h1>
+              <h1 className="text-3xl font-semibold text-white sm:text-4xl">TRAE 评分榜运行台</h1>
               <p className="mt-4 max-w-3xl text-sm leading-6 text-stone-300">
                 手动触发抓取、匹配和评分。自动抓取由 cron endpoint 负责；这里用于立即补跑或排查最近 run 记录。
               </p>
@@ -225,7 +225,7 @@ export default function AdminClient() {
               onClick={() => void runAction(action)}
               className="group rounded-lg border border-white/10 bg-white/[0.055] p-5 text-left transition hover:border-[#f4c96b]/40 hover:bg-[#f4c96b]/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <span className="flex items-center justify-between gap-3 text-base font-black text-white">
+              <span className="flex items-center justify-between gap-3 text-sm font-semibold text-white">
                 {action.label}
                 <Play className="h-4 w-4 text-stone-400 transition group-hover:text-[#f4c96b]" />
               </span>
@@ -253,7 +253,7 @@ export default function AdminClient() {
         {message ? <div className="mt-5 rounded-lg border border-white/10 bg-black/30 p-4 text-sm leading-6 text-stone-300">{message}</div> : null}
 
         <section className="surface-panel mt-6 p-5">
-          <h2 className="text-xl font-black text-white">最近 runs</h2>
+          <h2 className="text-lg font-semibold text-white">最近 runs</h2>
           {runs.length ? (
             <div className="mt-4 grid gap-3">
               {runs.map((run) => (

@@ -146,12 +146,12 @@ function ScoreBlock({ label, value, max, unrated }: { label: string; value?: num
   const percent = typeof value === "number" ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
   return (
     <div className="surface-panel p-4">
-      <div className="flex items-center justify-between text-sm text-slate-300">
+      <div className="flex items-center justify-between text-sm text-[var(--ink-soft)]">
         <span>{label}</span>
         <span>{typeof value === "number" ? `${value}/${max}` : unrated}</span>
       </div>
-      <div className="mt-3 h-2 rounded-full bg-slate-200/50 dark:bg-slate-800/50">
-        <div className="h-full rounded-full bg-gradient-to-r from-[#f4c96b] to-[#61d8a5]" style={{ width: `${percent}%` }} />
+      <div className="score-bar-track">
+        <div className="score-bar-fill" style={{ width: `${percent}%` }} />
       </div>
     </div>
   );
@@ -160,11 +160,11 @@ function ScoreBlock({ label, value, max, unrated }: { label: string; value?: num
 function TextList({ title, items, emptyLabel }: { title: string; items?: string[]; emptyLabel: string }) {
   return (
     <section className="surface-panel p-5">
-      <h2 className="text-lg font-bold text-white">{title}</h2>
+      <h2 className="text-base font-semibold text-white">{title}</h2>
       {items?.length ? (
         <ul className="mt-4 space-y-2 text-sm leading-6 text-slate-300">
           {items.map((item) => (
-            <li key={item} className="border-l border-[#f4c96b]/50 pl-3">
+            <li key={item} className="border-l-2 border-[var(--cyan)]/40 pl-3">
               {item}
             </li>
           ))}
@@ -318,7 +318,7 @@ export default function ProjectDetailClient({ id }: { id: string }) {
                       {t.scoredAt} {fmt(item.evaluation?.createdAt, language)}
                     </span>
                   </div>
-                  <h1 className="mt-3 max-w-4xl text-3xl font-black leading-tight text-white sm:text-5xl">{item.topic.title}</h1>
+                  <h1 className="mt-3 max-w-4xl text-2xl font-semibold leading-tight text-white sm:text-4xl">{item.topic.title}</h1>
                   <div className="mt-5 flex flex-wrap gap-3">
                     <a href={item.topic.url} target="_blank" rel="noreferrer" className="control-button ghost">
                       <ExternalLink className="h-4 w-4" />
@@ -342,10 +342,10 @@ export default function ProjectDetailClient({ id }: { id: string }) {
                     </button>
                   </div>
                 </div>
-                <div className="rounded-lg border border-[#f4c96b]/30 bg-[#f4c96b]/10 p-5 text-center">
-                  <div className="text-xs text-amber-800 dark:text-amber-100">{t.totalScore}</div>
-                  <div className="text-6xl font-black text-slate-800 dark:text-white">{item.evaluation?.totalScore ?? "N/A"}</div>
-                  <div className="text-xs text-slate-600 dark:text-slate-300">
+                <div className="score-summary">
+                  <div className="score-summary__label">{t.totalScore}</div>
+                  <div className="score-summary__value">{item.evaluation?.totalScore ?? "N/A"}</div>
+                  <div className="score-summary__meta">
                     {t.confidence} {item.evaluation?.confidenceScore ?? "N/A"}%
                   </div>
                 </div>
@@ -360,7 +360,7 @@ export default function ProjectDetailClient({ id }: { id: string }) {
             </section>
 
             <section className="surface-panel mt-5 p-6">
-              <h2 className="text-xl font-bold text-white">{t.explanation}</h2>
+              <h2 className="text-lg font-semibold text-white">{t.explanation}</h2>
               <p className="mt-3 text-sm leading-7 text-slate-300">{item.evaluation?.summary ?? t.pending}</p>
               {item.evaluation?.dimensionComments ? (
                 <div className="mt-5 grid gap-3 md:grid-cols-2">
@@ -382,7 +382,7 @@ export default function ProjectDetailClient({ id }: { id: string }) {
 
             <div className="mt-5 grid gap-4 lg:grid-cols-2">
               <section className="rounded-lg border border-amber-500/20 bg-amber-500/5 dark:bg-amber-300/10 p-5">
-                <h2 className="inline-flex items-center gap-2 text-lg font-bold text-amber-900 dark:text-amber-100">
+                <h2 className="inline-flex items-center gap-2 text-base font-semibold text-amber-900 dark:text-amber-100">
                   <ShieldAlert className="h-5 w-5" />
                   {t.compliance}
                 </h2>
@@ -400,7 +400,7 @@ export default function ProjectDetailClient({ id }: { id: string }) {
               </section>
 
               <section className="surface-panel p-5">
-                <h2 className="text-lg font-bold text-white">{t.matchTitle}</h2>
+                <h2 className="text-base font-semibold text-white">{t.matchTitle}</h2>
                 {item.match?.signupTopicId ? (
                   <div className="mt-4 space-y-2 text-sm leading-6 text-slate-300">
                     <p>

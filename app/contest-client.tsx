@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, FormEvent, ReactNode } from "react";
+import type { FormEvent, ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -391,20 +391,13 @@ function ScoreRing({
   tone?: RingTone;
   size?: "small" | "large";
 }) {
-  const percent = typeof value === "number" ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
   const displayValue = typeof value === "number" ? Math.round(value) : "--";
   const ariaValue = typeof value === "number" ? `${Math.round(value)}/${max}` : COPY[language].waitingScore;
-  const style = { "--score-percent": `${percent}%` } as CSSProperties;
 
   return (
-    <div className="score-ring" data-tone={tone} data-size={size} style={style} aria-label={`${label} ${ariaValue}`}>
-      <div className="score-ring__track" aria-hidden>
-        <div className="score-ring__core">
-          <span className="score-ring__value">{displayValue}</span>
-          <span className="score-ring__max">/{max}</span>
-        </div>
-      </div>
-      <span className="score-ring__label">{label}</span>
+    <div className="score-stat" data-tone={tone} data-size={size} aria-label={`${label} ${ariaValue}`}>
+      <span className="score-stat__value">{displayValue}</span>
+      <span className="score-stat__label">{label}</span>
     </div>
   );
 }
@@ -891,7 +884,7 @@ function LeadOfficerBand({ language }: { language: ContestLanguage }) {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="kicker">{language === "zh" ? "领造官阵容" : "LEAD CREATORS"}</p>
-          <h2 className="mt-1 text-2xl font-black text-white sm:text-3xl">{t.officers}</h2>
+          <h2 className="mt-1 text-xl font-semibold text-white sm:text-2xl">{t.officers}</h2>
         </div>
         <span className="text-xs text-slate-500">{t.officerNote}</span>
       </div>
@@ -903,7 +896,7 @@ function LeadOfficerBand({ language }: { language: ContestLanguage }) {
               <img className="officer-portrait" src={`${API_BASE}${officer.src}`} alt={`${officer.name[language]} · ${t.officers}`} loading="lazy" />
             </div>
             <div className="officer-meta">
-              <div className="text-lg font-black text-white">{officer.name[language]}</div>
+              <div className="text-base font-semibold text-white">{officer.name[language]}</div>
               <div className="mt-1 text-xs text-slate-500">{officer.title[language]}</div>
             </div>
           </article>
@@ -917,7 +910,6 @@ function RankCard({ item, language, viewMode }: { item: RankingItem; language: C
   const t = COPY[language];
   const router = useRouter();
   const tier = item.rank === 1 ? "gold" : item.rank === 2 ? "silver" : item.rank === 3 ? "bronze" : null;
-  const isTop = item.rank === 1;
   const trackName = item.topic.track ? (TRACK_LABELS[item.topic.track]?.[language] ?? item.topic.track) : null;
   const detailHref = `/project/${encodeURIComponent(item.topic.id)}`;
   const openDetail = () => router.push(detailHref);
@@ -940,10 +932,8 @@ function RankCard({ item, language, viewMode }: { item: RankingItem; language: C
 
       <div className="rank-row__rank">
         <div className={`rank-badge ${tier ? `rank-badge--${tier}` : ""}`}>
-          {isTop ? <Crown className="h-4 w-4" /> : null}
-          <span>#{item.rank}</span>
+          <span>{item.rank}</span>
         </div>
-        {isTop ? <span className="rank-row__top">{t.top}</span> : null}
       </div>
 
       <div className="rank-row__content">
@@ -951,11 +941,11 @@ function RankCard({ item, language, viewMode }: { item: RankingItem; language: C
             <span>{item.topic.authorName}</span>
             {trackName ? (
               <>
-                <span className="h-1 w-1 rounded-full bg-slate-700" />
+                <span className="rank-row__dot" />
                 <span>{trackName}</span>
               </>
             ) : null}
-            <span className="h-1 w-1 rounded-full bg-slate-700" />
+            <span className="rank-row__dot" />
             <span>{fmtDate(item.topic.updatedAt, language)}</span>
           </div>
           <h2 className="rank-row__title">{item.topic.title}</h2>
@@ -1016,7 +1006,7 @@ function EmptyState({ language, onRun }: { language: ContestLanguage; onRun: Rea
         <span className="locked-medallion">
           <Sparkles className="h-8 w-8" />
         </span>
-        <h2 className="mt-6 text-3xl font-black text-white">{t.emptyTitle}</h2>
+        <h2 className="mt-6 text-2xl font-semibold text-white">{t.emptyTitle}</h2>
         <p className="mt-3 max-w-xl text-sm leading-6 text-slate-300">{t.emptyBody}</p>
         <div className="mt-6">{onRun}</div>
       </div>
@@ -1031,7 +1021,7 @@ function LockedPanel({ phase, language }: { phase: Exclude<Phase, "prelim">; lan
       <span className="locked-medallion">
         {phase === "semi" ? <Lock className="h-8 w-8" /> : <Sparkles className="h-8 w-8" />}
       </span>
-      <h2 className="mt-6 text-3xl font-black text-white">{phase === "semi" ? t.lockedSemi : t.lockedFinal}</h2>
+      <h2 className="mt-6 text-2xl font-semibold text-white">{phase === "semi" ? t.lockedSemi : t.lockedFinal}</h2>
       <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-300">{t.lockedBody}</p>
     </section>
   );
@@ -1321,7 +1311,7 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
               <div className="hero-command-deck">
                 <div className="landing-hero-copy">
                   <p className="kicker">{t.heroKicker}</p>
-                  <h1 className="landing-hero-title mt-4 max-w-5xl text-5xl font-black leading-[0.95] text-white sm:text-6xl lg:text-7xl">{t.heroTitle}</h1>
+                  <h1 className="landing-hero-title mt-4 max-w-4xl text-4xl font-semibold leading-tight text-white sm:text-5xl lg:text-6xl">{t.heroTitle}</h1>
                   <p className="mt-6 max-w-3xl text-base leading-8 text-slate-300">{t.heroBody}</p>
                   <div className="hero-signal-strip" aria-label="Contest signals">
                     <div>
@@ -1382,7 +1372,7 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
             <section className="ranking-toolbar surface-panel">
               <div>
                 <p className="kicker">{t.navRanking}</p>
-                <h1 className="mt-1 text-3xl font-black text-white">{t.scoredProgress} {fmtN(progressDone)}/{fmtN(progressTotal)}</h1>
+                <h1 className="mt-1 text-2xl font-semibold text-white">{t.scoredProgress} {fmtN(progressDone)}/{fmtN(progressTotal)}</h1>
                 <p className="mt-2 text-sm text-slate-500">{t.lastUpdated}: {fmtD(stats?.lastUpdatedAt)}</p>
               </div>
               <div className="phase-switch" role="tablist" aria-label="Contest phase">

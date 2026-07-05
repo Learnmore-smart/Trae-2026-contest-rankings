@@ -60,9 +60,7 @@ a {
 
 .score-grid {
   position: relative;
-  background:
-    linear-gradient(180deg, var(--page-sheen), transparent 18rem),
-    var(--page-bg);
+  background: var(--page-bg);
 }
 
 .tech-shell {
@@ -93,21 +91,21 @@ a {
 .surface-panel-strong {
   position: relative;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--panel);
-  box-shadow: var(--shadow-soft);
+  box-shadow: none;
 }
 
 .surface-panel-strong {
-  border-color: var(--line-strong);
+  border-color: var(--line);
   background: var(--panel-strong);
 }
 
 .kicker {
-  color: var(--cyan);
+  color: var(--muted);
   font-size: 0.72rem;
-  font-weight: 850;
-  letter-spacing: 0;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
@@ -127,43 +125,50 @@ a {
 
 .control-button {
   display: inline-flex;
-  min-height: 2.32rem;
+  min-height: 2.25rem;
   align-items: center;
   justify-content: center;
-  gap: 0.48rem;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
+  gap: 0.44rem;
+  border: 1px solid var(--line);
+  border-radius: 7px;
   background: var(--surface-solid);
-  padding: 0.48rem 0.78rem;
+  padding: 0.46rem 0.78rem;
   color: var(--ink);
-  font-size: 0.86rem;
-  font-weight: 800;
+  font-size: 0.84rem;
+  font-weight: 600;
   transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
 }
 
 .control-button:hover {
-  border-color: rgba(22, 136, 168, 0.42);
+  border-color: var(--line-strong);
   background: var(--surface-hover);
 }
 
 .control-button.primary {
-  border-color: rgba(22, 136, 168, 0.4);
+  border-color: var(--cyan);
   background: var(--cyan);
   color: var(--cyan-contrast);
 }
 
 .control-button.primary:hover {
   background: var(--cyan-strong);
+  border-color: var(--cyan-strong);
 }
 
 .control-button.ghost {
+  border-color: transparent;
   background: transparent;
   color: var(--ink-soft);
 }
 
+.control-button.ghost:hover {
+  border-color: var(--line);
+  background: var(--surface-hover);
+}
+
 .control-field {
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 7px;
   background: var(--surface-field);
   color: var(--ink);
   transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
@@ -171,9 +176,9 @@ a {
 
 .control-field:hover,
 .control-field:focus-within {
-  border-color: rgba(22, 136, 168, 0.34);
+  border-color: var(--cyan);
   background: var(--surface-solid);
-  box-shadow: 0 0 0 3px rgba(22, 136, 168, 0.08);
+  box-shadow: none;
 }
 
 .search-field input {

@@ -23,8 +23,8 @@ export default async function DevPage() {
           返回榜单
         </Link>
         <header className="mt-8 border-b border-white/10 pb-6">
-          <p className="eyebrow">Local development only</p>
-          <h1 className="mt-3 text-4xl font-black text-white sm:text-5xl">TRAE /dev 控制台</h1>
+          <p className="kicker">Local development only</p>
+          <h1 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">TRAE /dev 控制台</h1>
           <p className="mt-4 max-w-3xl text-sm leading-6 text-stone-300">
             这个页面只用于本机调试抓取、匹配和评分流程。生产环境请使用 admin token 或 cron secret。
           </p>
