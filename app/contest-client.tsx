@@ -14,6 +14,7 @@ import {
   Crown,
   ExternalLink,
   Globe,
+  Github,
   Home,
   LayoutGrid,
   Loader2,
@@ -1280,6 +1281,15 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
             ]}
             onSelect={(value) => setTheme(value as ContestTheme)}
           />
+          <a
+            href="https://github.com/Learnmore-smart/Trae-2026-contest-rankings"
+            className="nav-control focus-ring"
+            aria-label="Open GitHub repository"
+          >
+            <span className="inline-flex text-cyan-300">
+              <Github className="h-4 w-4" />
+            </span>
+          </a>
           <a
             href="https://www.rateministere.com"
             className="nav-control focus-ring"

@@ -72,6 +72,7 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 - Query-changing filter/sort/page-size reloads are allowed to cover stale rows with skeletons so users do not read the old ordering as current.
 - Ranking page size must default to 50 while allowing explicit user choices.
 - Ranking sort direction must be user-selectable and must reset pagination to page 1 when changed.
+- 2026-07-04 Codex: Add a GitHub icon link immediately before the existing RateMinistere home icon in the top-right navbar. Keep it icon-only and use the same compact nav control styling.
 
 ## Change History
 
