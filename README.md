@@ -1,5 +1,7 @@
 # TRAE AI 创造力大赛第三方 AI 评分榜
 
+https://www.rateministere.com/trae-contest-2026
+
 公开路径：`/trae-contest-2026`
 
 本站是第三方 AI 模拟评分榜。评分由 AI 根据 TRAE 中文社区公开帖子内容生成，仅供学习、观摩和参考，不代表 TRAE 官方结果，不冒充官方评分，也不预测最终结果。
