@@ -1,6 +1,6 @@
 ﻿# lib/trae/judge.ts
 
-> Last updated: 2026-07-02 | Protection: STANDARD
+> Last updated: 2026-07-04 | Protection: STANDARD
 
 ## Purpose
 
@@ -54,6 +54,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - 2026-07-02 Codex: Owner hit `operation "GetBoardPage" not found` when starting a run. Root cause is connector deployment skew, not model judging. Add a narrow fallback to the deployed legacy board query so the run button does not fail immediately; full >1000 coverage still requires deploying `GetBoardPage`.
 - 2026-07-02 Codex: Duplicate preliminary posts with identical titles should not both enter the judge queue. Prefer already-scored or higher-scored duplicates before title dedupe, then apply the normal mode filter and max slice.
 - 2026-07-02 Codex: Owner relayed feedback that edited forum posts are not re-scored. Root cause is cross-module: `scraper.ts` preserves `JUDGED` on content updates to keep public scored counts stable, but `shouldJudgeTopicForMode(..., "changed")` does not compare the topic's current `updatedAt` with the latest evaluation's `createdAt`. Fix changed mode to treat a topic update newer than the latest evaluation as stale, without resetting public scores during scrape.
+- 2026-07-04 Kiro: Owner reported the public "已评分" count steadily DECREASING (3973→3940→3885→3882) while all AI providers were out of quota (friend HTTP 401, both NVIDIA HTTP 429). Root cause: the scheduled/button pipeline runs `judgeChangedTraeTopics({ mode: "changed" })`, and because `PROMPT_VERSION` is ahead of stored evals, changed mode re-judges the whole board; the batch failure handler then unconditionally wrote `JUDGE_ERROR` + `totalScore -1`, DESTROYING the prior valid score on every quota-failed re-judge. Fix: in the `runWithConcurrency` catch block, if the topic already had a valid score (`status === "judged"` and `totalScore >= 0`), record token usage and count the failed attempt but RETURN early — do not downgrade to JUDGE_ERROR and do not overwrite the good evaluation. Only genuinely unscored topics (needs_judging / judge_error / never scored) still get marked JUDGE_ERROR for retry. This makes the count monotonic (transient provider outages can no longer erase scored topics). The ~91 topics already flipped to JUDGE_ERROR before this fix will recover once quota returns. NOTE: this fix must be deployed to wherever the pipeline runs (Cloud Run / local worker) to take effect on the live board.
 
 ## Planned Change: SQL Connect Runtime
 
@@ -78,6 +79,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | 2026-06-29 | Implemented Firestore token usage aggregation for judge model calls. | Codex |
 | 2026-06-30 | Planned Data Connect judge persistence verification. | Codex |
 | 2026-06-30 | Verified offline LLM fallback tests; live judge run was blocked by escalation usage limits. | Codex |
+| 2026-07-04 | Batch judge failure handler now preserves a topic's existing valid score on transient failure (rate limit/quota/timeout) instead of overwriting it with JUDGE_ERROR/-1; only never-scored topics get marked as errors. Stops the public count bleeding during provider quota outages. All 22 judge tests pass. | Kiro |
 | 2026-06-30 | Planned fix for Data Connect judge failure caused by sending client-side `createdAt` to `UpsertEvaluation`. | Codex |
 | 2026-07-01 | Planned multi-evaluator consensus judging so each topic is scored by four independent requests plus one consensus request. | Codex |
 | 2026-07-01 | Implemented four-evaluator plus consensus judging and explicit evidence-limit prompts. | Codex |

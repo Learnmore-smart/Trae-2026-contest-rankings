@@ -884,8 +884,24 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
         evaluatedCount += 1;
       } catch (error) {
         failedCount += 1;
-        const errorText = error instanceof Error ? error.message : String(error);
         const llmCallLogs = error instanceof LLMFallbackError ? error.callLogs : [];
+
+        // A transient LLM failure (rate limit / quota / timeout / bad JSON) must NEVER
+        // discard a topic's existing valid score. If this topic was already successfully
+        // judged, keep its prior JUDGED evaluation intact and only count the failed
+        // re-judge attempt. Without this guard, a quota outage during a "changed" re-judge
+        // steadily flips good topics to JUDGE_ERROR (totalScore -1) and bleeds the public
+        // "已评分" count downward. Only genuinely unscored topics (needs_judging /
+        // judge_error / never scored) get downgraded to JUDGE_ERROR so the next run retries.
+        await recordTokenUsage(llmCallLogs);
+
+        const hadValidScore =
+          topicObj.topic.status === "judged" &&
+          typeof topicObj.topic.totalScore === "number" &&
+          topicObj.topic.totalScore >= 0;
+        if (hadValidScore) return;
+
+        const errorText = error instanceof Error ? error.message : String(error);
         const lastCallLog = llmCallLogs.at(-1);
         const failedPrompt = buildJudgePrompt(topicObj.topic, topicObj.match);
         const failedTokens = tokensFromLogs(llmCallLogs);
@@ -941,8 +957,6 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
           error: errorText,
           createdAt: nowIso()
         };
-
-        await recordTokenUsage(llmCallLogs);
 
         const failedEvaluationInput = toUpsertEvaluationVariables(failedEvaluation);
         await upsertEvaluation(dc as any, {
