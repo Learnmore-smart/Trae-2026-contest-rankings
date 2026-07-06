@@ -64,22 +64,21 @@ test("contest theme is split into a light-mode theme file", () => {
   assert.match(theme, /--ink:/);
 });
 
-test("ranking list uses row layout hooks and circular score rings", () => {
+test("ranking list uses row layout hooks and score stats", () => {
   assert.match(component, /function ScoreRing/);
-  assert.match(component, /className="score-ring/);
-  assert.match(component, /--score-percent/);
+  assert.match(component, /className="score-stat/);
   assert.match(component, /"ranking-list"/);
   assert.match(component, /className=\{`rank-row/);
   assert.match(component, /className="ranking-inline-meta"/);
 
   assert.match(css, /\.ranking-list\s*{[\s\S]*?display:\s*grid;/);
   assert.match(css, /\.rank-row\s*{[\s\S]*?grid-template-columns:/);
-  assert.match(css, /\.score-ring__track\s*{[\s\S]*?conic-gradient\(/);
+  assert.match(css, /\.score-stat\s*{[\s\S]*?display:\s*grid;/);
   assert.doesNotMatch(component, /className="ranking-result-strip"/);
 });
 
 test("ranking rows keep the text column from collapsing", () => {
-  assert.match(css, /\.rank-row\s*{[\s\S]*?grid-template-columns:\s*minmax\(3\.7rem, max-content\) minmax\(18rem, 1fr\) minmax\(24rem, 34rem\) minmax\(9\.5rem, auto\);/);
+  assert.match(css, /\.rank-row\s*{[\s\S]*?grid-template-columns:\s*minmax\(2\.6rem, max-content\) minmax\(18rem, 1fr\) minmax\(20rem, 30rem\) minmax\(9rem, auto\);/);
   assert.match(css, /\.rank-row__score-panel\s*{[\s\S]*?min-width:\s*0;/);
   assert.match(css, /\.rank-row__summary\s*{[\s\S]*?overflow-wrap:\s*anywhere;/);
 });
@@ -97,13 +96,13 @@ test("ranking controls stay compact and cards open details directly", () => {
   assert.match(component, /tabIndex=\{0\}/);
   assert.match(component, /event\.key === "Enter"/);
 
-  assert.match(css, /\.main-tabs\s*{[\s\S]*?border-top-left-radius:\s*0;/);
+  assert.match(css, /\.main-tabs\s*{[\s\S]*?border-radius:\s*6px;/);
   assert.match(css, /\.ranking-filters\s*{[\s\S]*?display:\s*flex;/);
   assert.match(css, /\.ranking-filters\s*{[\s\S]*?flex-wrap:\s*wrap;/);
-  assert.match(css, /\.rank-row\s*{[\s\S]*?box-shadow:\s*none;/);
-  assert.match(css, /\.rank-row:hover\s*{[\s\S]*?border-color:/);
+  assert.match(css, /\.rank-row\s*{[\s\S]*?border-bottom:\s*1px/);
+  assert.match(css, /\.rank-row:hover\s*{[\s\S]*?background:/);
   assert.doesNotMatch(css, /\.rank-row:hover\s*{[\s\S]*?transform:/);
-  assert.match(theme, /--shadow-card:\s*none;/);
+  assert.match(theme, /--shadow-card:/);
 
   // Assert details page theming and dropdowns
   const detailComponent = readFileSync(join(process.cwd(), "app/project/project-detail-client.tsx"), "utf8");

@@ -49,7 +49,7 @@ test("contest top-level navigation uses refreshable links", () => {
 test("ranking reload keeps existing rows visible while refreshing", () => {
   const client = read(clientPath);
 
-  assert.match(client, /loading && items\.length === 0 \? \([\s\S]*?<LoadingGrid viewMode={viewMode} \/>/);
+  assert.match(client, /loading && items\.length === 0 \? \([\s\S]*?<LoadingGrid viewMode=\{viewMode\}[\s\S]*?\/>/);
 });
 
 test("ranking filter changes show skeleton rows while the replacement query loads", () => {
@@ -58,7 +58,7 @@ test("ranking filter changes show skeleton rows while the replacement query load
   assert.match(client, /const \[loadedQueryString, setLoadedQueryString\] = useState\(""\);/);
   assert.match(client, /setLoadedQueryString\(queryString\);/);
   assert.match(client, /const showQueryChangeSkeleton = loading && queryString !== loadedQueryString;/);
-  assert.match(client, /loading && items\.length === 0 \? \([\s\S]*?<LoadingGrid viewMode=\{viewMode\} \/>[\s\S]*?\) : showQueryChangeSkeleton \? \(/);
+  assert.match(client, /loading && items\.length === 0 \? \([\s\S]*?<LoadingGrid viewMode=\{viewMode\}[\s\S]*?\/>[\s\S]*?\) : showQueryChangeSkeleton \? \(/);
 });
 
 test("client API requests default to configured Next base path", () => {
