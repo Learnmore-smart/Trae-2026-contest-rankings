@@ -385,6 +385,7 @@ async function topicFromJson(sourceType: TraeSourceType, ref: CategoryTopicRef, 
     views?: number;
     created_at?: string;
     bumped_at?: string;
+    last_posted_at?: string;
   };
   const firstPost = firstPostFromJson(payload);
   const html = firstPost.html ?? "";
@@ -414,7 +415,7 @@ async function topicFromJson(sourceType: TraeSourceType, ref: CategoryTopicRef, 
     viewCount: typeof data.views === "number" ? data.views : null,
     likeCount: firstPost.likeCount,
     createdAtExternal: data.created_at ?? firstPost.createdAt,
-    lastActivityAtExternal: data.bumped_at ?? null,
+    lastActivityAtExternal: data.bumped_at ?? data.last_posted_at ?? null,
     scrapedAt: now,
     updatedAt: now,
     contentText: signals.contentText,
@@ -753,8 +754,97 @@ export async function scrapeTraeSource(sourceType: TraeSourceType, options: Scra
     // topics the cursor is about to step past.
     const refs = Array.from(seen.values());
     topicsFound = refs.length;
+
+    // Batch query existing topics to see if we can skip fetching details
+    const dc = getDataConnectDb();
+    const existingTopics = new Map<string, any>();
+
+    await Promise.all(
+      refs.map(async (ref) => {
+        const id = `${sourceType}_${ref.externalTopicId}`;
+        try {
+          const res = await getTopicDetail(dc as any, { id } as any);
+          if (res.data.topic) {
+            existingTopics.set(id, res.data.topic);
+          }
+        } catch {
+          // Ignore read error, we'll just fetch detail
+        }
+      })
+    );
+
     for (const ref of refs) {
+      const id = `${sourceType}_${ref.externalTopicId}`;
+      const existing = existingTopics.get(id);
+
+      let shouldSkipFetch = false;
+      if (existing) {
+        const raw = ref.rawJson as any;
+        const incomingBumped = raw?.bumped_at || raw?.last_posted_at || null;
+        const existingBumped = existing.lastActivityAtExternal;
+
+        const incomingReplyCount = typeof raw?.posts_count === "number" ? Math.max(0, raw.posts_count - 1) : null;
+        const incomingViewCount = typeof raw?.views === "number" ? raw.views : null;
+        const incomingLikeCount = typeof raw?.like_count === "number" ? raw.like_count : null;
+
+        const statsMatch =
+          existing.replyCount === incomingReplyCount &&
+          existing.viewCount === incomingViewCount &&
+          existing.likeCount === incomingLikeCount;
+
+        if (incomingBumped) {
+          if (existingBumped === incomingBumped) {
+            if (statsMatch) {
+              shouldSkipFetch = true;
+            }
+          } else if (!existingBumped && statsMatch) {
+            // One-time migration: existing has null date, but stats match exactly, so we assume no change.
+            // We update the DB with the incoming bumped date using existing details to fix the null.
+            shouldSkipFetch = true;
+            try {
+              const topic = {
+                id: existing.id,
+                sourceType: existing.sourceType.toLowerCase() as any,
+                externalTopicId: existing.externalTopicId,
+                slug: existing.slug,
+                title: existing.title,
+                url: existing.url,
+                authorName: existing.authorName,
+                authorAvatarUrl: existing.authorAvatarUrl,
+                track: existing.track,
+                tags: sanitizeTags(existing.tags),
+                replyCount: incomingReplyCount,
+                viewCount: incomingViewCount,
+                likeCount: incomingLikeCount,
+                createdAtExternal: existing.createdAtExternal,
+                lastActivityAtExternal: incomingBumped,
+                scrapedAt: existing.scrapedAt,
+                updatedAt: nowIso(),
+                contentText: existing.contentText,
+                contentHtml: existing.contentHtml,
+                excerpt: existing.excerpt,
+                demoUrl: existing.demoUrl,
+                attachmentUrls: existing.attachmentUrls ?? [],
+                imageUrls: existing.imageUrls ?? [],
+                sessionIds: existing.sessionIds ?? [],
+                traeEvidence: existing.traeEvidence,
+                contentHash: existing.contentHash,
+                status: existing.status.toLowerCase() as any,
+                rawJson: existing.rawJson,
+                rawHtml: existing.rawHtml
+              };
+              await upsertTopic(topic);
+            } catch {
+              // Ignore and let it fall back
+            }
+          }
+        }
+      }
+
       try {
+        if (shouldSkipFetch) {
+          continue;
+        }
         const topic = await fetchTopic(sourceType, ref);
         const result = await upsertTopic(topic);
         if (result === "created") topicsCreated += 1;
