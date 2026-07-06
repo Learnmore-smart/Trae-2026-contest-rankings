@@ -10,7 +10,7 @@ Verifies the zero-budget provider-agnostic LLM fallback client, including the vi
 
 - Tests Friend-first, then NVIDIA, zero-budget fallback behavior.
 - Tests default Friend/NVIDIA text fallback order, image/multimodal model config, and DeepSeek reasoning effort.
-- Tests that 429 and NVIDIA soft-429 responses retry the same model until the throttle clears instead of immediately falling through.
+- Tests that 429 and NVIDIA soft-429 responses use all configured free provider/key lanes before waiting and retrying the full plan.
 - Tests the optional cap for rate-limit retries and the fallback behavior after that cap.
 - Tests round-robin use of multiple NVIDIA keys so each key carries its own RPM budget.
 - Tests invalid JSON/content validation fallback.
@@ -54,9 +54,20 @@ Verifies the zero-budget provider-agnostic LLM fallback client, including the vi
 | 2026-07-02 | Added shared LLM rate-limiter regression coverage. | Codex |
 | 2026-07-04 | Added regression tests for LLM failure details and summary formatting. | Codex |
 | 2026-07-04 | Added rate-limit retry-until-clear, capped retry fallback, and NVIDIA key-rotation tests. | Claude/Codex |
+| 2026-07-06 | Planned regressions for using NVIDIA capacity when Friend is throttled/exhausted before waiting. | Codex |
 ## Change Plan: Friend/NVIDIA Tests Only
 
 - 2026-07-03 Codex: Update fixtures to remove REMOVED_PROVIDER env vars and use `AI_PROVIDER_ORDER=friend,nvidia`.
 - Assert the fallback plan includes all Friend text models before all NVIDIA text models.
 - Assert invalid Friend responses fall through to NVIDIA, not REMOVED_PROVIDER.
+
+## Change Plan: Provider-Aware Rate Limit Tests
+
+- 2026-07-06 Codex: Added a failing regression where Friend returns HTTP 429 and NVIDIA succeeds; expected behavior is to use NVIDIA instead of waiting forever on Friend.
+- Added a regression where both Friend and NVIDIA are saturated first, then Friend clears on the next full-plan pass; expected behavior is a wait/retry cycle rather than `LLMFallbackError`.
+- Added a regression that Friend balance/auth-style failures fall through to NVIDIA, since Friend has a balance but NVIDIA keys do not.
+
+## Implemented Change: Provider-Aware Rate Limit Tests
+
+- 2026-07-06 Codex: `tests/trae.llm.test.ts` now covers Friend 429 -> NVIDIA success, full-plan saturation -> wait/retry, capped full-plan wait cycles, and Friend balance-style client errors -> NVIDIA success.
 

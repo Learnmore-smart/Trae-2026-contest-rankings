@@ -159,8 +159,15 @@ export async function callLLMWithFallback<TParsed = string>({
 }: CallLLMWithFallbackOptions<TParsed>): Promise<LLMCallResult<TParsed>> {
   const callLogs: TraeLLMCallLog[] = [];
   const resolvedPlan = plan ?? buildLLMFallbackPlan(config);
+  let fullPlanRateLimitRetries = 0;
+
+  while (true) {
+    const saturatedProviders = new Set<TraeAIProvider>();
+    let hitRateLimitThisPass = false;
 
   for (const entry of resolvedPlan) {
+    if (saturatedProviders.has(entry.provider)) continue;
+
     const apiKeys = entry.apiKeys.filter(Boolean);
     if (apiKeys.length === 0) {
       callLogs.push({
@@ -209,20 +216,16 @@ export async function callLLMWithFallback<TParsed = string>({
         };
       }
 
-      // A rate limit is a per-key/account condition, not a model failure, so we do
-      // NOT fall through to the next model (same account = same limit). Instead we
-      // rotate to the next key and keep retrying until it clears. Default budget is
-      // unlimited (aiMaxRateLimitRetries === 0) so a throttled re-judge waits it out
-      // rather than downgrading an already-scored topic to JUDGE_ERROR. Best-effort
-      // callers (vision) set retryRateLimitsUntilCleared=false to fall through instead.
+      // Try every key/provider lane before waiting. This lets Friend throttles fall
+      // through to NVIDIA capacity, while still waiting instead of failing when all
+      // configured free lanes are saturated.
       if (retryRateLimitsUntilCleared && isRateLimitError(attempt.log.errorReason)) {
+        hitRateLimitThisPass = true;
         rateLimitRetries += 1;
         keyCursor += 1;
-        if (config.aiMaxRateLimitRetries > 0 && rateLimitRetries > config.aiMaxRateLimitRetries) {
-          advanceToNextModel = true;
-          continue;
-        }
-        await sleepFn(rateLimitBackoffMs(rateLimitRetries));
+        if (rateLimitRetries < apiKeys.length) continue;
+        saturatedProviders.add(entry.provider);
+        advanceToNextModel = true;
         continue;
       }
 
@@ -238,6 +241,17 @@ export async function callLLMWithFallback<TParsed = string>({
 
       advanceToNextModel = true;
     }
+  }
+
+    if (!retryRateLimitsUntilCleared || !hitRateLimitThisPass) {
+      break;
+    }
+
+    fullPlanRateLimitRetries += 1;
+    if (config.aiMaxRateLimitRetries > 0 && fullPlanRateLimitRetries > config.aiMaxRateLimitRetries) {
+      break;
+    }
+    await sleepFn(rateLimitBackoffMs(fullPlanRateLimitRetries));
   }
 
   throw new LLMFallbackError("All zero-budget LLM models failed.", callLogs);

@@ -11,7 +11,7 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 - Builds the model fallback plan from `AI_PROVIDER_ORDER` (default `friend,nvidia`).
 - Calls the Friend gateway (new-api, OpenAI-compatible) first, then NVIDIA direct; paid or removed providers are intentionally not part of the plan.
 - Retries non-rate-limit transient failures with bounded exponential backoff.
-- Retries rate limits (`http_429` and NVIDIA soft-429) on the same model by default, rotating API keys and waiting until the limit clears unless `AI_MAX_RATE_LIMIT_RETRIES` caps it.
+- Handles rate limits (`http_429` and NVIDIA soft-429) by trying every configured free provider/key lane before waiting and retrying the full plan unless `AI_MAX_RATE_LIMIT_RETRIES` caps it.
 - Treats NVIDIA's HTTP 200 + empty `choices` reply (a soft 429) as a retryable `rate_limited` error.
 - Adds NVIDIA DeepSeek reasoning effort `max` for DeepSeek V4 fallback calls, leaving Kimi and GLM request bodies unchanged.
 - Records provider, model, latency, retry count, error reason, and raw response for every attempt.
@@ -78,9 +78,26 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 | 2026-07-03 | GLM 5.2 (`z-ai/glm-5.2`) is now the primary text model on friend + nvidia; DeepSeek V4 Pro is the first text fallback. | Claude |
 | 2026-07-04 | Implemented sanitized LLM failure summaries for local CLI diagnostics. | Codex |
 | 2026-07-04 | Implemented per-key LLM pacing, multi-key NVIDIA rotation, and unlimited judge rate-limit retries with a vision opt-out. | Claude/Codex |
+| 2026-07-06 | Planned provider-aware rate-limit rotation so Friend throttles do not block NVIDIA key capacity before the client waits. | Codex |
 ## Change Plan: Friend And NVIDIA Only
 
 - 2026-07-03 Codex: Remove REMOVED_PROVIDER from the provider config map, fallback plan, request option plumbing, and header builder.
 - Keep both Friend and NVIDIA usable at the same time by preserving `AI_PROVIDER_ORDER=friend,nvidia`.
 - Missing API keys should continue to log `missing_api_key` per provider/model instead of throwing early.
+
+## Change Plan: Use All Free Keys Before Waiting
+
+- 2026-07-06 Codex: Current text judge calls could wait forever on a Friend 429/soft-429 before reaching NVIDIA, which made the runtime look Friend-only even when two NVIDIA keys were configured.
+- Keep Friend first for successful calls, but treat a rate-limited plan entry as temporarily saturated and continue through the rest of the free plan.
+- If every configured free entry is saturated, wait with the existing rate-limit backoff and retry the full plan instead of failing the judge.
+- Keep per-key pacing unchanged: Friend has its own lane; each NVIDIA key has its own `AI_RPM_LIMIT` lane, so two 40 rpm NVIDIA keys remain 80 rpm direct NVIDIA capacity.
+- Friend balance/auth/quota-style errors that are not rate-limit/5xx should fall through to NVIDIA through the existing non-retryable error path.
+
+## Implemented Change: Use All Free Keys Before Waiting
+
+- 2026-07-06 Codex: `callLLMWithFallback()` now runs rate-limit handling as full-plan passes. A provider is marked saturated for the current pass once all of its configured keys return a rate-limit shape.
+- Friend 429/soft-429 no longer blocks direct NVIDIA attempts; the client skips the rest of the Friend models for that pass and tries NVIDIA.
+- NVIDIA still rotates across all configured NVIDIA keys before the provider is considered saturated.
+- Only after every viable provider lane in a pass is saturated does the client wait using `rateLimitBackoffMs()` and retry the full free plan.
+- `AI_MAX_RATE_LIMIT_RETRIES` now caps full-plan wait cycles; `0` remains unlimited for must-succeed judging.
 

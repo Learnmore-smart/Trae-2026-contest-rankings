@@ -140,11 +140,11 @@ describe("LLM zero-budget fallback client", () => {
     });
   });
 
-  it("retries a rate-limited model until it clears instead of failing over to the next model", async () => {
+  it("uses NVIDIA capacity when Friend is rate-limited before waiting on Friend", async () => {
     await withEnv(zeroBudgetEnv(), async () => {
-      const requests: Array<{ url: string; model: string; authorization: string | null }> = [];
+      const requests: Array<{ provider: string; model: string; authorization: string | null }> = [];
       const sleeps: number[] = [];
-      let primaryCalls = 0;
+      let friendPrimaryCalls = 0;
 
       const result = await callLLMWithFallback({
         messages: [{ role: "user", content: "score this" }],
@@ -152,17 +152,18 @@ describe("LLM zero-budget fallback client", () => {
         validateContent: (content) => JSON.parse(content) as { ok: boolean },
         fetchFn: async (url, init) => {
           const body = JSON.parse(String(init?.body)) as { model: string };
+          const provider = String(url).startsWith("https://friend.example") ? "friend" : "nvidia";
           const headers = new Headers(init?.headers);
           requests.push({
-            url: String(url),
+            provider,
             model: body.model,
             authorization: headers.get("authorization")
           });
 
-          if (body.model === "z-ai/glm-5.2") {
-            primaryCalls += 1;
+          if (provider === "friend" && body.model === "z-ai/glm-5.2") {
+            friendPrimaryCalls += 1;
             // Two 429s in a row, then the limit clears — the client must wait it out.
-            if (primaryCalls <= 2) return new Response("rate limited", { status: 429 });
+            if (friendPrimaryCalls === 1) return new Response("rate limited", { status: 429 });
           }
 
           return Response.json({
@@ -174,55 +175,153 @@ describe("LLM zero-budget fallback client", () => {
         }
       });
 
-      // A rate limit is not a model failure, so it stays on the primary model and
-      // succeeds there rather than burning a fallback model on a transient throttle.
-      assert.equal(result.provider, "friend");
+      // Friend has a balance/quota lane; when it throttles, direct NVIDIA keys should
+      // be used before the client waits on Friend to clear.
+      assert.equal(result.provider, "nvidia");
       assert.equal(result.model, "z-ai/glm-5.2");
       assert.deepEqual(
-        requests.map((request) => request.model),
-        ["z-ai/glm-5.2", "z-ai/glm-5.2", "z-ai/glm-5.2"]
+        requests.map((request) => `${request.provider}:${request.model}`),
+        ["friend:z-ai/glm-5.2", "nvidia:z-ai/glm-5.2"]
       );
-      assert.equal(requests.every((request) => request.url.endsWith("/chat/completions")), true);
-      assert.equal(requests.every((request) => request.authorization === "Bearer friend-key"), true);
-      assert.equal(sleeps.length, 2);
+      assert.deepEqual(
+        requests.map((request) => request.authorization),
+        ["Bearer friend-key", "Bearer nvidia-key"]
+      );
+      assert.equal(sleeps.length, 0);
       assert.deepEqual(
         result.callLogs.map((log) => log.errorReason),
-        ["http_429", "http_429", null]
+        ["http_429", null]
       );
       assert.deepEqual(
         result.callLogs.map((log) => log.retryCount),
-        [0, 1, 2]
+        [0, 0]
       );
-      assert.match(result.callLogs[2]?.rawResponse ?? "", /choices/);
+      assert.match(result.callLogs[1]?.rawResponse ?? "", /choices/);
       assert.deepEqual(result.parsed, { ok: true });
     });
   });
 
-  it("gives up on a rate-limited model after AI_MAX_RATE_LIMIT_RETRIES and falls through", async () => {
+  it("waits and retries the full free plan only after Friend and NVIDIA are both saturated", async () => {
+    await withEnv(zeroBudgetEnv(), async () => {
+      const attempts: string[] = [];
+      const sleeps: number[] = [];
+
+      const result = await callLLMWithFallback({
+        messages: [{ role: "user", content: "score this" }],
+        config: getTraeConfig(),
+        validateContent: (content) => JSON.parse(content) as { ok: boolean },
+        plan: [
+          {
+            provider: "friend",
+            model: "z-ai/glm-5.2",
+            baseUrl: "https://friend.example/v1",
+            apiKeys: ["friend-key"]
+          },
+          {
+            provider: "nvidia",
+            model: "z-ai/glm-5.2",
+            baseUrl: "https://integrate.api.nvidia.com/v1",
+            apiKeys: ["nvidia-key"]
+          }
+        ],
+        fetchFn: async (url) => {
+          const provider = String(url).startsWith("https://friend.example") ? "friend" : "nvidia";
+          attempts.push(provider);
+          if (attempts.length <= 2) return new Response("rate limited", { status: 429 });
+          return Response.json({ choices: [{ message: { content: JSON.stringify({ ok: true }) } }] });
+        },
+        sleepFn: async (delayMs) => {
+          sleeps.push(delayMs);
+        }
+      });
+
+      assert.equal(result.provider, "friend");
+      assert.deepEqual(attempts, ["friend", "nvidia", "friend"]);
+      assert.deepEqual(sleeps, [2000]);
+      assert.deepEqual(
+        result.callLogs.map((log) => log.errorReason),
+        ["http_429", "http_429", null]
+      );
+    });
+  });
+
+  it("honors AI_MAX_RATE_LIMIT_RETRIES as a cap on full-plan wait cycles", async () => {
     await withEnv(
       zeroBudgetEnv({ AI_PROVIDER_ORDER: "nvidia", AI_MAX_RATE_LIMIT_RETRIES: "2" }),
       async () => {
         const models: string[] = [];
 
-        const result = await callLLMWithFallback({
-          messages: [{ role: "user", content: "score this" }],
-          config: getTraeConfig(),
-          validateContent: (content) => JSON.parse(content) as { ok: boolean },
-          fetchFn: async (_url, init) => {
-            const body = JSON.parse(String(init?.body)) as { model: string };
-            models.push(body.model);
-            if (body.model === "z-ai/glm-5.2") return new Response("rate limited", { status: 429 });
-            return Response.json({ choices: [{ message: { content: JSON.stringify({ ok: true }) } }] });
-          },
-          sleepFn: async () => undefined
-        });
+        await assert.rejects(
+          callLLMWithFallback({
+            messages: [{ role: "user", content: "score this" }],
+            config: getTraeConfig(),
+            validateContent: (content) => JSON.parse(content) as { ok: boolean },
+            plan: [
+              {
+                provider: "nvidia",
+                model: "z-ai/glm-5.2",
+                baseUrl: "https://integrate.api.nvidia.com/v1",
+                apiKeys: ["nvidia-key"]
+              }
+            ],
+            fetchFn: async (_url, init) => {
+              const body = JSON.parse(String(init?.body)) as { model: string };
+              models.push(body.model);
+              return new Response("rate limited", { status: 429 });
+            },
+            sleepFn: async () => undefined
+          }),
+          (error) => {
+            assert.ok(error instanceof LLMFallbackError);
+            assert.equal(error.callLogs.length, 3);
+            return true;
+          }
+        );
 
-        // Primary tried once + 2 capped retries = 3 attempts, then falls through.
+        // Initial full-plan pass + 2 capped waits = 3 attempts, then fail cleanly.
         assert.equal(models.filter((model) => model === "z-ai/glm-5.2").length, 3);
-        assert.equal(result.provider, "nvidia");
-        assert.equal(result.model, "deepseek-ai/deepseek-v4-pro");
       }
     );
+  });
+
+  it("falls through to NVIDIA when Friend reports a balance-style client error", async () => {
+    await withEnv(zeroBudgetEnv(), async () => {
+      const attempts: string[] = [];
+
+      const result = await callLLMWithFallback({
+        messages: [{ role: "user", content: "score this" }],
+        config: getTraeConfig(),
+        validateContent: (content) => JSON.parse(content) as { ok: boolean },
+        plan: [
+          {
+            provider: "friend",
+            model: "z-ai/glm-5.2",
+            baseUrl: "https://friend.example/v1",
+            apiKeys: ["friend-key"]
+          },
+          {
+            provider: "nvidia",
+            model: "z-ai/glm-5.2",
+            baseUrl: "https://integrate.api.nvidia.com/v1",
+            apiKeys: ["nvidia-key"]
+          }
+        ],
+        fetchFn: async (url) => {
+          const provider = String(url).startsWith("https://friend.example") ? "friend" : "nvidia";
+          attempts.push(provider);
+          if (provider === "friend") return new Response("insufficient balance", { status: 402 });
+          return Response.json({ choices: [{ message: { content: JSON.stringify({ ok: true }) } }] });
+        },
+        sleepFn: async () => undefined
+      });
+
+      assert.equal(result.provider, "nvidia");
+      assert.deepEqual(attempts, ["friend", "nvidia"]);
+      assert.deepEqual(
+        result.callLogs.map((log) => log.errorReason),
+        ["http_402", null]
+      );
+    });
   });
 
   it("falls through all Friend models on invalid JSON before trying NVIDIA", async () => {
