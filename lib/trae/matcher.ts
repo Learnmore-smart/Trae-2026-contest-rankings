@@ -252,6 +252,18 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+async function fetchAllTopicsBySourceType(dc: any, sourceType: "PRELIMINARY" | "SIGNUP"): Promise<TraeTopic[]> {
+  const all: TraeTopic[] = [];
+  const PAGE_SIZE = 1000;
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const res = await getTopicsBySourceType(dc, { sourceType, offset } as any);
+    const topics = (res.data.topics ?? []) as unknown as TraeTopic[];
+    all.push(...topics);
+    if (topics.length < PAGE_SIZE) break;
+  }
+  return all;
+}
+
 export async function runTraeMatching(): Promise<{
   matchedCount: number;
   failedCount: number;
@@ -265,12 +277,10 @@ export async function runTraeMatching(): Promise<{
   let forumLookups = 0;
 
   try {
-    const [preliminaryRes, signupRes] = await Promise.all([
-      getTopicsBySourceType(dc as any, { sourceType: "PRELIMINARY" } as any),
-      getTopicsBySourceType(dc as any, { sourceType: "SIGNUP" } as any)
+    const [preliminaries, signups] = await Promise.all([
+      fetchAllTopicsBySourceType(dc, "PRELIMINARY"),
+      fetchAllTopicsBySourceType(dc, "SIGNUP")
     ]);
-    const preliminaries = (preliminaryRes.data.topics ?? []) as unknown as TraeTopic[];
-    const signups = (signupRes.data.topics ?? []) as unknown as TraeTopic[];
 
     // Growing pool: forum-discovered signups join it so later preliminaries by the
     // same author match via the cheap in-memory path instead of re-hitting the forum.

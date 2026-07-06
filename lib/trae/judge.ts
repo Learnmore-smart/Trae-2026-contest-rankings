@@ -27,7 +27,7 @@ import {
   type TraeTopic
 } from "./types.ts";
 
-export const PROMPT_VERSION = "trae-contest-2026-v5-demo-audit-standards";
+export const PROMPT_VERSION = "trae-contest-2026-v6-demo-audit-standards";
 const JUDGE_BOARD_PAGE_SIZE = 1000;
 
 export type JudgeEvaluatorId = "product" | "technical" | "ux" | "risk";
@@ -307,8 +307,11 @@ export function buildJudgePrompt(
 
 合规/材料风险只作为评分解释参考，不做单独审核页面。重点识别：缺 Demo、缺 TRAE 实践过程、缺 3 张开发截图、缺 Session ID、作品与报名方向不一致、只有概念没有 Demo、赛道/标题/标签不一致、材料不足导致置信度降低。
 Uploaded screenshot evidence can satisfy official ordinary screenshot material requirements. When image vision is available, explicitly use it to judge whether there is at least one Trae usage/development process screenshot and at least one finished Demo/product interface screenshot. Do not require a web Demo URL when uploaded screenshots, download packages, QR codes, or mini-program evidence already show a usable product/demo path.
-Session ID standard: treat Session IDs as binary evidence. If at least one Session ID is detected, do not penalize for fewer than 3 and do not speculate about authenticity.
+Session ID standard: You MUST only check if Session IDs are present. Do NOT analyze, comment on, criticize, or raise any compliance risks about the format, structure, naming convention, or authenticity of the Session IDs (such as claiming they are custom-named, non-standard, or fake). As long as Session IDs are detected, treat it as fully valid evidence and do not speculate or mention any naming/format issues.
+Screenshot standard: All uploaded screenshots/pictures are naturally static images. You MUST NOT criticize, penalize, or raise any compliance risks (such as "截图证据静态化风险") claiming that the screenshot evidence is static, might be design drafts, or might be static displays simply because the image itself is static. As long as the screenshots show the product interface or development process, treat them as valid finished or process evidence.
+Hardware track standard: For the "硬件交互" (Hardware Interaction) track, standard device inputs and sensors such as microphones (麦克风), cameras (摄像头), audio input, and standard phone/computer hardware peripherals are completely valid hardware components. You MUST NOT penalize, raise risks (such as "赛道一致性风险"), or criticize the project for using web-based APIs to interact with microphones/cameras rather than custom embedded systems (like physical boards or robotics). These are fully valid hardware interactions.
 Demo audit standard: first decide whether Demo material exists, then separately state whether web click-through or package verification was performed. Do not call found but unverified Demo evidence missing. Only say "unable to verify interactive core functionality" when no product/demo evidence exists, or when actual image/browser/package evidence shows a static, broken, or non-core product surface.
+If the automated demo browsing fails (e.g. when the crawler/screenshot verification is unsuccessful or not performed successfully for this run), this is a limitation of our rating system's automation crawler, NOT a flaw, risk, or missing material of the contestant's project. You MUST NOT deduct any points, raise any compliance risks (such as "Demo可验证性风险: 自动化浏览失败"), or criticize the contestant for this. Do not speculate that the product might be a fake marketing landing page just because automation failed.
 
 报名匹配信息：
 ${summarizeMatch(match)}

@@ -366,10 +366,11 @@ query GetScrapeCursor($sourceType: TraeSourceType!) @auth(level: NO_ACCESS) {
 }
 
 # ─── Topics by Source Type (pipeline only) ────────────────────────────────────
-query GetTopicsBySourceType($sourceType: TraeSourceType!) @auth(level: NO_ACCESS) {
+query GetTopicsBySourceType($sourceType: TraeSourceType!, $offset: Int = 0) @auth(level: NO_ACCESS) {
   topics(
     where: { sourceType: { eq: $sourceType } }
     limit: 1000
+    offset: $offset
   ) {
     id
     sourceType

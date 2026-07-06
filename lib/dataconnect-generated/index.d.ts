@@ -158,7 +158,85 @@ export interface GetBoardDataData {
 }
 
 export interface GetBoardPageData {
-  topics: GetBoardDataData["topics"];
+  topics: ({
+    id: string;
+    sourceType: TraeSourceType;
+    externalTopicId: string;
+    slug: string;
+    title: string;
+    url: string;
+    authorName: string;
+    authorAvatarUrl?: string | null;
+    track?: string | null;
+    tags?: string[] | null;
+    replyCount?: number | null;
+    viewCount?: number | null;
+    likeCount?: number | null;
+    createdAtExternal?: TimestampString | null;
+    lastActivityAtExternal?: TimestampString | null;
+    scrapedAt: TimestampString;
+    updatedAt: TimestampString;
+    contentText: string;
+    excerpt: string;
+    demoUrl?: string | null;
+    attachmentUrls?: string[] | null;
+    imageUrls?: string[] | null;
+    sessionIds?: string[] | null;
+    traeEvidence?: unknown | null;
+    contentHash: string;
+    status: TraeTopicStatus;
+    totalScore?: number | null;
+    innovationScore?: number | null;
+    practicalityScore?: number | null;
+    completionScore?: number | null;
+    designScore?: number | null;
+    complianceRiskScore?: number | null;
+    directionConsistencyScore?: number | null;
+    confidenceScore?: number | null;
+    competitionLevel?: CompetitionLevel | null;
+    evaluatedAt?: TimestampString | null;
+    evaluations_on_topic: ({
+      id: string;
+      provider?: TraeAiProvider | null;
+      model: string;
+      promptVersion: string;
+      totalScore: number;
+      innovationScore: number;
+      practicalityScore: number;
+      completionScore: number;
+      designScore: number;
+      complianceRiskScore: number;
+      directionConsistencyScore?: number | null;
+      confidenceScore: number;
+      competitionLevel: CompetitionLevel;
+      summary: string;
+      strengths?: string[] | null;
+      weaknesses?: string[] | null;
+      suggestions?: string[] | null;
+      complianceRisks?: string[] | null;
+      dimensionComments?: unknown | null;
+      matchComment?: string | null;
+      inputTokens?: number | null;
+      outputTokens?: number | null;
+      error?: string | null;
+      createdAt: TimestampString;
+    } & Evaluation_Key)[];
+      match_on_preliminaryTopic?: {
+        id: string;
+        preliminaryTopicId: string;
+        signupTopicId?: string | null;
+        preliminaryAuthorName: string;
+        signupAuthorName?: string | null;
+        matchMethod: MatchMethod;
+        matchConfidence: number;
+        titleSimilarity?: number | null;
+        directionConsistencyScore?: number | null;
+        directionConsistencyComment?: string | null;
+        mismatchRisk: MismatchRisk;
+        createdAt: TimestampString;
+        updatedAt: TimestampString;
+      } & Match_Key;
+  } & Topic_Key)[];
 }
 
 export interface GetBoardPageVariables {
@@ -368,6 +446,7 @@ export interface GetTopicsBySourceTypeData {
 
 export interface GetTopicsBySourceTypeVariables {
   sourceType: TraeSourceType;
+  offset?: number | null;
 }
 
 export interface ListRunsData {
@@ -807,3 +886,4 @@ export function getScrapeCursor(vars: GetScrapeCursorVariables, options?: Operat
 export function getTopicsBySourceType(dc: DataConnect, vars: GetTopicsBySourceTypeVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetTopicsBySourceTypeData>>;
 /** Generated Node Admin SDK operation action function for the 'GetTopicsBySourceType' Query. Allow users to pass in custom DataConnect instances. */
 export function getTopicsBySourceType(vars: GetTopicsBySourceTypeVariables, options?: OperationOptions): Promise<ExecuteOperationResponse<GetTopicsBySourceTypeData>>;
+

@@ -71,17 +71,27 @@ function topicToVariables(topic: any) {
   };
 }
 
+async function fetchAllTopicsBySourceType(dc: any, sourceType: "PRELIMINARY" | "SIGNUP"): Promise<any[]> {
+  const all: any[] = [];
+  const PAGE_SIZE = 1000;
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const res = await getTopicsBySourceType(dc, { sourceType, offset } as any);
+    const topics = res.data.topics ?? [];
+    all.push(...topics);
+    if (topics.length < PAGE_SIZE) break;
+  }
+  return all;
+}
+
 async function main() {
   const dc = getDataConnectDb();
   console.log("Fetching all preliminary and signup topics...");
   
-  const [prelimRes, signupRes] = await Promise.all([
-    getTopicsBySourceType(dc, { sourceType: "PRELIMINARY" }),
-    getTopicsBySourceType(dc, { sourceType: "SIGNUP" })
+  const [prelimTopics, signupTopics] = await Promise.all([
+    fetchAllTopicsBySourceType(dc, "PRELIMINARY"),
+    fetchAllTopicsBySourceType(dc, "SIGNUP")
   ]);
   
-  const prelimTopics = prelimRes.data.topics ?? [];
-  const signupTopics = signupRes.data.topics ?? [];
   const allTopics = [...prelimTopics, ...signupTopics];
   
   console.log(`Loaded ${prelimTopics.length} preliminary and ${signupTopics.length} signup topics.`);
