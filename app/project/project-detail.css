@@ -1,1 +1,57 @@
 @import "../contest.css";
+
+/* Score Summary Card on the right of the header */
+.score-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1.25rem 2rem;
+  border-radius: 12px;
+  background: var(--page-bg);
+  border: 1px solid var(--line);
+  min-width: 9rem;
+}
+
+.score-summary__label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.15rem;
+}
+
+.score-summary__value {
+  color: var(--cyan);
+  font-size: 2.75rem;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 0.25rem;
+}
+
+.score-summary__meta {
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Dimension Score Blocks Progress Bars */
+.score-bar-track {
+  width: 100%;
+  height: 6px;
+  background: var(--track-bg);
+  border-radius: 999px;
+  margin-top: 0.75rem;
+  overflow: hidden;
+}
+
+.score-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--cyan);
+  transition: width 0.3s ease;
+}

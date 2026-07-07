@@ -307,7 +307,7 @@ export default function ProjectDetailClient({ id }: { id: string }) {
         {!loading && item ? (
           <div className="mt-8">
             <header className="surface-panel-strong p-6">
-              <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <div className="flex flex-wrap items-center gap-2 text-sm text-slate-400">
                     <span>{item.topic.authorName}</span>
