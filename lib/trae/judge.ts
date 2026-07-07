@@ -874,11 +874,24 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
       };
     });
 
-    const topics = dedupeByTopicTitle(mapped)
+    const filtered = dedupeByTopicTitle(mapped)
       // Never spend LLM calls on deleted/empty posts (no content, demo, images, or session IDs).
       .filter(({ topic }) => !isDeletedOrEmptyTopic(topic))
-      .filter(({ topic, latestEvaluation }) => shouldJudgeTopicForMode(topic, latestEvaluation, mode))
-      .slice(0, max);
+      .filter(({ topic, latestEvaluation }) => shouldJudgeTopicForMode(topic, latestEvaluation, mode));
+
+    // Interleave unjudged topics (never scored / failed) with old-version re-judgments so
+    // both queues progress simultaneously instead of 4000 re-judgments blocking 1910 new ones.
+    const isUnjudged = ({ topic, latestEvaluation }: typeof filtered[number]) =>
+      topic.status === "needs_judging" || topic.status === "judge_error" || !latestEvaluation;
+    const unjudged = filtered.filter(isUnjudged);
+    const rejudge = filtered.filter((item) => !isUnjudged(item));
+    const halfMax = Math.floor(max / 2);
+    const unjudgedTake = Math.min(halfMax, unjudged.length);
+    const rejudgeTake = Math.min(max - unjudgedTake, rejudge.length);
+    const topics = [
+      ...unjudged.slice(0, unjudgedTake),
+      ...rejudge.slice(0, rejudgeTake)
+    ];
 
     await runWithConcurrency(topics, concurrency, async (topicObj) => {
       try {

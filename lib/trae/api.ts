@@ -166,6 +166,12 @@ async function getBoardVersion(): Promise<string> {
     const res = await getLatestRun(dc as any);
     const run = res.data.runs?.[0];
     if (!run) return `none|${Math.floor(Date.now() / 60_000)}`;
+    // While a run is in progress, invalidate every 30 seconds so newly written evaluations
+    // show up on the public board instead of being hidden behind a stale cache keyed to a
+    // forever-RUNNING zombie run.
+    if (run.status === "RUNNING") {
+      return `${run.startedAt}|RUNNING|${Math.floor(Date.now() / 30_000)}`;
+    }
     return `${run.startedAt}|${run.finishedAt ?? ""}|${run.status}`;
   } catch (error) {
     console.error("Failed to get board version from DB, falling back to time-based key:", error);

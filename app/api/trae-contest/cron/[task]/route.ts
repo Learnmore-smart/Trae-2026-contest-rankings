@@ -1,15 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractBearerToken, isValidCronSecret } from "@/lib/trae/auth";
-import { writeBoardSnapshot } from "@/lib/trae/api";
+import { listRuns, writeBoardSnapshot } from "@/lib/trae/api";
 import { judgeChangedTraeTopics } from "@/lib/trae/judge";
 import { runTraeMatching } from "@/lib/trae/matcher";
 import { scrapeAllTraeSources, scrapeTraeSource } from "@/lib/trae/scraper";
 
 export const runtime = "nodejs";
-// Scraping is rate-limited (800ms/host) so a chunked run still needs headroom beyond the
-// default serverless timeout. 60s is valid on all Vercel plans; raise to 300 on Pro and
-// tune TRAE_MAX_TOPIC_DETAILS_PER_RUN so one cron tick fits within it.
-export const maxDuration = 60;
+// Cron is invoked by Cloud Scheduler directly on Cloud Run (not Vercel), so the Vercel
+// maxDuration is advisory only. Cloud Run default timeout is 300s; 80 topics × 5 LLM calls
+// at 16 concurrency finishes well within that.
+export const maxDuration = 300;
+
+const CRON_JUDGE_MAX = 80;
+
+async function hasRecentRunningJudgeRun(): Promise<boolean> {
+  try {
+    const runs = await listRuns(5);
+    const tenMinAgo = Date.now() - 10 * 60 * 1000;
+    return runs.some(
+      (run) =>
+        run.type === "judge" &&
+        run.status === "running" &&
+        Date.parse(run.startedAt) > tenMinAgo
+    );
+  } catch {
+    return false;
+  }
+}
 
 // After any task that mutates board data, refresh the snapshot doc so public reads stay at
 // 1 doc/read instead of re-scanning 5 collections on the next board load. Best-effort: a
@@ -39,14 +56,21 @@ async function runCronTask(task: string): Promise<NextResponse> {
     return NextResponse.json({ ok: true, result });
   }
   if (task === "judge") {
-    const result = await judgeChangedTraeTopics({ mode: "changed" });
+    if (await hasRecentRunningJudgeRun()) {
+      return NextResponse.json({ ok: true, skipped: "judge_already_running" });
+    }
+    const result = await judgeChangedTraeTopics({ mode: "changed", max: CRON_JUDGE_MAX });
     await refreshSnapshot();
     return NextResponse.json({ ok: true, result });
   }
   if (task === "run-all") {
     await scrapeAllTraeSources();
     await runTraeMatching();
-    const result = await judgeChangedTraeTopics({ mode: "changed" });
+    if (await hasRecentRunningJudgeRun()) {
+      await refreshSnapshot();
+      return NextResponse.json({ ok: true, skipped: "judge_already_running" });
+    }
+    const result = await judgeChangedTraeTopics({ mode: "changed", max: CRON_JUDGE_MAX });
     await refreshSnapshot();
     return NextResponse.json({ ok: true, result });
   }
