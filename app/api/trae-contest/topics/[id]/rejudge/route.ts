@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getTopicDetail, writeBoardSnapshot } from "@/lib/trae/api";
+import { writeBoardSnapshot } from "@/lib/trae/api";
 import { rejudgeTopicById } from "@/lib/trae/judge";
 import { normalizeTopicRouteId } from "@/lib/trae/topic-route-id";
 
@@ -11,6 +11,12 @@ export const maxDuration = 60;
 // consensus (several calls against the zero-budget providers) plus DB writes, so it is
 // guarded three ways: a per-topic in-flight lock (no double submit), a per-topic cooldown
 // (no spamming the same work), and a global concurrency cap (no stampede across works).
+//
+// A single re-judge runs ~400s (vision evidence + 4 evaluators + consensus), far over
+// Cloud Run's 60s request timeout, so POST fires the work in the background and returns
+// immediately with { ok: true, started: true }. The client polls GET every few seconds
+// for { running, error }; on running:false it refetches the topic detail. Same pattern
+// as the /run pipeline route.
 const REJUDGE_COOLDOWN_MS = 60_000;
 const MAX_CONCURRENT_REJUDGE = 2;
 const LAST_FINISHED_MAX_ENTRIES = 500;
@@ -18,13 +24,18 @@ const LAST_FINISHED_MAX_ENTRIES = 500;
 interface RejudgeState {
   inFlight: Set<string>;
   lastFinishedAt: Map<string, number>;
+  lastError: Map<string, string | null>;
 }
 
 const globalState = globalThis as typeof globalThis & { __traeRejudge?: RejudgeState };
 
 function getState(): RejudgeState {
   if (!globalState.__traeRejudge) {
-    globalState.__traeRejudge = { inFlight: new Set<string>(), lastFinishedAt: new Map<string, number>() };
+    globalState.__traeRejudge = {
+      inFlight: new Set<string>(),
+      lastFinishedAt: new Map<string, number>(),
+      lastError: new Map<string, string | null>()
+    };
   }
   return globalState.__traeRejudge;
 }
@@ -35,6 +46,41 @@ function pruneLastFinished(state: RejudgeState, now: number): void {
   for (const [key, finishedAt] of state.lastFinishedAt) {
     if (now - finishedAt >= REJUDGE_COOLDOWN_MS) state.lastFinishedAt.delete(key);
   }
+}
+
+async function runRejudgeInBackground(state: RejudgeState, id: string): Promise<void> {
+  try {
+    const result = await rejudgeTopicById(id);
+    if (result.status === "ok") {
+      state.lastError.set(id, null);
+    } else {
+      state.lastError.set(id, result.status);
+    }
+    // Refresh the board snapshot so the leaderboard reflects the new score. Best-effort:
+    // the detail page already reads fresh from the DB, so a snapshot failure is non-fatal.
+    await writeBoardSnapshot().catch((error) => console.error("[trae] writeBoardSnapshot failed:", error));
+  } catch (error) {
+    state.lastError.set(id, error instanceof Error ? error.message : "Pipeline failed.");
+  } finally {
+    // Start the cooldown on both success and failure so a failing provider can't be hammered.
+    const finishedAt = Date.now();
+    pruneLastFinished(state, finishedAt);
+    state.lastFinishedAt.set(id, finishedAt);
+    state.inFlight.delete(id);
+  }
+}
+
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ id: string }> }
+): Promise<NextResponse> {
+  const { id: rawId } = await context.params;
+  const id = normalizeTopicRouteId(decodeURIComponent(rawId));
+  const state = getState();
+  return NextResponse.json({
+    running: state.inFlight.has(id),
+    error: state.lastError.get(id) ?? null
+  });
 }
 
 export async function POST(
@@ -63,31 +109,10 @@ export async function POST(
   }
 
   state.inFlight.add(id);
-  try {
-    const result = await rejudgeTopicById(id);
-    if (result.status === "not_found") {
-      return NextResponse.json({ error: "作品不存在或不是初赛作品。", code: "not_found" }, { status: 404 });
-    }
-    if (result.status === "empty") {
-      return NextResponse.json({ error: "该作品内容为空或已删除，无法评分。", code: "empty" }, { status: 422 });
-    }
+  state.lastError.delete(id);
 
-    // Refresh the board snapshot so the leaderboard reflects the new score. Best-effort:
-    // the detail page already reads fresh from the DB, so a snapshot failure is non-fatal.
-    await writeBoardSnapshot().catch((error) => console.error("[trae] writeBoardSnapshot failed:", error));
+  // Fire-and-forget: response returns immediately, client polls GET for completion.
+  void runRejudgeInBackground(state, id);
 
-    const item = await getTopicDetail(id);
-    return NextResponse.json({ ok: true, item });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "重新评分失败，请稍后再试。", code: "error" },
-      { status: 500 }
-    );
-  } finally {
-    // Start the cooldown on both success and failure so a failing provider can't be hammered.
-    const finishedAt = Date.now();
-    pruneLastFinished(state, finishedAt);
-    state.lastFinishedAt.set(id, finishedAt);
-    state.inFlight.delete(id);
-  }
+  return NextResponse.json({ ok: true, started: true });
 }

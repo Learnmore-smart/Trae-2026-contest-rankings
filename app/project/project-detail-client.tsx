@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink, ShieldAlert, Sparkles, Globe, Sun, Moon, Monitor, RefreshCw, Loader2 } from "lucide-react";
 import { useContestLanguage, type ContestLanguage } from "../i18n";
@@ -37,6 +37,7 @@ const COPY = {
     rejudgeStarted: "评分已经开始，请耐心等待",
     rejudgeSuccess: "评分已更新。",
     rejudgeFailed: "重新评分失败，请稍后再试。",
+    rejudgeTimeout: "评分超时，请稍后再试。",
     rejudgeCooldown: "刚刚已重新评分，请稍后再试。",
     rejudgeBusy: "评分服务繁忙，请稍后再试。",
     rejudgeInFlight: "该作品正在重新评分，请稍候。",
@@ -208,6 +209,8 @@ export default function ProjectDetailClient({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [rejudging, setRejudging] = useState(false);
   const [rejudgeNotice, setRejudgeNotice] = useState<{ tone: "success" | "info" | "error"; text: string } | null>(null);
+  const pollRef = useRef<number | null>(null);
+  const timeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -231,27 +234,88 @@ export default function ProjectDetailClient({ id }: { id: string }) {
     };
   }, [id, t.loadError, t.notFound, t.unknownError]);
 
+  const stopRejudgePolling = useCallback(() => {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (timeoutRef.current !== null) {
+      window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => stopRejudgePolling();
+  }, [stopRejudgePolling]);
+
+  const startRejudgePolling = useCallback(() => {
+    stopRejudgePolling();
+    pollRef.current = window.setInterval(async () => {
+      try {
+        const statusResponse = await fetch(`${API_BASE}/api/trae-contest/topics/${encodeURIComponent(id)}/rejudge`, {
+          cache: "no-store"
+        });
+        const status = (await statusResponse.json().catch(() => null)) as
+          | { running?: boolean; error?: string | null }
+          | null;
+        if (!status || status.running) return;
+        stopRejudgePolling();
+        if (status.error === null || status.error === undefined) {
+          // Re-judge succeeded — refresh the topic detail so the new score shows.
+          try {
+            const detailResponse = await fetch(`${API_BASE}/api/trae-contest/topics/${encodeURIComponent(id)}`, {
+              cache: "no-store"
+            });
+            if (detailResponse.ok) {
+              const freshItem = (await detailResponse.json()) as RankingItem;
+              setItem(freshItem);
+            }
+          } catch {
+            // Best-effort: the re-judge itself succeeded; detail refresh failure is non-fatal.
+          }
+          setRejudgeNotice({ tone: "success", text: t.rejudgeSuccess });
+        } else {
+          const code = status.error === "not_found" || status.error === "empty" ? status.error : "error";
+          setRejudgeNotice({ tone: rejudgeNoticeTone(code), text: rejudgeNoticeText(code, t) });
+        }
+        setRejudging(false);
+      } catch {
+        // Transient network error — keep polling until timeout.
+      }
+    }, 3000);
+    // 10-minute safety timeout: re-judge normally finishes in ~5-7 minutes.
+    timeoutRef.current = window.setTimeout(() => {
+      stopRejudgePolling();
+      setRejudgeNotice({ tone: "error", text: t.rejudgeTimeout });
+      setRejudging(false);
+    }, 10 * 60 * 1000);
+  }, [id, stopRejudgePolling, t.rejudgeSuccess, t.rejudgeTimeout]);
+
   async function handleRejudge() {
     if (rejudging) return;
     setRejudging(true);
     setRejudgeNotice({ tone: "info", text: t.rejudgeStarted });
+    let polling = false;
     try {
       const response = await fetch(`${API_BASE}/api/trae-contest/topics/${encodeURIComponent(id)}/rejudge`, {
         method: "POST"
       });
       const payload = (await response.json().catch(() => null)) as
-        | { ok?: boolean; item?: RankingItem | null; error?: string; code?: string }
+        | { ok?: boolean; started?: boolean; error?: string; code?: string }
         | null;
-      if (response.ok && payload?.item) {
-        setItem(payload.item);
-        setRejudgeNotice({ tone: "success", text: t.rejudgeSuccess });
+      if (response.ok && payload?.started) {
+        polling = true;
+        startRejudgePolling();
         return;
       }
       setRejudgeNotice({ tone: rejudgeNoticeTone(payload?.code), text: rejudgeNoticeText(payload?.code, t) });
     } catch {
       setRejudgeNotice({ tone: "error", text: t.rejudgeFailed });
     } finally {
-      setRejudging(false);
+      if (!polling) {
+        setRejudging(false);
+      }
     }
   }
 
