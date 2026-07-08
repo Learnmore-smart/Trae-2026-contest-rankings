@@ -159,8 +159,8 @@ export function getTraeConfig(): TraeConfig {
     scraperUserAgent:
       process.env.TRAE_SCRAPER_USER_AGENT ??
       "RateMinistere TRAE Contest Rank Bot; contact: noahzh52@gmail.com",
-    adminToken: process.env.TRAE_ADMIN_TOKEN ?? null,
-    cronSecret: process.env.TRAE_CRON_SECRET ?? null,
+    adminToken: (process.env.TRAE_ADMIN_TOKEN ?? "").trim() || null,
+    cronSecret: (process.env.TRAE_CRON_SECRET ?? "").trim() || null,
     maxScrapePagesPerRun: numberFromEnv("TRAE_MAX_SCRAPE_PAGES_PER_RUN", 10),
     maxTopicDetailsPerRun: numberFromEnv("TRAE_MAX_TOPIC_DETAILS_PER_RUN", 100),
     maxJudgePerRun: Math.max(1, Math.floor(numberFromEnv("TRAE_MAX_JUDGE_PER_RUN", DEFAULT_JUDGE_BATCH_MAX))),
