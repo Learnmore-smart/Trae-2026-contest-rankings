@@ -7,11 +7,12 @@ import { scrapeAllTraeSources, scrapeTraeSource } from "@/lib/trae/scraper";
 
 export const runtime = "nodejs";
 // Cron is invoked by Cloud Scheduler directly on Cloud Run (not Vercel), so the Vercel
-// maxDuration is advisory only. Cloud Run default timeout is 300s; 80 topics × 5 LLM calls
-// at 16 concurrency finishes well within that.
-export const maxDuration = 300;
+// maxDuration is advisory only. Cloud Run service timeout must be set to >= 900s to match
+// (gcloud run services update trae-contest-2026 --timeout=900). Cloud Scheduler's
+// attemptDeadline is 900s. 500 topics × ~7 LLM calls at concurrency 16 fits comfortably.
+export const maxDuration = 900;
 
-const CRON_JUDGE_MAX = 80;
+const CRON_JUDGE_MAX = 500;
 
 async function hasRecentRunningJudgeRun(): Promise<boolean> {
   try {
@@ -64,15 +65,33 @@ async function runCronTask(task: string): Promise<NextResponse> {
     return NextResponse.json({ ok: true, result });
   }
   if (task === "run-all") {
-    await scrapeAllTraeSources();
-    await runTraeMatching();
     if (await hasRecentRunningJudgeRun()) {
       await refreshSnapshot();
       return NextResponse.json({ ok: true, skipped: "judge_already_running" });
     }
-    const result = await judgeChangedTraeTopics({ mode: "changed", max: CRON_JUDGE_MAX });
+    // Parallelize like the /run route: start judging already-matched topics immediately
+    // while scraping and matching run in parallel. Then judge again for newly matched topics.
+    // The old sequential approach (scrape → match → judge) wasted most of the timeout on
+    // scraping, leaving little time for judging — causing only ~4 topics graded per day.
+    const halfMax = Math.floor(CRON_JUDGE_MAX / 2);
+    const scrapeAndMatch = (async () => {
+      await scrapeAllTraeSources();
+      await runTraeMatching();
+    })();
+    const firstJudge = judgeChangedTraeTopics({ mode: "changed", max: halfMax }).catch((error) => {
+      console.error("[trae] first judge batch failed:", error);
+      return { evaluatedCount: 0, failedCount: 0 };
+    });
+
+    const [, firstResult] = await Promise.all([scrapeAndMatch, firstJudge]);
+
+    const secondResult = await judgeChangedTraeTopics({ mode: "changed", max: halfMax });
+    const merged = {
+      evaluatedCount: firstResult.evaluatedCount + secondResult.evaluatedCount,
+      failedCount: firstResult.failedCount + secondResult.failedCount
+    };
     await refreshSnapshot();
-    return NextResponse.json({ ok: true, result });
+    return NextResponse.json({ ok: true, result: merged });
   }
   return NextResponse.json({ error: "Unknown cron task." }, { status: 404 });
 }

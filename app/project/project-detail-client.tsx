@@ -97,6 +97,7 @@ const COPY = {
     rejudgeStarted: "Scoring has started. Please wait.",
     rejudgeSuccess: "Score updated.",
     rejudgeFailed: "Re-scoring failed. Please try again later.",
+    rejudgeTimeout: "Re-scoring timed out. Please try again later.",
     rejudgeCooldown: "Just re-scored. Please try again shortly.",
     rejudgeBusy: "Scoring service is busy. Please try again later.",
     rejudgeInFlight: "This project is already being re-scored. Please wait.",
