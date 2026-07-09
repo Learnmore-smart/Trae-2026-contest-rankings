@@ -618,11 +618,18 @@ function phaseMessage(phase: RunPhase, language: ContestLanguage): string {
   return t.running;
 }
 
+// After POST /run kicks off the server-side pipeline, the first RUNNING row can take a few
+// seconds to appear in the runs table (and a poll may land on an instance that knows nothing
+// yet). During this window, ignore "not running" polls instead of silently resetting the
+// button — the old behavior that made the click look like it did nothing.
+const RUN_START_GRACE_MS = 15_000;
+
 function RunButton({ language, onCompleted }: { language: ContestLanguage; onCompleted: () => void }) {
   const t = COPY[language];
   const [status, setStatus] = useState<PipelineStatus | null>(null);
   const pollRef = useRef<number | null>(null);
   const doneTimerRef = useRef<number | null>(null);
+  const graceUntilRef = useRef(0);
   const completedRef = useRef(onCompleted);
   completedRef.current = onCompleted;
 
@@ -652,6 +659,7 @@ function RunButton({ language, onCompleted }: { language: ContestLanguage; onCom
       try {
         const response = await fetch(`${API_BASE}/api/trae-contest/run`, { cache: "no-store" });
         const next = (await response.json()) as PipelineStatus;
+        if (!next.running && Date.now() < graceUntilRef.current) return;
         setStatus(next);
         if (!next.running) {
           stopPolling();
@@ -692,6 +700,7 @@ function RunButton({ language, onCompleted }: { language: ContestLanguage; onCom
 
   const trigger = useCallback(async () => {
     if (status?.running) return;
+    graceUntilRef.current = Date.now() + RUN_START_GRACE_MS;
     setStatus({ running: true, phase: "judge", startedAt: null, finishedAt: null, message: t.judging, error: null });
     try {
       const response = await fetch(`${API_BASE}/api/trae-contest/run`, { method: "POST" });

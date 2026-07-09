@@ -1,16 +1,26 @@
-import { NextResponse } from "next/server";
-import { writeBoardSnapshot } from "@/lib/trae/api";
+import { NextRequest, NextResponse } from "next/server";
+import { setTimeout as sleep } from "node:timers/promises";
+import { listRuns, writeBoardSnapshot } from "@/lib/trae/api";
+import { getTraeConfig } from "@/lib/trae/config";
 import { judgeChangedTraeTopics } from "@/lib/trae/judge";
 import { DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY } from "@/lib/trae/judge-policy";
 import { runTraeMatching } from "@/lib/trae/matcher";
 import { scrapeAllTraeSources } from "@/lib/trae/scraper";
+import type { TraeRun } from "@/lib/trae/types";
 
 export const runtime = "nodejs";
 
 // One public "update now" button drives the whole pipeline (scrape -> match -> judge).
-// The same pipeline also runs automatically on the Vercel cron schedule; this endpoint
+// The same pipeline also runs automatically on the Cloud Scheduler cron; this endpoint
 // is only a manual trigger, so it is intentionally token-free but guarded by a single
 // in-flight lock plus a short cooldown to avoid hammering the public forum.
+//
+// Cloud Run reality check: in-memory state is per-instance, and CPU is throttled once a
+// response is sent. So POST must NOT rely on fire-and-forget background work (it stalls
+// mid-flight), and GET must NOT rely on this process's memory alone (the poll may land on
+// a different instance than the click). Instead, POST self-invokes the cron run-all
+// endpoint — the work then runs inside a request that keeps CPU for the full 900s service
+// timeout — and GET derives a cross-instance status from the persistent runs table.
 
 export type RunPhase = "idle" | "scrape" | "match" | "judge" | "done" | "error";
 
@@ -24,9 +34,28 @@ export interface PipelineStatus {
 }
 
 const COOLDOWN_MS = 30_000;
+// A RUNNING run older than this is a zombie (killed mid-flight); ignore it for status.
+// Must exceed judgeBatchDeadlineMs (690s) so a legit long batch still reads as running.
+const RUNNING_RUN_WINDOW_MS = 15 * 60 * 1000;
+// After the last run finishes, keep reporting "done" to pollers for this long so the
+// client that started the run gets its completion signal (and board refresh) even when
+// the memory that produced the run lives on another instance.
+const DONE_RUN_WINDOW_MS = 2 * 60 * 1000;
+// In-memory "running" older than this is stale (background pipeline died without a
+// finally); fall through to DB status and let POST start a fresh run.
+const STALE_MEMORY_RUNNING_MS = 20 * 60 * 1000;
+// Polling clients hit GET every 2s; cache the runs read briefly so status polls cost
+// at most ~1 Data Connect query per interval regardless of how many tabs are open.
+const RUNS_CACHE_TTL_MS = 2_500;
+// A self-invocation failure within this window means the request never really started
+// (connection refused / 401 / DNS) — fall back to the in-process pipeline. Later
+// failures (e.g. undici's 300s headers timeout outliving the 900s run) mean the work
+// is still running server-side; starting a second pipeline would double-grade.
+const EARLY_INVOKE_FAILURE_MS = 10_000;
 
 interface PipelineState {
   status: PipelineStatus;
+  runsCache?: { at: number; runs: TraeRun[] };
 }
 
 type JudgeBatchResult = Awaited<ReturnType<typeof judgeChangedTraeTopics>>;
@@ -50,6 +79,89 @@ function getState(): PipelineState {
   return globalState.__traePipeline;
 }
 
+function isStaleRunningStatus(status: PipelineStatus): boolean {
+  if (!status.running) return false;
+  const startedAt = status.startedAt ? Date.parse(status.startedAt) : Number.NaN;
+  return !Number.isFinite(startedAt) || Date.now() - startedAt > STALE_MEMORY_RUNNING_MS;
+}
+
+async function readRecentRuns(state: PipelineState): Promise<TraeRun[]> {
+  const now = Date.now();
+  if (state.runsCache && now - state.runsCache.at < RUNS_CACHE_TTL_MS) return state.runsCache.runs;
+  const runs = await listRuns(10);
+  state.runsCache = { at: now, runs };
+  return runs;
+}
+
+const RUN_TYPE_PHASE: Record<TraeRun["type"], RunPhase> = {
+  scrape: "scrape",
+  match: "match",
+  judge: "judge"
+};
+
+const PHASE_MESSAGE: Partial<Record<RunPhase, string>> = {
+  scrape: "正在抓取报名与初赛专区…",
+  match: "正在匹配报名方向…",
+  judge: "正在评分作品…"
+};
+
+/**
+ * Cross-instance pipeline status derived from the persistent runs table. Returns null when
+ * the table says nothing relevant (no fresh RUNNING run, no recent finish), so callers can
+ * fall back to this process's in-memory state.
+ */
+function statusFromRuns(runs: TraeRun[]): PipelineStatus | null {
+  const now = Date.now();
+  const runningRuns = runs.filter(
+    (run) => run.status === "running" && now - Date.parse(run.startedAt) < RUNNING_RUN_WINDOW_MS
+  );
+  if (runningRuns.length > 0) {
+    // listRuns is startedAt DESC: latest run's type decides the phase shown, the oldest
+    // running run anchors startedAt.
+    const phase = RUN_TYPE_PHASE[runningRuns[0].type];
+    return {
+      running: true,
+      phase,
+      startedAt: runningRuns[runningRuns.length - 1].startedAt,
+      finishedAt: null,
+      message: PHASE_MESSAGE[phase] ?? "运行中…",
+      error: null
+    };
+  }
+
+  const finished = runs.find((run) => run.finishedAt !== null);
+  if (!finished || now - Date.parse(finished.finishedAt as string) >= DONE_RUN_WINDOW_MS) return null;
+
+  if (finished.status === "error") {
+    return {
+      running: false,
+      phase: "error",
+      startedAt: finished.startedAt,
+      finishedAt: finished.finishedAt,
+      message: "运行中断，请稍后重试。",
+      error: finished.error ?? "Pipeline failed."
+    };
+  }
+
+  const latestJudge = runs.find((run) => run.type === "judge" && run.finishedAt !== null);
+  return {
+    running: false,
+    phase: "done",
+    startedAt: finished.startedAt,
+    finishedAt: finished.finishedAt,
+    message: `本轮后台运行已完成；最近一批评分 ${latestJudge?.evaluatedCount ?? 0} 个，失败 ${latestJudge?.failedCount ?? 0} 个。`,
+    error: null
+  };
+}
+
+function latestFinishedAtMs(runs: TraeRun[], memory: PipelineStatus): number | null {
+  const candidates = [
+    ...runs.map((run) => (run.finishedAt ? Date.parse(run.finishedAt) : Number.NaN)),
+    memory.finishedAt ? Date.parse(memory.finishedAt) : Number.NaN
+  ].filter((value) => Number.isFinite(value));
+  return candidates.length > 0 ? Math.max(...candidates) : null;
+}
+
 function judgeChangedBatch(): Promise<JudgeBatchResult> {
   return judgeChangedTraeTopics({
     mode: "changed",
@@ -68,6 +180,8 @@ function mergeJudgeResults(results: JudgeBatchResult[]): Pick<JudgeBatchResult, 
   );
 }
 
+// Legacy in-process pipeline: only used when no cron secret is configured (local dev,
+// where the process keeps CPU) or when the cron self-invocation fails to start.
 async function runPipeline(state: PipelineState): Promise<void> {
   const set = (patch: Partial<PipelineStatus>) => {
     state.status = { ...state.status, ...patch };
@@ -116,26 +230,95 @@ async function runPipeline(state: PipelineState): Promise<void> {
   }
 }
 
-export function GET(): NextResponse {
-  return NextResponse.json(getState().status);
+function buildCronRunAllUrl(request: NextRequest): string {
+  const url = new URL(request.url);
+  const forwardedHost = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  const forwardedProto = request.headers.get("x-forwarded-proto");
+  if (forwardedHost) url.host = forwardedHost;
+  if (forwardedProto) url.protocol = `${forwardedProto}:`;
+  // Preserve the basePath prefix by swapping only the route suffix.
+  url.pathname = url.pathname.replace(/\/api\/trae-contest\/run$/, "/api/trae-contest/cron/run-all");
+  url.search = "";
+  return url.toString();
 }
 
-export function POST(): NextResponse {
-  const state = getState();
-  const { status } = state;
+/**
+ * Run the pipeline through the cron run-all endpoint so it executes inside its own request
+ * (full CPU up to the Cloud Run service timeout) instead of as throttled background work.
+ * The secret goes in a header — never the query string — so it stays out of request logs.
+ */
+async function invokeCronRunAll(request: NextRequest, cronSecret: string, state: PipelineState): Promise<void> {
+  const dispatchedAt = Date.now();
+  try {
+    const response = await fetch(buildCronRunAllUrl(request), {
+      method: "POST",
+      headers: { "x-trae-cron-secret": cronSecret },
+      cache: "no-store"
+    });
+    if (!response.ok) throw new Error(`cron run-all responded ${response.status}`);
+    const payload = (await response.json().catch(() => null)) as
+      | { result?: { evaluatedCount?: number; failedCount?: number }; skipped?: string }
+      | null;
+    state.status = {
+      ...state.status,
+      running: false,
+      phase: "done",
+      finishedAt: new Date().toISOString(),
+      message: payload?.skipped
+        ? "后台已有评分批次在运行，本次点击已并入该批次。"
+        : `本轮抓取、匹配、评分已完成；评分 ${payload?.result?.evaluatedCount ?? 0} 个，失败 ${payload?.result?.failedCount ?? 0} 个。`,
+      error: null
+    };
+  } catch (error) {
+    if (Date.now() - dispatchedAt < EARLY_INVOKE_FAILURE_MS) {
+      // The run-all request never started; grade in-process so the click still does work.
+      console.error("[trae] cron run-all self-invocation failed to start; falling back in-process:", error);
+      await runPipeline(state);
+      return;
+    }
+    // Late failure: the fetch died (e.g. client-side headers timeout) but the server-side
+    // run is still going. Release this instance's memory lock and let the runs table drive
+    // status; starting a second pipeline here would double-grade the same topics.
+    console.error("[trae] cron run-all self-invocation lost its response; deferring to runs table:", error);
+    state.status = { ...state.status, running: false, phase: "idle", message: "等待运行。" };
+  }
+}
 
-  if (status.running) {
-    return NextResponse.json(status);
+export async function GET(): Promise<NextResponse> {
+  const state = getState();
+  if (state.status.running && !isStaleRunningStatus(state.status)) {
+    return NextResponse.json(state.status);
   }
 
-  if (status.finishedAt) {
-    const sinceFinish = Date.now() - Date.parse(status.finishedAt);
-    if (Number.isFinite(sinceFinish) && sinceFinish < COOLDOWN_MS) {
-      return NextResponse.json({
-        ...status,
-        message: "刚刚已更新过，请稍后再试。"
-      });
-    }
+  const derived = statusFromRuns(await readRecentRuns(state));
+  if (derived) return NextResponse.json(derived);
+  return NextResponse.json(state.status);
+}
+
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  const state = getState();
+  if (isStaleRunningStatus(state.status)) {
+    state.status = { ...state.status, running: false, phase: "idle", message: "等待运行。" };
+  }
+  if (state.status.running) {
+    return NextResponse.json(state.status);
+  }
+
+  // Cross-instance guards: a run already in flight anywhere reports as running instead of
+  // double-starting, and a run that just finished anywhere still honors the cooldown.
+  const runs = await readRecentRuns(state);
+  const dbStatus = statusFromRuns(runs);
+  if (dbStatus?.running) {
+    return NextResponse.json(dbStatus);
+  }
+
+  const lastFinishedAt = latestFinishedAtMs(runs, state.status);
+  if (lastFinishedAt !== null && Date.now() - lastFinishedAt < COOLDOWN_MS) {
+    return NextResponse.json({
+      ...state.status,
+      running: false,
+      message: "刚刚已更新过，请稍后再试。"
+    });
   }
 
   state.status = {
@@ -147,8 +330,17 @@ export function POST(): NextResponse {
     error: null
   };
 
-  // Fire-and-forget: the response returns immediately and the client polls GET for progress.
-  void runPipeline(state);
+  const config = getTraeConfig();
+  if (config.cronSecret) {
+    // Fire-and-forget the self-invocation; the response returns immediately and clients
+    // poll GET (runs-table backed) for progress. The short sleep lets the outbound request
+    // flush before Cloud Run throttles this instance's CPU post-response.
+    void invokeCronRunAll(request, config.cronSecret, state);
+    await sleep(250);
+  } else {
+    // Local dev: no cron secret, and the process keeps CPU — run in-process as before.
+    void runPipeline(state);
+  }
 
   return NextResponse.json(state.status);
 }

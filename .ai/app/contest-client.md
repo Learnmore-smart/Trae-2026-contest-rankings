@@ -1,6 +1,6 @@
 # app/contest-client.tsx
 
-> Last updated: 2026-06-30 | Protection: STANDARD
+> Last updated: 2026-07-09 | Protection: STANDARD
 
 ## Purpose
 
@@ -38,6 +38,12 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 - 2026-07-02 Codex: Filter/sort/page-size query changes should show ranking skeleton rows while the replacement page loads, but same-query refreshes from run completion or submitted-topic reloads should keep current rows visible.
 - 2026-07-03 Codex: User provided the official TRAE AI Creativity Contest banner at `public/Banner-Trae-contest-2026.jpg`. Add it as an actual landing hero banner image, using the existing `API_BASE` prefix so the asset works with the configured `/trae-contest-2026` base path.
 - 2026-07-03 Codex: Implemented the official banner as a first child of `.landing-hero` using `next/image`, with intrinsic 3000x600 dimensions, priority loading, responsive sizes, and alt text. Existing scoring, ranking, run, and submission controls remain unchanged.
+
+## Bug Fix Plan: Run Button Must Not Silently Reset (2026-07-09)
+
+- Owner reported clicking 开始评分 "似乎没有用". On Cloud Run the status poll can land on a different instance than the click (in-memory pipeline state is per-process), so the first poll reported `running: false, phase: "idle"`; the client called `stopPolling()` and reset the button with zero feedback ~2s after the click.
+- Fix strategy (client half; server half lives in `.ai/app/api/trae-contest/run/route.md`): add `RUN_START_GRACE_MS = 15_000`. `trigger()` stamps `graceUntilRef` before POST; the poll callback ignores `running: false` responses until the grace expires, giving the server-side run time to write its first RUNNING row into the runs table (which now backs GET status across instances).
+- Regression risk: keep the exact `setStatus({ running: true, phase: "judge", ... message: t.judging ... })` trigger line and the cooldown/message rendering asserted by `tests/contest-route-pages.test.ts`. The grace window must not swallow the POST response itself (cooldown/error replies come through the POST path, not the poll path).
 
 ## Bug Fix Plan: Stats Request Must Survive Topic Deadline
 

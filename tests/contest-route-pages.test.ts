@@ -426,6 +426,37 @@ test("public run status reports bounded judging batch counts", () => {
   assert.match(client, /phase === "error" && status\?\.error/);
 });
 
+test("public run button works across Cloud Run instances", () => {
+  const route = read(runRoutePath);
+  const client = read(clientPath);
+
+  // POST must not rely on fire-and-forget background work on Cloud Run: with the cron
+  // secret configured it self-invokes cron run-all so the pipeline runs inside a request
+  // that keeps CPU allocated; the in-process pipeline stays as the local-dev fallback.
+  assert.match(route, /buildCronRunAllUrl\(request\)/);
+  assert.match(route, /\/api\/trae-contest\/cron\/run-all/);
+  assert.match(route, /"x-trae-cron-secret": cronSecret/);
+  assert.match(route, /if \(config\.cronSecret\) \{[\s\S]*?void invokeCronRunAll\(request, config\.cronSecret, state\);[\s\S]*?\} else \{[\s\S]*?void runPipeline\(state\);/);
+  // The secret must never ride in the query string where it would leak into request logs.
+  assert.doesNotMatch(route, /secret=\$\{/);
+
+  // GET must derive a cross-instance status from the persistent runs table so status polls
+  // landing on another instance don't silently reset the button to idle.
+  assert.match(route, /const derived = statusFromRuns\(await readRecentRuns\(state\)\);/);
+  assert.match(route, /run\.status === "running" && now - Date\.parse\(run\.startedAt\) < RUNNING_RUN_WINDOW_MS/);
+  assert.match(route, /listRuns\(10\)/);
+
+  // POST must honor a run already in flight elsewhere (no double start) and the DB cooldown.
+  assert.match(route, /if \(dbStatus\?\.running\) \{\s*return NextResponse\.json\(dbStatus\);/);
+  assert.match(route, /latestFinishedAtMs\(runs, state\.status\)/);
+
+  // The client keeps polling through the start-up window instead of settling on the first
+  // "not running" poll before the run's first RUNNING row is visible.
+  assert.match(client, /const RUN_START_GRACE_MS = 15_000;/);
+  assert.match(client, /graceUntilRef\.current = Date\.now\(\) \+ RUN_START_GRACE_MS;/);
+  assert.match(client, /if \(!next\.running && Date\.now\(\) < graceUntilRef\.current\) return;/);
+});
+
 test("cron judge tasks rejudge changed topics, not only unjudged topics", () => {
   const route = read(cronRoutePath);
 

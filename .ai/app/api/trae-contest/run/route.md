@@ -1,6 +1,6 @@
 # app/api/trae-contest/run/route.ts
 
-> Last updated: 2026-06-30 | Protection: STANDARD
+> Last updated: 2026-07-09 | Protection: STANDARD
 
 ## Purpose
 
@@ -8,9 +8,9 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 
 ## What It Does
 
-- Exposes `GET` for current in-memory pipeline status.
-- Exposes `POST` to start one manual pipeline run, guarded by an in-process lock and cooldown.
-- Runs scraping, matching, and one bounded judging batch in the background, then refreshes the board cache.
+- Exposes `GET` for pipeline status: prefers fresh in-memory state, otherwise derives a cross-instance status from the persistent runs table (`listRuns`).
+- Exposes `POST` to start one manual pipeline run, guarded by an in-process lock, a DB-backed "already running" check, and a cooldown (memory + DB `finishedAt`).
+- On Cloud Run (cron secret configured), POST self-invokes `/api/trae-contest/cron/run-all` with `x-trae-cron-secret` so the work runs inside a request that keeps CPU allocated up to the 900s service timeout. Without a cron secret (local dev), it falls back to the legacy in-process fire-and-forget `runPipeline`.
 
 ## Public API
 
@@ -34,22 +34,37 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 - Regression risk: do not remove the in-flight lock or cooldown; do not start an unbounded hour-long public request.
 - Implemented: `runPipeline()` stores `judgeResult` and includes evaluated/failed counts in the final `done` message.
 
+## Bug Fix Plan: "开始评分" Button Does Nothing On Cloud Run (2026-07-09)
+
+- Symptom: clicking the public 开始评分 button appears to do nothing — the button flips to 运行中 for ~2s, then silently resets; the scored count never moves.
+- Root cause 1 (split-brain status): pipeline status lives only in `globalThis.__traePipeline`, which is per-process. On Cloud Run with >1 instance (or after instance recycling), the POST starts a run on instance A while the 2s GET polls land on instance B, which reports `idle`; the client sees `running: false`, stops polling, and silently resets the button.
+- Root cause 2 (throttled background work): POST fires `void runPipeline(state)` and returns immediately. With Cloud Run request-based billing, instance CPU is throttled to near-zero once the response is sent, so the fire-and-forget scrape → match → judge pipeline stalls or dies mid-flight (the same "zombie RUNNING run" failure mode documented in `lib/trae/judge.md` / `config.ts` for over-deadline cron batches). Nothing actually gets graded from the button.
+- Fix strategy:
+  1. POST self-invokes the existing `/api/trae-contest/cron/run-all` endpoint (using `config.cronSecret` in the `x-trae-cron-secret` header, host taken from the incoming request's forwarded headers). The work then runs inside a normal request that keeps full CPU for up to the 900s Cloud Run timeout and reuses run-all's judge deadlines and `judge_already_running` guard. Local dev (no cron secret) keeps the in-process pipeline.
+  2. GET derives status from the persistent runs table when in-memory state is not an active fresh run: a RUNNING run started within 15 min → running (phase mapped from run type); otherwise a run finished within the last 2 min → done/error with judge counts; otherwise fall back to memory. A short module cache (2.5s) keeps polling from hammering Data Connect.
+  3. POST guards cross-instance: a RUNNING run in the DB → return that running status instead of double-starting; DB `finishedAt` within 30s → cooldown reply.
+  4. Client (`RunButton`): after POST, ignore `running: false` polls for a ~15s grace window so the run-all request has time to write its first RUNNING row before polls can settle the UI.
+- Regression risk: keep the in-flight lock, cooldown, bounded batches, and the exact source shapes asserted by `tests/contest-route-pages.test.ts` (`judgeChangedBatch`, `immediateJudge`, `postMatchJudgeResult`, client trigger `setStatus` line). A stale in-memory `running` (>20 min) must not lock POST forever.
+
 ## Important Notes / NEVER Change
 
 - Do not add admin token requirements to the public button unless the UI is changed to match.
 - Do not put provider secrets or raw model output in this status payload.
+- Do not put the cron secret in a URL query parameter (it would leak into request logs); header only.
 
 ## Bug Fixes
 
 | Date | Bug | Cause | Fix |
 |------|-----|-------|-----|
 | 2026-06-30 | Public run looked like a full scoring pass but only advanced 90 items. | The judge step is intentionally capped per run and the status message hid the cap. | Planned to include per-batch judge counts in the completion message. |
+| 2026-07-09 | 开始评分 button silently did nothing in production. | In-memory status is per-instance (split-brain with multi-instance Cloud Run) and fire-and-forget background work is CPU-throttled after the POST response. | POST self-invokes cron run-all (request-bound CPU); GET derives cross-instance status from the runs table; client adds a post-POST grace window. |
 
 ## Change History
 
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-06-30 | Created route documentation and planned batch-count status fix. | Codex |
+| 2026-07-09 | Documented and fixed the Cloud Run split-brain/no-op button: cron self-invocation + DB-derived status. | Claude |
 
 ## Planned Change: Public Scrape Plus Immediate Judge
 
