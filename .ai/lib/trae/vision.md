@@ -58,6 +58,7 @@ Gathers real visual evidence for judging: describes a topic's post images and ca
 | 2026-07-01 | Implemented explicit Kimi image-review wording for Trae usage screenshots and finished Demo/product screenshots. | Codex |
 | 2026-07-03 | Planned all-image vision coverage so later Trae process screenshots reach Kimi. | Codex |
 | 2026-07-03 | Implemented bounded image batching and combined per-batch summaries. | Codex |
+| 2026-07-08 | Removed `moonshotai/kimi-k2.6` from the vision chain (upstream-deprecated). Vision primary is now `minimaxai/minimax-m3`, fallback `google/gemma-4-31b-it` on both friend and nvidia. Note: Gemma 4 31B vision capability is unverified; if it returns empty/error, vision degrades gracefully to null per the existing no-throw contract. | Claude |
 
 ## Implemented Change: All-Image Vision Batching
 

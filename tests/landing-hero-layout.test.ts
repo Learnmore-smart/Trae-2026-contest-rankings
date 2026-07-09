@@ -87,8 +87,8 @@ test("ranking controls stay compact and cards open details directly", () => {
   assert.match(component, /function NavMenu/);
   assert.match(component, /ariaLabel=\{t\.chooseLanguage\}/);
   assert.match(component, /ariaLabel=\{t\.chooseTheme\}/);
-  assert.match(component, /href="https:\/\/www\.rateministere\.com"/);
-  assert.match(component, /href="https:\/\/www\.rateministere\.com"[\s\S]*className="nav-control focus-ring"[\s\S]*aria-label="Open RateMinistere home"[\s\S]*<Home className="h-4 w-4" \/>/);
+  assert.match(component, /href="https:\/\/trae-2026-contest-rankings-494660453737\.asia-east1\.run\.app"/);
+  assert.match(component, /href="https:\/\/trae-2026-contest-rankings-494660453737\.asia-east1\.run\.app"[\s\S]*className="nav-control focus-ring"[\s\S]*aria-label="Open RateMinistere home"[\s\S]*<Home className="h-4 w-4" \/>/);
   assert.match(component, /className="ranking-filters surface-panel"[\s\S]*<ViewToggle value=\{viewMode\} onChange=\{setViewMode\}/);
   assert.match(component, /const openDetail = \(\) => router\.push\(detailHref\);/);
   assert.match(component, /onClick=\{openDetail\}/);

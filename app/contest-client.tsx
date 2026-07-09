@@ -1291,7 +1291,7 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
             </span>
           </a>
           <a
-            href="https://www.rateministere.com"
+            href="https://trae-2026-contest-rankings-494660453737.asia-east1.run.app"
             className="nav-control focus-ring"
             aria-label="Open RateMinistere home"
           >

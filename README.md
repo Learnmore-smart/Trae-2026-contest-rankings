@@ -1,6 +1,6 @@
 # TRAE AI 创造力大赛第三方 AI 评分榜
 
-https://www.rateministere.com/trae-contest-2026
+https://trae-2026-contest-rankings-494660453737.asia-east1.run.app/trae-contest-2026
 
 公开路径：`/trae-contest-2026`
 
@@ -33,10 +33,10 @@ Provider 顺序：
 
 默认模型：
 
-- Friend/NVIDIA text primary: `z-ai/glm-5.2`
-- Friend/NVIDIA text fallback: `deepseek-ai/deepseek-v4-pro`, `minimaxai/minimax-m3`, `moonshotai/kimi-k2.6`
-- NVIDIA image/vision primary: `moonshotai/kimi-k2.6`（`NVIDIA_IMAGE_MODEL`）
-- NVIDIA image/vision fallback: `minimaxai/minimax-m3`（`NVIDIA_IMAGE_FALLBACK_MODEL`）
+- Friend/NVIDIA text primary: `minimaxai/minimax-m3`
+- Friend/NVIDIA text fallback: `google/gemma-4-31b-it`, `deepseek-ai/deepseek-v4-pro`, `z-ai/glm-5.2`
+- Friend/NVIDIA image/vision primary: `minimaxai/minimax-m3`（`*_IMAGE_MODEL`）
+- Friend/NVIDIA image/vision fallback: `google/gemma-4-31b-it`（`*_IMAGE_FALLBACK_MODEL`）
 
 所有文本评分调用统一走 `callLLMWithFallback()`。遇到 429/5xx/timeout/invalid JSON 会按 `AI_MAX_RETRIES_PER_MODEL` 和指数退避处理，再切换同 provider fallback；Friend 全部失败后才尝试 NVIDIA。所有免费模型不可用或 JSON 无法校验时会记录 `judge_error`，等待下次定时任务重试。
 

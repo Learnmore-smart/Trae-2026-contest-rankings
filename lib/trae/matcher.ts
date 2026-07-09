@@ -1,10 +1,11 @@
 import type { MatchMethod, MismatchRisk, TraeTopic } from "./types.ts";
-import { getDataConnectDb } from "./dataconnect.ts";
+import { getDataConnectDb, withSqlRetry } from "./dataconnect.ts";
 import { getTopicsBySourceType, upsertMatch } from "@trae-contest/dataconnect-generated";
 import { getTraeConfig } from "./config.ts";
 import { fetchTopic, upsertTopic } from "./scraper.ts";
 import { findSignupRefsByUsername, normalizeUsername, resolveAuthorUsername } from "./signup-finder.ts";
 import { finishRun, startRun } from "./runs.ts";
+import { mapWithConcurrency } from "./concurrency.ts";
 
 export interface MatchScore {
   signupTopicId: string | null;
@@ -231,32 +232,11 @@ async function fetchConfirmedSignups(username: string): Promise<TraeTopic[]> {
   return confirmed;
 }
 
-/** Run an async worker over items with a bounded number in flight, preserving order. */
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  worker: (item: T, index: number) => Promise<R>
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let cursor = 0;
-  const runnerCount = Math.min(Math.max(1, limit), items.length || 1);
-  const runners = Array.from({ length: runnerCount }, async () => {
-    for (;;) {
-      const index = cursor;
-      cursor += 1;
-      if (index >= items.length) break;
-      results[index] = await worker(items[index], index);
-    }
-  });
-  await Promise.all(runners);
-  return results;
-}
-
 async function fetchAllTopicsBySourceType(dc: any, sourceType: "PRELIMINARY" | "SIGNUP"): Promise<TraeTopic[]> {
   const all: TraeTopic[] = [];
   const PAGE_SIZE = 1000;
   for (let offset = 0; ; offset += PAGE_SIZE) {
-    const res = await getTopicsBySourceType(dc, { sourceType, offset } as any);
+    const res = await withSqlRetry(() => getTopicsBySourceType(dc, { sourceType, offset } as any));
     const topics = (res.data.topics ?? []) as unknown as TraeTopic[];
     all.push(...topics);
     if (topics.length < PAGE_SIZE) break;
@@ -343,7 +323,7 @@ export async function runTraeMatching(): Promise<{
           }
         }
 
-        await upsertMatch(dc as any, {
+        await withSqlRetry(() => upsertMatch(dc as any, {
           id: preliminary.id,
           preliminaryTopicId: preliminary.id,
           signupTopicId: best.signupTopicId,
@@ -355,7 +335,7 @@ export async function runTraeMatching(): Promise<{
           directionConsistencyScore: best.directionConsistencyScore ?? null,
           directionConsistencyComment: best.directionConsistencyComment ?? null,
           mismatchRisk: mismatchRiskMap[best.mismatchRisk]
-        } as any);
+        } as any));
 
         const matched = Boolean(best.signupTopicId);
         const forumMatched = matched && forumSourcedIds.has(best.signupTopicId as string);

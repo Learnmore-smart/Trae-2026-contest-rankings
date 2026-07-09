@@ -211,7 +211,7 @@ test("ranking and judge candidates filter duplicate topic titles server-side", (
   assert.match(traeApi, /import \{ dedupeByTopicTitle \} from "\.\/dedupe\.ts";/);
   assert.match(traeApi, /items = dedupeByTopicTitle\(items\);[\s\S]*?items = items\.map/);
   assert.match(judge, /import \{ dedupeByTopicTitle \} from "\.\/dedupe\.ts";/);
-  assert.match(judge, /const topics = dedupeByTopicTitle\(mapped\)[\s\S]*?\.filter/);
+  assert.match(judge, /const filtered = dedupeByTopicTitle\(mapped\)[\s\S]*?\.filter/);
 });
 
 test("deleted or empty topics are hidden from ranking and skipped by judge", () => {
@@ -429,8 +429,8 @@ test("public run status reports bounded judging batch counts", () => {
 test("cron judge tasks rejudge changed topics, not only unjudged topics", () => {
   const route = read(cronRoutePath);
 
-  assert.match(route, /task === "judge"[\s\S]*?judgeChangedTraeTopics\(\{ mode: "changed" \}\)/);
-  assert.match(route, /task === "run-all"[\s\S]*?judgeChangedTraeTopics\(\{ mode: "changed" \}\)/);
+  assert.match(route, /task === "judge"[\s\S]*?judgeChangedTraeTopics\(\{ mode: "changed"/);
+  assert.match(route, /task === "run-all"[\s\S]*?judgeChangedTraeTopics\(\{ mode: "changed"/);
   assert.doesNotMatch(route, /judgeChangedTraeTopics\(\{ mode: "unjudged" \}\)/);
 });
 

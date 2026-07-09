@@ -1,4 +1,4 @@
-﻿# lib/trae/judge.ts
+# lib/trae/judge.ts
 
 > Last updated: 2026-07-04 | Protection: STANDARD
 
@@ -17,6 +17,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - Filters duplicate judge candidates by normalized topic title before selecting the run slice, so repeated posts do not consume multiple evaluator teams.
 - Handles 429, timeout, invalid JSON, validation errors, and model fallbacks.
 - Writes SQL `evaluations`, updates denormalized topic scoring fields, and records token usage through Data Connect.
+- Aborts the batch pipeline early when consecutive topics hit systemic LLM failures (≥2 models returning `empty_content_billed` in the fallback chain), preventing a single cron run from burning the entire API budget on a broken endpoint. Records the abort reason in run logs and preserves already-judged topics' scores.
 
 ## Public API
 
@@ -107,6 +108,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | 2026-07-02 | Implemented deleted/empty judge candidate filtering before mode selection. | Codex |
 | 2026-07-02 | Planned changed-mode rejudge detection for edited posts whose topic update is newer than the latest evaluation. | Codex |
 | 2026-07-02 | Implemented changed-mode timestamp comparison without resetting public judged status during scrape. | Codex |
+| 2026-07-08 | Added systemic LLM failure early-abort: `judgeChangedTraeTopics` tracks `consecutiveSystemicFailures`; when 2 consecutive topics return `isSystemicLLMFallbackError`, throws `SystemicLLMFailureError` to stop `runWithConcurrency` and records the abort in `finishRun` logs. | Claude |
 
 ## Bug Fix: Edited Posts Not Rejudged
 

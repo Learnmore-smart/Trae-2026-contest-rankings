@@ -59,6 +59,7 @@ interface ChatCompletionRequestBody {
   temperature: number;
   response_format?: { type: "json_object" };
   reasoning_effort?: "max";
+  chat_template_kwargs?: { enable_thinking: true };
 }
 
 export class LLMFallbackError extends Error {
@@ -69,6 +70,18 @@ export class LLMFallbackError extends Error {
     this.name = "LLMFallbackError";
     this.callLogs = callLogs;
   }
+}
+
+/**
+ * True when a fallback chain failed with ≥2 models returning `empty_content_billed` —
+ * a systemic model/gateway-level failure, not a transient blip. Judge pipeline uses
+ * this to abort early instead of burning the entire cron budget on a broken endpoint.
+ */
+export function isSystemicLLMFallbackError(error: unknown): boolean {
+  return (
+    error instanceof LLMFallbackError &&
+    error.callLogs.filter((log) => log.errorReason === "empty_content_billed").length >= 2
+  );
 }
 
 // One rate limiter per API key. Each key gets its own aiRpmLimit budget, so two
@@ -384,7 +397,13 @@ async function callOneModel<TParsed>({
     const content = extractMessageContent(rawResponse);
     const tokenUsage = extractTokenUsage(rawResponse);
     if (!content) {
-      return failedAttempt(entry, startedAt, retryCount, emptyContentReason(rawResponse), rawResponse, tokenUsage);
+      const reason = emptyContentReason(rawResponse, tokenUsage);
+      if (reason === "empty_content_billed") {
+        console.warn(
+          `[trae-llm] empty_content_billed: provider=${entry.provider} model=${entry.model} input=${tokenUsage.inputTokens} output=${tokenUsage.outputTokens} rawResponse=${truncateDiagnostic(rawResponse, 800)}`
+        );
+      }
+      return failedAttempt(entry, startedAt, retryCount, reason, rawResponse, tokenUsage);
     }
 
     try {
@@ -435,11 +454,20 @@ function buildChatCompletionRequestBody(
     body.reasoning_effort = "max";
   }
 
+  if (entry.provider === "nvidia" && isGemmaModel(entry.model)) {
+    // Gemma thinking toggle; mirrors the NVIDIA integrate API chat_template_kwargs, same provider-gating as DeepSeek.
+    body.chat_template_kwargs = { enable_thinking: true };
+  }
+
   return body;
 }
 
 function isDeepSeekModel(model: string): boolean {
   return model.toLowerCase().startsWith("deepseek-ai/");
+}
+
+function isGemmaModel(model: string): boolean {
+  return model.toLowerCase().startsWith("google/gemma-");
 }
 
 function buildHeaders(apiKey: string): Headers {
@@ -468,10 +496,17 @@ function extractMessageContent(rawResponse: string): string | null {
  * a rate limit so it retries with rate-limit backoff rather than being mislabeled
  * as a malformed model response.
  */
-function emptyContentReason(rawResponse: string): "rate_limited" | "invalid_response" {
+function emptyContentReason(
+  rawResponse: string,
+  tokenUsage: { inputTokens: number; outputTokens: number }
+): "rate_limited" | "empty_content_billed" | "invalid_response" {
   try {
     const json = JSON.parse(rawResponse) as { choices?: unknown };
     if (Array.isArray(json.choices) && json.choices.length === 0) return "rate_limited";
+    // choices 非空但 content 为空 + 已计费 input token → 模型/网关级问题，重试无意义
+    if (Array.isArray(json.choices) && json.choices.length > 0 && tokenUsage.inputTokens > 0) {
+      return "empty_content_billed";
+    }
   } catch {
     return "invalid_response";
   }
@@ -535,6 +570,9 @@ function isRateLimitError(errorReason: string | null): boolean {
   return errorReason === "http_429" || errorReason === "rate_limited";
 }
 
+// empty_content_billed is intentionally NOT retryable: when a model returns 200 OK with
+// input tokens billed but empty content, retrying the same model just wastes tokens —
+// the failure is model/gateway-level, so we advance to the next model immediately.
 function isRetryableError(errorReason: string | null): boolean {
   return (
     isRateLimitError(errorReason) ||
@@ -596,7 +634,7 @@ function appendErrorDetails(parts: string[], error: unknown): void {
   parts.push(String(error));
 }
 
-function truncateDiagnostic(value: string, maxLength = 500): string {
+export function truncateDiagnostic(value: string, maxLength = 500): string {
   const sanitized = value
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/((?:api[_-]?key|access_token|token)=)[^&\s]+/gi, "$1[redacted]")

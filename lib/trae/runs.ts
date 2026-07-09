@@ -1,4 +1,4 @@
-import { getDataConnectDb, nowIso } from "./dataconnect.ts";
+import { getDataConnectDb, nowIso, withSqlRetry } from "./dataconnect.ts";
 import { upsertRun, finishRun as finishRunMutation } from "@trae-contest/dataconnect-generated";
 import type { TraeRun, TraeRunStatus, TraeRunType, TraeSourceType } from "./types.ts";
 
@@ -24,12 +24,12 @@ export async function startRun(type: TraeRunType, sourceType: TraeSourceType | n
   const dc = getDataConnectDb();
   const id = `${type}_${sourceType ?? "all"}_${Date.now()}`;
   const startedAt = nowIso();
-  await upsertRun(dc as any, {
+  await withSqlRetry(() => upsertRun(dc as any, {
     id,
     type: runTypeMap[type],
     sourceType: sourceType ? sourceTypeMap[sourceType] : null,
     status: "RUNNING"
-  } as any);
+  } as any));
   return {
     id,
     type,
@@ -64,7 +64,7 @@ export interface FinishRunPatch {
 
 export async function finishRun(id: string, patch: FinishRunPatch): Promise<void> {
   const dc = getDataConnectDb();
-  await finishRunMutation(dc as any, {
+  await withSqlRetry(() => finishRunMutation(dc as any, {
     id,
     status: runStatusMap[patch.status],
     pagesScanned: patch.pagesScanned ?? null,
@@ -76,5 +76,5 @@ export async function finishRun(id: string, patch: FinishRunPatch): Promise<void
     matchedCount: patch.matchedCount ?? null,
     logs: patch.logs ? patch.logs.slice(-50) : null,
     error: patch.error ?? null
-  } as any);
+  } as any));
 }

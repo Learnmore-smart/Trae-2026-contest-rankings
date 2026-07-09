@@ -7,9 +7,9 @@ import {
   getJudgeEvaluatorProfiles,
   PROMPT_VERSION,
   parseEvaluationJson,
-  runWithConcurrency,
   shouldJudgeTopicForMode
 } from "../lib/trae/judge.ts";
+import { runWithConcurrency } from "../lib/trae/concurrency.ts";
 import { DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY } from "../lib/trae/judge-policy.ts";
 import type { EvaluationOutput, TraeEvaluation, TraeTopic } from "../lib/trae/types.ts";
 
@@ -204,8 +204,8 @@ describe("multi-evaluator judging", () => {
 
   it("surfaces real image and demo vision summaries in the prompt instead of the not-performed disclaimer", () => {
     const prompt = buildJudgePrompt(topic, null, {
-      imageEvidence: { summary: "截图显示一个可交互的待办事项列表界面。", provider: "nvidia", model: "moonshotai/kimi-k2.6" },
-      demoEvidence: { summary: "页面是一个静态营销落地页，没有可操作的产品功能。", provider: "nvidia", model: "moonshotai/kimi-k2.6" }
+      imageEvidence: { summary: "截图显示一个可交互的待办事项列表界面。", provider: "nvidia", model: "minimaxai/minimax-m3" },
+      demoEvidence: { summary: "页面是一个静态营销落地页，没有可操作的产品功能。", provider: "nvidia", model: "minimaxai/minimax-m3" }
     });
 
     assert.match(prompt, /截图显示一个可交互的待办事项列表界面/);
@@ -229,7 +229,7 @@ describe("multi-evaluator judging", () => {
         demoEvidence: {
           summary: "The first screen renders a landing page with one start button.",
           provider: "nvidia",
-          model: "moonshotai/kimi-k2.6",
+          model: "minimaxai/minimax-m3",
           source: "screenshot_proxy",
           auditStatus: "first_screen_only",
           artifactType: "web"
@@ -257,7 +257,7 @@ describe("multi-evaluator judging", () => {
         demoEvidence: {
           summary: "Browser agent clicked the CTA and captured the interactive workflow.",
           provider: "browser-agent",
-          model: "playwright+kimi-k2.6",
+          model: "playwright+minimax-m3",
           source: "browser_agent",
           auditStatus: "browser_verified",
           artifactType: "web"
@@ -274,7 +274,7 @@ describe("multi-evaluator judging", () => {
       imageEvidence: {
         summary: "Trae usage/development process screenshot: yes. Finished Demo/product interface screenshot: yes.",
         provider: "nvidia",
-        model: "moonshotai/kimi-k2.6"
+        model: "minimaxai/minimax-m3"
       },
       demoEvidence: null
     });
@@ -293,7 +293,7 @@ describe("multi-evaluator judging", () => {
       topicId: judgedTopic.id,
       sourceType: "preliminary",
       provider: "nvidia",
-      model: "moonshotai/kimi-k2.6",
+      model: "minimaxai/minimax-m3",
       promptVersion: PROMPT_VERSION,
       rawModelResponse: "{}",
       error: null,
@@ -323,7 +323,7 @@ describe("multi-evaluator judging", () => {
       topicId: editedTopic.id,
       sourceType: "preliminary",
       provider: "nvidia",
-      model: "moonshotai/kimi-k2.6",
+      model: "minimaxai/minimax-m3",
       promptVersion: PROMPT_VERSION,
       rawModelResponse: "{}",
       error: null,
@@ -372,8 +372,8 @@ describe("multi-evaluator judging", () => {
         rawContent: JSON.stringify(validPayload)
       })),
       {
-        imageEvidence: { summary: "图片显示营销图，非产品截图。", provider: "nvidia", model: "moonshotai/kimi-k2.6" },
-        demoEvidence: { summary: "Demo 是一个静态落地页。", provider: "nvidia", model: "moonshotai/kimi-k2.6" }
+        imageEvidence: { summary: "图片显示营销图，非产品截图。", provider: "nvidia", model: "minimaxai/minimax-m3" },
+        demoEvidence: { summary: "Demo 是一个静态落地页。", provider: "nvidia", model: "minimaxai/minimax-m3" }
       }
     );
 

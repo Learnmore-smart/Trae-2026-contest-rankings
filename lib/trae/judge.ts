@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
+import { runWithConcurrency } from "./concurrency.ts";
 import { getTraeConfig } from "./config.ts";
-import { getDataConnectDb, isMissingDataConnectOperationError, nowIso } from "./dataconnect.ts";
-import { callLLMWithFallback, LLMFallbackError } from "./llm.ts";
+import { getDataConnectDb, isMissingDataConnectOperationError, nowIso, withSqlRetry } from "./dataconnect.ts";
+import { callLLMWithFallback, isSystemicLLMFallbackError, LLMFallbackError } from "./llm.ts";
 import { finishRun, startRun } from "./runs.ts";
 import { auditDemoArtifact } from "./demo-audit.ts";
 import { gatherVisualEvidence, type TopicVisualEvidence } from "./vision.ts";
@@ -29,6 +30,18 @@ import {
 
 export const PROMPT_VERSION = "trae-contest-2026-v6-demo-audit-standards";
 const JUDGE_BOARD_PAGE_SIZE = 1000;
+
+/**
+ * Raised inside a judge concurrency worker once `consecutiveSystemicFailures` hits
+ * the threshold, so the worker rejects and the outer runWithConcurrency wrapper can
+ * abort the batch instead of burning the whole cron budget on a broken LLM endpoint.
+ */
+class SystemicLLMFailureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SystemicLLMFailureError";
+  }
+}
 
 export type JudgeEvaluatorId = "product" | "technical" | "ux" | "risk";
 
@@ -705,21 +718,21 @@ async function recordTokenUsage(callLogs: TraeLLMCallLog[]): Promise<void> {
   if (!totals.size) return;
   for (const [key, usage] of totals) {
     const id = `usage_${Date.now()}_${createHash("sha256").update(key).digest("hex").slice(0, 10)}`;
-    await upsertModelTokenUsage(dc as any, {
+    await withSqlRetry(() => upsertModelTokenUsage(dc as any, {
       id,
       provider: providerMap[usage.provider],
       model: usage.model,
       input: usage.input,
       output: usage.output
-    } as any);
+    } as any));
   }
 }
 
 /** Store a successful evaluation and flip the topic to JUDGED. Shared by the batch worker and the single-topic re-judge. */
 async function persistJudgedTopic(dc: unknown, topicId: string, evaluation: TraeEvaluation): Promise<void> {
   await recordTokenUsage(evaluation.llmCallLogs ?? []);
-  await upsertEvaluation(dc as any, toUpsertEvaluationVariables(evaluation));
-  await updateTopicEvaluationState(dc as any, {
+  await withSqlRetry(() => upsertEvaluation(dc as any, toUpsertEvaluationVariables(evaluation)));
+  await withSqlRetry(() => updateTopicEvaluationState(dc as any, {
     id: topicId,
     status: "JUDGED",
     totalScore: evaluation.totalScore,
@@ -731,7 +744,7 @@ async function persistJudgedTopic(dc: unknown, topicId: string, evaluation: Trae
     directionConsistencyScore: evaluation.directionConsistencyScore ?? null,
     confidenceScore: evaluation.confidenceScore,
     competitionLevel: competitionLevelMap[evaluation.competitionLevel]
-  } as any);
+  } as any));
 }
 
 export interface JudgeOptions {
@@ -741,27 +754,6 @@ export interface JudgeOptions {
 }
 
 export type JudgeMode = "unjudged" | "changed" | "low-confidence";
-
-export async function runWithConcurrency<T>(
-  items: readonly T[],
-  concurrency: number,
-  worker: (item: T, index: number) => Promise<void>
-): Promise<void> {
-  if (items.length === 0) return;
-
-  const workerCount = Math.min(items.length, Math.max(1, Math.floor(concurrency)));
-  let nextIndex = 0;
-
-  async function runWorker(): Promise<void> {
-    while (nextIndex < items.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      await worker(items[index], index);
-    }
-  }
-
-  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
-}
 
 function normalizeJudgeConcurrency(value: number | undefined, max: number): number {
   const parsed = Math.floor(value ?? 1);
@@ -777,12 +769,12 @@ function isTopicNewerThanEvaluation(topic: TraeTopic, latestEvaluation: TraeEval
 }
 
 async function fetchJudgeBoardPage(dc: unknown, offset: number): Promise<GetBoardPageData["topics"]> {
-  const res = await getBoardPageQuery(dc as any, { limit: JUDGE_BOARD_PAGE_SIZE, offset } as any);
+  const res = await withSqlRetry(() => getBoardPageQuery(dc as any, { limit: JUDGE_BOARD_PAGE_SIZE, offset } as any));
   return res.data.topics ?? [];
 }
 
 async function fetchLegacyJudgeBoardData(dc: unknown): Promise<GetBoardPageData["topics"]> {
-  const res = await getBoardDataQuery(dc as any);
+  const res = await withSqlRetry(() => getBoardDataQuery(dc as any));
   return res.data.topics ?? [];
 }
 
@@ -893,113 +885,156 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
       ...rejudge.slice(0, rejudgeTake)
     ];
 
-    await runWithConcurrency(topics, concurrency, async (topicObj) => {
-      try {
-        const evaluation = await judgeOneTopic(topicObj.topic, topicObj.match);
-        await persistJudgedTopic(dc, topicObj.topic.id, evaluation);
-        evaluatedCount += 1;
-      } catch (error) {
-        failedCount += 1;
-        const llmCallLogs = error instanceof LLMFallbackError ? error.callLogs : [];
+    // Shared across all concurrency workers. Two consecutive systemic LLM failures
+    // (empty_content_billed across the whole fallback chain) means the model/gateway is
+    // broken, not a transient blip — abort the batch instead of burning the cron budget.
+    let consecutiveSystemicFailures = 0;
+    let systemicAbortReason: string | null = null;
 
-        // A transient LLM failure (rate limit / quota / timeout / bad JSON) must NEVER
-        // discard a topic's existing valid score. If this topic was already successfully
-        // judged, keep its prior JUDGED evaluation intact and only count the failed
-        // re-judge attempt. Without this guard, a quota outage during a "changed" re-judge
-        // steadily flips good topics to JUDGE_ERROR (totalScore -1) and bleeds the public
-        // "已评分" count downward. Only genuinely unscored topics (needs_judging /
-        // judge_error / never scored) get downgraded to JUDGE_ERROR so the next run retries.
-        await recordTokenUsage(llmCallLogs);
+    try {
+      await runWithConcurrency(topics, concurrency, async (topicObj) => {
+        try {
+          const evaluation = await judgeOneTopic(topicObj.topic, topicObj.match);
+          await persistJudgedTopic(dc, topicObj.topic.id, evaluation);
+          evaluatedCount += 1;
+        } catch (error) {
+          failedCount += 1;
+          const llmCallLogs = error instanceof LLMFallbackError ? error.callLogs : [];
 
-        const hadValidScore =
-          topicObj.topic.status === "judged" &&
-          typeof topicObj.latestEvaluation?.totalScore === "number" &&
-          topicObj.latestEvaluation.totalScore >= 0;
-        if (hadValidScore) return;
+          // A transient LLM failure (rate limit / quota / timeout / bad JSON) must NEVER
+          // discard a topic's existing valid score. If this topic was already successfully
+          // judged, keep its prior JUDGED evaluation intact and only count the failed
+          // re-judge attempt. Without this guard, a quota outage during a "changed" re-judge
+          // steadily flips good topics to JUDGE_ERROR (totalScore -1) and bleeds the public
+          // "已评分" count downward. Only genuinely unscored topics (needs_judging /
+          // judge_error / never scored) get downgraded to JUDGE_ERROR so the next run retries.
+          await recordTokenUsage(llmCallLogs);
 
-        const errorText = error instanceof Error ? error.message : String(error);
-        const lastCallLog = llmCallLogs.at(-1);
-        const failedPrompt = buildJudgePrompt(topicObj.topic, topicObj.match);
-        const failedTokens = tokensFromLogs(llmCallLogs);
+          // Systemic LLM failure early-abort: when the fallback chain keeps returning
+          // 200 OK with billed input tokens but empty content (empty_content_billed),
+          // retrying more topics just wastes tokens. Track consecutive systemic failures
+          // across workers and abort once two stack up. The hadValidScore guard below
+          // still runs for non-systemic failures, so existing valid scores are never
+          // discarded; a systemic throw skips the JUDGE_ERROR downgrade entirely, leaving
+          // the topic's prior state untouched for the next run.
+          if (isSystemicLLMFallbackError(error)) {
+            consecutiveSystemicFailures += 1;
+            if (consecutiveSystemicFailures >= 2) {
+              throw new SystemicLLMFailureError(
+                "pipeline aborted due to systemic LLM failure (2 consecutive topics with empty_content_billed)"
+              );
+            }
+          } else {
+            consecutiveSystemicFailures = 0;
+          }
 
-        await updateTopicEvaluationState(dc as any, {
-          id: topicObj.topic.id,
-          status: "JUDGE_ERROR",
-          totalScore: -1,
-          innovationScore: -1,
-          practicalityScore: -1,
-          completionScore: -1,
-          designScore: -1,
-          complianceRiskScore: -1,
-          directionConsistencyScore: null,
-          confidenceScore: -1,
-          competitionLevel: null
-        } as any);
+          const hadValidScore =
+            topicObj.topic.status === "judged" &&
+            typeof topicObj.latestEvaluation?.totalScore === "number" &&
+            topicObj.latestEvaluation.totalScore >= 0;
+          if (hadValidScore) return;
 
-        const failedEvaluation: TraeEvaluation = {
-          id: `${topicObj.topic.id}_${Date.now()}_error`,
-          topicId: topicObj.topic.id,
-          sourceType: "preliminary",
-          provider: lastCallLog?.provider ?? null,
-          model: lastCallLog?.model ?? "unknown",
-          promptVersion: PROMPT_VERSION,
-          totalScore: 0,
-          innovationScore: 0,
-          practicalityScore: 0,
-          completionScore: 0,
-          designScore: 0,
-          complianceRiskScore: 10,
-          directionConsistencyScore: null,
-          confidenceScore: 0,
-          competitionLevel: "较弱",
-          summary: "评分失败，等待重试。",
-          strengths: [],
-          weaknesses: ["模型调用或 JSON 校验失败"],
-          suggestions: ["稍后重试评分"],
-          complianceRisks: [],
-          dimensionComments: {
-            innovation: "未评分",
-            practicality: "未评分",
-            completion: "未评分",
-            design: "未评分"
-          },
-          matchComment: null,
-          promptText: failedPrompt,
-          systemPrompt: JUDGE_SYSTEM_PROMPT,
-          inputTokens: failedTokens.inputTokens,
-          outputTokens: failedTokens.outputTokens,
-          rawModelResponse: lastCallLog?.rawResponse ?? "",
-          llmCallLogs,
-          error: errorText,
-          createdAt: nowIso()
-        };
+          const errorText = error instanceof Error ? error.message : String(error);
+          const lastCallLog = llmCallLogs.at(-1);
+          const failedPrompt = buildJudgePrompt(topicObj.topic, topicObj.match);
+          const failedTokens = tokensFromLogs(llmCallLogs);
 
-        const failedEvaluationInput = toUpsertEvaluationVariables(failedEvaluation);
-        await upsertEvaluation(dc as any, {
-          ...failedEvaluationInput,
-          provider: failedEvaluation.provider ? providerMap[failedEvaluation.provider] : null,
-          competitionLevel: competitionLevelMap[failedEvaluation.competitionLevel],
-          strengths: [],
-          weaknesses: ["模型调用或 JSON 校验失败"],
-          suggestions: ["稍后重试评分"],
-          complianceRisks: [],
-          llmCallLogs,
-          dimensionComments: failedEvaluation.dimensionComments,
-          promptText: failedPrompt,
-          systemPrompt: JUDGE_SYSTEM_PROMPT,
-          inputTokens: failedTokens.inputTokens,
-          outputTokens: failedTokens.outputTokens,
-          matchComment: null,
-          error: errorText
-        } as any);
+          await withSqlRetry(() => updateTopicEvaluationState(dc as any, {
+            id: topicObj.topic.id,
+            status: "JUDGE_ERROR",
+            totalScore: -1,
+            innovationScore: -1,
+            practicalityScore: -1,
+            completionScore: -1,
+            designScore: -1,
+            complianceRiskScore: -1,
+            directionConsistencyScore: null,
+            confidenceScore: -1,
+            competitionLevel: null
+          } as any));
+
+          const failedEvaluation: TraeEvaluation = {
+            id: `${topicObj.topic.id}_${Date.now()}_error`,
+            topicId: topicObj.topic.id,
+            sourceType: "preliminary",
+            provider: lastCallLog?.provider ?? null,
+            model: lastCallLog?.model ?? "unknown",
+            promptVersion: PROMPT_VERSION,
+            totalScore: 0,
+            innovationScore: 0,
+            practicalityScore: 0,
+            completionScore: 0,
+            designScore: 0,
+            complianceRiskScore: 10,
+            directionConsistencyScore: null,
+            confidenceScore: 0,
+            competitionLevel: "较弱",
+            summary: "评分失败，等待重试。",
+            strengths: [],
+            weaknesses: ["模型调用或 JSON 校验失败"],
+            suggestions: ["稍后重试评分"],
+            complianceRisks: [],
+            dimensionComments: {
+              innovation: "未评分",
+              practicality: "未评分",
+              completion: "未评分",
+              design: "未评分"
+            },
+            matchComment: null,
+            promptText: failedPrompt,
+            systemPrompt: JUDGE_SYSTEM_PROMPT,
+            inputTokens: failedTokens.inputTokens,
+            outputTokens: failedTokens.outputTokens,
+            rawModelResponse: lastCallLog?.rawResponse ?? "",
+            llmCallLogs,
+            error: errorText,
+            createdAt: nowIso()
+          };
+
+          const failedEvaluationInput = toUpsertEvaluationVariables(failedEvaluation);
+          await withSqlRetry(() => upsertEvaluation(dc as any, {
+            ...failedEvaluationInput,
+            provider: failedEvaluation.provider ? providerMap[failedEvaluation.provider] : null,
+            competitionLevel: competitionLevelMap[failedEvaluation.competitionLevel],
+            strengths: [],
+            weaknesses: ["模型调用或 JSON 校验失败"],
+            suggestions: ["稍后重试评分"],
+            complianceRisks: [],
+            llmCallLogs,
+            dimensionComments: failedEvaluation.dimensionComments,
+            promptText: failedPrompt,
+            systemPrompt: JUDGE_SYSTEM_PROMPT,
+            inputTokens: failedTokens.inputTokens,
+            outputTokens: failedTokens.outputTokens,
+            matchComment: null,
+            error: errorText
+          } as any));
+        }
+      });
+    } catch (error) {
+      // A SystemicLLMFailureError means the batch was intentionally aborted; record the
+      // reason and fall through to finishRun instead of rethrowing so the run is still
+      // finalized with the counts accumulated so far. Any other error is unexpected and
+      // propagates to the outer catch for the normal error-handling path.
+      if (error instanceof SystemicLLMFailureError) {
+        systemicAbortReason = error.message;
+      } else {
+        throw error;
       }
-    });
+    }
 
     await finishRun(run.id, {
-      status: failedCount > 0 ? "partial" : "success",
+      status: systemicAbortReason !== null
+        ? "error"
+        : failedCount > 0
+          ? "partial"
+          : "success",
       evaluatedCount,
       failedCount,
-      logs: [`Evaluated ${evaluatedCount} topics; ${failedCount} failures; concurrency ${concurrency}.`]
+      logs: [
+        `Evaluated ${evaluatedCount} topics; ${failedCount} failures; concurrency ${concurrency}.`,
+        ...(systemicAbortReason !== null ? [systemicAbortReason] : [])
+      ]
     });
     return { evaluatedCount, failedCount };
   } catch (error) {
@@ -1048,7 +1083,7 @@ function mapDbMatchForJudge(match: any): TraeMatch | null {
  */
 export async function rejudgeTopicById(id: string): Promise<RejudgeResult> {
   const dc = getDataConnectDb();
-  const res = await getTopicDetailQuery(dc as any, { id });
+  const res = await withSqlRetry(() => getTopicDetailQuery(dc as any, { id }));
   const dbTopic = res.data.topic;
   if (!dbTopic || dbTopic.sourceType !== "PRELIMINARY") return { status: "not_found" };
 

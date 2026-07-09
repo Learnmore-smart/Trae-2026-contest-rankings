@@ -2,7 +2,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import * as cheerio from "cheerio";
 import { getTraeConfig } from "./config.ts";
 import { extractTopicSignals, getContentHash, htmlToText, normalizeWhitespace } from "./extractors.ts";
-import { getDataConnectDb, nowIso } from "./dataconnect.ts";
+import { getDataConnectDb, nowIso, withSqlRetry } from "./dataconnect.ts";
+import { mapWithConcurrency } from "./concurrency.ts";
 import { getTopicDetail, getScrapeCursor, upsertScrapeCursor, upsertTopic as upsertTopicMutation, updateTopicEvaluationState } from "@trae-contest/dataconnect-generated";
 import { finishRun, startRun } from "./runs.ts";
 import type { TraeScrapeCursor, TraeSourceType, TraeTopic } from "./types.ts";
@@ -627,12 +628,12 @@ function topicToVariables(topic: TraeTopic, status: keyof typeof topicStatusMap)
 
 export async function upsertTopic(topic: TraeTopic): Promise<"created" | "updated" | "unchanged"> {
   const dc = getDataConnectDb();
-  const existingRes = await getTopicDetail(dc as any, { id: topic.id } as any);
+  const existingRes = await withSqlRetry(() => getTopicDetail(dc as any, { id: topic.id } as any));
   const existing = existingRes.data.topic;
 
   if (!existing) {
-    await upsertTopicMutation(dc as any, topicToVariables(topic, topic.status) as any);
-    await updateTopicEvaluationState(dc as any, {
+    await withSqlRetry(() => upsertTopicMutation(dc as any, topicToVariables(topic, topic.status) as any));
+    await withSqlRetry(() => updateTopicEvaluationState(dc as any, {
       id: topic.id,
       status: topic.sourceType === "preliminary" ? "NEEDS_JUDGING" : "SCRAPED",
       totalScore: -1,
@@ -644,7 +645,7 @@ export async function upsertTopic(topic: TraeTopic): Promise<"created" | "update
       directionConsistencyScore: null,
       confidenceScore: -1,
       competitionLevel: null
-    } as any);
+    } as any));
     return "created";
   }
 
@@ -653,7 +654,7 @@ export async function upsertTopic(topic: TraeTopic): Promise<"created" | "update
   }
 
   const updatedStatus = nextScrapedTopicStatus(topic.sourceType, existing.status);
-  await upsertTopicMutation(dc as any, topicToVariables(topic, updatedStatus) as any);
+  await withSqlRetry(() => upsertTopicMutation(dc as any, topicToVariables(topic, updatedStatus) as any));
   return "updated";
 }
 
@@ -759,19 +760,17 @@ export async function scrapeTraeSource(sourceType: TraeSourceType, options: Scra
     const dc = getDataConnectDb();
     const existingTopics = new Map<string, any>();
 
-    await Promise.all(
-      refs.map(async (ref) => {
-        const id = `${sourceType}_${ref.externalTopicId}`;
-        try {
-          const res = await getTopicDetail(dc as any, { id } as any);
-          if (res.data.topic) {
-            existingTopics.set(id, res.data.topic);
-          }
-        } catch {
-          // Ignore read error, we'll just fetch detail
+    await mapWithConcurrency(refs, 8, async (ref) => {
+      const id = `${sourceType}_${ref.externalTopicId}`;
+      try {
+        const res = await withSqlRetry(() => getTopicDetail(dc as any, { id } as any));
+        if (res.data.topic) {
+          existingTopics.set(id, res.data.topic);
         }
-      })
-    );
+      } catch {
+        // Ignore read error, we'll just fetch detail
+      }
+    });
 
     for (const ref of refs) {
       const id = `${sourceType}_${ref.externalTopicId}`;

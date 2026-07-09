@@ -1,4 +1,4 @@
-﻿# lib/trae/llm.ts
+# lib/trae/llm.ts
 
 > Last updated: 2026-07-04 | Protection: STANDARD
 
@@ -22,6 +22,11 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 - `responseFormat` option (default `"json_object"`) controls whether `response_format: {type: "json_object"}` is sent; vision calls use `"text"` since descriptions are prose, not schema-bound JSON.
 - `callVisionLLMWithFallback()` reuses the same retry/fallback loop but scopes the plan to `buildVisionLLMFallbackPlan()` (Friend vision models first, then NVIDIA; deduped by `provider:model`) and opts out of unlimited rate-limit waiting because vision is best-effort.
 - Enforces per-API-key request-start rate limiters from `AI_RPM_LIMIT` before each real model attempt; two NVIDIA keys at 40 rpm each produce 80 rpm total direct NVIDIA capacity.
+- Classifies empty-content HTTP 200 responses into three modes: `rate_limited` (empty choices array, NVIDIA soft-429), `empty_content_billed` (choices non-empty + content null + input tokens > 0, model/gateway-level failure), and `invalid_response` (other).
+- Does NOT retry `empty_content_billed` on the same model — advances to the next model immediately, since this failure mode is model/gateway-level and retrying only wastes billed input tokens.
+- Emits a `[trae-llm] empty_content_billed:` console warning with provider/model/token counts and a sanitized rawResponse summary when this mode is detected, for fast grep-based diagnosis.
+- Exports `isSystemicLLMFallbackError(error)` — true when an `LLMFallbackError`'s callLogs contain ≥2 `empty_content_billed` entries, used by the judge pipeline to abort early on systemic model/gateway outages.
+- Exports `truncateDiagnostic(value, maxLength)` for reuse by the admin health-check endpoint.
 
 ## Public API
 
@@ -31,6 +36,8 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 | `buildLLMFallbackPlan` | function | Produces the ordered text-model provider/model plan used by the client. |
 | `callVisionLLMWithFallback` | function | Same retry/fallback semantics, scoped to vision-capable models, text response format. |
 | `buildVisionLLMFallbackPlan` | function | Produces the ordered vision-model plan: Friend image + fallback models, then NVIDIA image + fallback models, deduped by `provider:model`. |
+| `isSystemicLLMFallbackError` | function | True when a fallback chain failed with ≥2 `empty_content_billed` model attempts — a systemic model/gateway outage, not a transient blip. |
+| `truncateDiagnostic` | function | Sanitizes API keys/tokens and truncates a string to a max length for safe diagnostic logging. |
 
 ## Dependencies
 
@@ -79,6 +86,8 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 | 2026-07-04 | Implemented sanitized LLM failure summaries for local CLI diagnostics. | Codex |
 | 2026-07-04 | Implemented per-key LLM pacing, multi-key NVIDIA rotation, and unlimited judge rate-limit retries with a vision opt-out. | Claude/Codex |
 | 2026-07-06 | Planned provider-aware rate-limit rotation so Friend throttles do not block NVIDIA key capacity before the client waits. | Codex |
+| 2026-07-08 | Removed `moonshotai/kimi-k2.6` from all chains (upstream-deprecated). New text order is MiniMax M3 → Gemma 4 31B → DeepSeek V4 Pro → GLM 5.2 on both providers. Added `chat_template_kwargs: { enable_thinking: true }` for NVIDIA-side `google/gemma-*` models, mirroring the DeepSeek `reasoning_effort: "max"` provider gating. Vision chain is now MiniMax M3 → Gemma 4 31B on both providers. | Claude |
+| 2026-07-08 | Added `empty_content_billed` error classification (HTTP 200 + input tokens billed + empty content); skip same-model retry for this mode; emit console diagnostic; export `isSystemicLLMFallbackError` and `truncateDiagnostic` for judge pipeline early-abort and admin health-check. | Claude |
 ## Change Plan: Friend And NVIDIA Only
 
 - 2026-07-03 Codex: Remove REMOVED_PROVIDER from the provider config map, fallback plan, request option plumbing, and header builder.

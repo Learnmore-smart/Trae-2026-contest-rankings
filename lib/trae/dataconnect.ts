@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { applicationDefault, cert, getApps, initializeApp, type ServiceAccount } from "firebase-admin/app";
 import { getDataConnect, type DataConnect } from "firebase-admin/data-connect";
 import { connectorConfig } from "@trae-contest/dataconnect-generated";
@@ -21,6 +22,64 @@ export function isMissingDataConnectOperationError(error: unknown, operationName
     normalized.includes("not found") &&
     message.includes(`"${operationName}"`)
   );
+}
+
+/**
+ * 判定错误是否为 Data Connect / Cloud SQL 的瞬时错误(超时、连接重置、临时不可用、死锁等)。
+ * 复用 isMissingDataConnectOperationError 的消息归一化写法,通过关键词匹配识别可重试错误。
+ */
+export function isTransientDataConnectError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  const transientKeywords = [
+    "sql execution timed out",
+    "timeout",
+    "timed out",
+    "econnreset",
+    "econnrefused",
+    "epipe",
+    "connection",
+    "503",
+    "unavailable",
+    "deadlock",
+    "restart"
+  ];
+  return transientKeywords.some((keyword) => normalized.includes(keyword));
+}
+
+/**
+ * 为 Data Connect / Cloud SQL 调用包装瞬时错误重试。
+ * 默认最多重试 3 次,指数退避(500 / 1000 / 2000ms)。
+ * 非瞬时错误立即抛出,重试耗尽后抛出最后一个原始错误对象(不包装)。
+ */
+export async function withSqlRetry<T>(
+  fn: () => Promise<T>,
+  options?: { maxRetries?: number; baseDelayMs?: number }
+): Promise<T> {
+  const maxRetries = options?.maxRetries ?? 3;
+  const baseDelayMs = options?.baseDelayMs ?? 500;
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      // 重试耗尽或非瞬时错误:立即抛出原始错误
+      if (attempt === maxRetries || !isTransientDataConnectError(error)) {
+        throw error;
+      }
+      const retryNumber = attempt + 1;
+      const delayMs = baseDelayMs * 2 ** attempt;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[withSqlRetry] 瞬时错误,将进行第 ${retryNumber}/${maxRetries} 次重试(等待 ${delayMs}ms):${errorMessage}`
+      );
+      await sleep(delayMs);
+    }
+  }
+  // 理论上不可达,保险起见抛出最后一个错误对象
+  throw lastError;
 }
 
 type ServiceAccountEnv = ServiceAccount & {

@@ -1,4 +1,4 @@
-﻿# lib/trae/config.ts
+# lib/trae/config.ts
 
 > Last updated: 2026-07-04 | Protection: STANDARD
 
@@ -16,7 +16,7 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 - Supplies `judgeConcurrency` (`TRAE_JUDGE_CONCURRENCY`, default from `DEFAULT_JUDGE_CONCURRENCY`, currently 8) for bounded topic-level judge parallelism.
 - Does not expose a judge strategy switch. Scoring quality requires the four-evaluator plus consensus referee path only.
 - Tunes the matcher's forum signup lookups: `maxForumLookupsPerRun` (env `TRAE_MAX_FORUM_LOOKUPS_PER_RUN`, default `0` = unlimited), `forumLookupConcurrency` (`TRAE_FORUM_LOOKUP_CONCURRENCY`, default 16), `forumMinRequestMs` per-host start spacing (`TRAE_FORUM_MIN_REQUEST_MS`, default 150), and `forumMaxRetries` (`TRAE_FORUM_MAX_RETRIES`, default 5). Defaults favor fastest convergence; the forum host is the only real limiter (Retry-After + host-wide cooldown + backoff cover throttling).
-- Keeps NVIDIA text judging order explicit and separate from the preferred NVIDIA image/multimodal model, plus a distinct `nvidiaImageFallbackModel` (env `NVIDIA_IMAGE_FALLBACK_MODEL`, default `minimaxai/minimax-m3`) used when the primary image model soft-throttles.
+- Keeps NVIDIA text judging order explicit and separate from the preferred NVIDIA image/multimodal model, plus a distinct `nvidiaImageFallbackModel` (env `NVIDIA_IMAGE_FALLBACK_MODEL`, default `google/gemma-4-31b-it`) used when the primary image model soft-throttles.
 - Keeps secret access server-side.
 - Parses numeric env vars defensively.
 
@@ -69,6 +69,7 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 | 2026-07-02 | Added Friend gateway provider (primary); model chains now DeepSeek V4 Pro → MiniMax M3 → Kimi K2.6 on friend then nvidia. Dropped GLM 5.1 (410 EOL) and DeepSeek V4 Flash (hangs). | Claude |
 | 2026-07-03 | Promoted GLM 5.2 (`z-ai/glm-5.2`) to primary text model on both friend and nvidia chains; DeepSeek V4 Pro demoted to first fallback → MiniMax M3 → Kimi K2.6. Image models unchanged. | Claude |
 | 2026-07-04 | Added multi-key NVIDIA config and unlimited rate-limit retry budget. | Claude/Codex |
+| 2026-07-08 | Switched main text + image primary to `minimaxai/minimax-m3` on both friend and nvidia. Removed `moonshotai/kimi-k2.6` from every chain (upstream removed it). Added `google/gemma-4-31b-it` as first text fallback and image fallback; `deepseek-ai/deepseek-v4-pro` and `z-ai/glm-5.2` retained as deeper text fallbacks. | Claude |
 
 ## Planned Change: Judge Concurrency Config
 
