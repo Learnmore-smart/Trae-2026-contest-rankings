@@ -10,6 +10,7 @@ import {
   shouldJudgeTopicForMode
 } from "../lib/trae/judge.ts";
 import { runWithConcurrency } from "../lib/trae/concurrency.ts";
+import { getTraeConfig } from "../lib/trae/config.ts";
 import { DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY } from "../lib/trae/judge-policy.ts";
 import type { EvaluationOutput, TraeEvaluation, TraeTopic } from "../lib/trae/types.ts";
 
@@ -433,5 +434,42 @@ describe("judge strategy surface", () => {
       judgeSource,
       /dedupeByTopicTitle\(mapped\)[\s\S]*?\.filter\(\(\{ topic \}\) => !isDeletedOrEmptyTopic\(topic\)\)[\s\S]*?\.filter\(\(\{ topic, latestEvaluation \}\) => shouldJudgeTopicForMode/
     );
+  });
+
+  it("resets the systemic-failure counter on every successful grade so the abort is truly consecutive", () => {
+    const judgeSource = readFileSync("lib/trae/judge.ts", "utf8");
+
+    // A successful grade must reset consecutiveSystemicFailures; otherwise two systemic
+    // failures anywhere in the batch (even far apart, on a merely flaky gateway) abort the
+    // whole run and freeze the "已评分" count. Guards the success path in judgeChangedTraeTopics.
+    assert.match(
+      judgeSource,
+      /evaluatedCount \+= 1;[\s\S]*?consecutiveSystemicFailures = 0;[\s\S]*?\} catch \(error\) \{/
+    );
+  });
+
+  it("stops taking new topics once the batch wall-clock deadline passes so the run can finalize", () => {
+    const judgeSource = readFileSync("lib/trae/judge.ts", "utf8");
+
+    // The worker must short-circuit past batchDeadlineAt (leaving remaining topics for the next
+    // run) so finishRun + the snapshot refresh happen inside the cron timeout instead of Cloud
+    // Run killing a mid-flight batch — which would freeze the public "最后更新" timestamp.
+    assert.match(
+      judgeSource,
+      /batchDeadlineAt !== null && Date\.now\(\) >= batchDeadlineAt[\s\S]*?skippedForDeadline \+= 1;[\s\S]*?return;/
+    );
+  });
+});
+
+describe("judge batch wall-clock budget", () => {
+  it("defaults the judge batch deadline to 690s, under the 900s cron timeout", () => {
+    const previous = process.env.TRAE_JUDGE_BATCH_DEADLINE_MS;
+    delete process.env.TRAE_JUDGE_BATCH_DEADLINE_MS;
+    try {
+      assert.equal(getTraeConfig().judgeBatchDeadlineMs, 690_000);
+    } finally {
+      if (previous === undefined) delete process.env.TRAE_JUDGE_BATCH_DEADLINE_MS;
+      else process.env.TRAE_JUDGE_BATCH_DEADLINE_MS = previous;
+    }
   });
 });

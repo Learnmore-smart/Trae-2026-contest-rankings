@@ -12,6 +12,7 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 - Calls the Friend gateway (new-api, OpenAI-compatible) first, then NVIDIA direct; paid or removed providers are intentionally not part of the plan.
 - Retries non-rate-limit transient failures with bounded exponential backoff.
 - Handles rate limits (`http_429` and NVIDIA soft-429) by trying every configured free provider/key lane before waiting and retrying the full plan unless `AI_MAX_RATE_LIMIT_RETRIES` caps it.
+- Bounds the total rate-limit wait for a single call by a wall-clock ceiling (`AI_MAX_RATE_LIMIT_WAIT_MS`, default 90s) read via an injectable `nowFn`, so unlimited retry count (`AI_MAX_RATE_LIMIT_RETRIES=0`) can never hang one call — and thus the whole cron — on a fully-throttled endpoint. `0` disables the ceiling.
 - Treats NVIDIA's HTTP 200 + empty `choices` reply (a soft 429) as a retryable `rate_limited` error.
 - Adds NVIDIA DeepSeek reasoning effort `max` for DeepSeek V4 fallback calls, leaving Kimi and GLM request bodies unchanged.
 - Records provider, model, latency, retry count, error reason, and raw response for every attempt.
@@ -88,6 +89,7 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 | 2026-07-06 | Planned provider-aware rate-limit rotation so Friend throttles do not block NVIDIA key capacity before the client waits. | Codex |
 | 2026-07-08 | Removed `moonshotai/kimi-k2.6` from all chains (upstream-deprecated). New text order is MiniMax M3 → Gemma 4 31B → DeepSeek V4 Pro → GLM 5.2 on both providers. Added `chat_template_kwargs: { enable_thinking: true }` for NVIDIA-side `google/gemma-*` models, mirroring the DeepSeek `reasoning_effort: "max"` provider gating. Vision chain is now MiniMax M3 → Gemma 4 31B on both providers. | Claude |
 | 2026-07-08 | Added `empty_content_billed` error classification (HTTP 200 + input tokens billed + empty content); skip same-model retry for this mode; emit console diagnostic; export `isSystemicLLMFallbackError` and `truncateDiagnostic` for judge pipeline early-abort and admin health-check. | Claude |
+| 2026-07-09 | Added `AI_MAX_RATE_LIMIT_WAIT_MS` (default 90s) wall-clock ceiling on rate-limit retries + injectable `nowFn`, so `AI_MAX_RATE_LIMIT_RETRIES=0` (unlimited count) can no longer hang a single call — and the cron — on a fully-throttled endpoint. | Claude |
 ## Change Plan: Friend And NVIDIA Only
 
 - 2026-07-03 Codex: Remove REMOVED_PROVIDER from the provider config map, fallback plan, request option plumbing, and header builder.

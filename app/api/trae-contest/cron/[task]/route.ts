@@ -74,18 +74,22 @@ async function runCronTask(task: string): Promise<NextResponse> {
     // The old sequential approach (scrape → match → judge) wasted most of the timeout on
     // scraping, leaving little time for judging — causing only ~4 topics graded per day.
     const halfMax = Math.floor(CRON_JUDGE_MAX / 2);
+    // run-all fits scrape + match + TWO judge passes into one ~900s request, so each judge pass
+    // gets a smaller wall-clock budget than a standalone judge cron. firstJudge runs alongside
+    // scrape/match; secondJudge runs after, so ~300s each keeps the whole task inside the window.
+    const RUN_ALL_JUDGE_DEADLINE_MS = 300_000;
     const scrapeAndMatch = (async () => {
       await scrapeAllTraeSources();
       await runTraeMatching();
     })();
-    const firstJudge = judgeChangedTraeTopics({ mode: "changed", max: halfMax }).catch((error) => {
+    const firstJudge = judgeChangedTraeTopics({ mode: "changed", max: halfMax, deadlineMs: RUN_ALL_JUDGE_DEADLINE_MS }).catch((error) => {
       console.error("[trae] first judge batch failed:", error);
       return { evaluatedCount: 0, failedCount: 0 };
     });
 
     const [, firstResult] = await Promise.all([scrapeAndMatch, firstJudge]);
 
-    const secondResult = await judgeChangedTraeTopics({ mode: "changed", max: halfMax });
+    const secondResult = await judgeChangedTraeTopics({ mode: "changed", max: halfMax, deadlineMs: RUN_ALL_JUDGE_DEADLINE_MS });
     const merged = {
       evaluatedCount: firstResult.evaluatedCount + secondResult.evaluatedCount,
       failedCount: firstResult.failedCount + secondResult.failedCount

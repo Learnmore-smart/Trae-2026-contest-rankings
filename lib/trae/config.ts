@@ -38,8 +38,21 @@ export interface TraeConfig {
   aiMaxRetriesPerModel: number;
   /** Retry budget for rate limits (HTTP 429 + NVIDIA soft-429). 0 = unlimited: retry (rotating keys) until it clears. */
   aiMaxRateLimitRetries: number;
+  /**
+   * Wall-clock ceiling (ms) for how long a SINGLE llm call may ride out rate limits before it
+   * gives up and throws. Bounds `aiMaxRateLimitRetries: 0` (unlimited count) so one throttled
+   * judge call can never consume the whole cron budget. 0 = unlimited (legacy behavior).
+   */
+  aiMaxRateLimitWaitMs: number;
   aiRequestTimeoutMs: number;
   judgeConcurrency: number;
+  /**
+   * Wall-clock budget (ms) for one judge batch. Once elapsed, workers stop picking up NEW
+   * topics and let in-flight ones drain, so the run finalizes (finishRun + board snapshot)
+   * within the Cloud Run request timeout instead of being killed mid-flight — which would
+   * leave a zombie RUNNING run and a frozen public snapshot. 0 = unlimited (legacy behavior).
+   */
+  judgeBatchDeadlineMs: number;
   scraperUserAgent: string;
   adminToken: string | null;
   cronSecret: string | null;
@@ -118,6 +131,9 @@ export function getTraeConfig(): TraeConfig {
   const aiMaxRetriesPerModel = Math.max(0, Math.floor(numberFromEnv("AI_MAX_RETRIES_PER_MODEL", 2)));
   // 0 = unlimited (retry rate limits until they clear); >0 caps it and then falls to the next model.
   const aiMaxRateLimitRetries = Math.max(0, Math.floor(numberFromEnv("AI_MAX_RATE_LIMIT_RETRIES", 0)));
+  // Default 90s: long enough to outlast a normal throttle burst, short enough that a single
+  // stuck call can't monopolize the ~900s cron budget. 0 disables the ceiling (unlimited wait).
+  const aiMaxRateLimitWaitMs = Math.max(0, Math.floor(numberFromEnv("AI_MAX_RATE_LIMIT_WAIT_MS", 90_000)));
   const aiRequestTimeoutMs = Math.max(1, Math.floor(numberFromEnv("AI_REQUEST_TIMEOUT_MS", 120_000)));
   const aiRpmLimit = Math.max(1, Math.floor(numberFromEnv("AI_RPM_LIMIT", 40)));
   const nvidiaApiKeys = collectNvidiaApiKeys();
@@ -156,8 +172,13 @@ export function getTraeConfig(): TraeConfig {
     aiRpmLimit,
     aiMaxRetriesPerModel,
     aiMaxRateLimitRetries,
+    aiMaxRateLimitWaitMs,
     aiRequestTimeoutMs,
     judgeConcurrency: Math.max(1, Math.floor(numberFromEnv("TRAE_JUDGE_CONCURRENCY", DEFAULT_JUDGE_CONCURRENCY))),
+    // Default 690s (11.5 min): leaves ~3.5 min under the 900s Cloud Run timeout for the last
+    // in-flight wave to drain (each call bounded by aiMaxRateLimitWaitMs) plus finishRun +
+    // snapshot. 0 disables the batch deadline (legacy: run until Cloud Run kills it).
+    judgeBatchDeadlineMs: Math.max(0, Math.floor(numberFromEnv("TRAE_JUDGE_BATCH_DEADLINE_MS", 690_000))),
     scraperUserAgent:
       process.env.TRAE_SCRAPER_USER_AGENT ??
       "RateMinistere TRAE Contest Rank Bot; contact: noahzh52@gmail.com",

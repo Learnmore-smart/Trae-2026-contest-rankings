@@ -31,6 +31,7 @@ const aiEnvKeys = [
   "AI_RPM_LIMIT",
   "AI_MAX_RETRIES_PER_MODEL",
   "AI_MAX_RATE_LIMIT_RETRIES",
+  "AI_MAX_RATE_LIMIT_WAIT_MS",
   "AI_REQUEST_TIMEOUT_MS"
 ];
 
@@ -82,6 +83,15 @@ describe("LLM zero-budget fallback client", () => {
   it("defaults the shared AI rate limit to 40 rpm", () => {
     withEnv(zeroBudgetEnv({ AI_RPM_LIMIT: undefined }), () => {
       assert.equal(getTraeConfig().aiRpmLimit, 40);
+    });
+  });
+
+  it("defaults the per-call rate-limit wall-clock ceiling to 90s and honors the env override", () => {
+    withEnv(zeroBudgetEnv({ AI_MAX_RATE_LIMIT_WAIT_MS: undefined }), () => {
+      assert.equal(getTraeConfig().aiMaxRateLimitWaitMs, 90_000);
+    });
+    withEnv(zeroBudgetEnv({ AI_MAX_RATE_LIMIT_WAIT_MS: "0" }), () => {
+      assert.equal(getTraeConfig().aiMaxRateLimitWaitMs, 0);
     });
   });
 
@@ -280,6 +290,96 @@ describe("LLM zero-budget fallback client", () => {
 
         // Initial full-plan pass + 2 capped waits = 3 attempts, then fail cleanly.
         assert.equal(models.filter((model) => model === "z-ai/glm-5.2").length, 3);
+      }
+    );
+  });
+
+  it("bounds unlimited rate-limit retries by a wall-clock deadline so one call can't hang the cron", async () => {
+    await withEnv(
+      zeroBudgetEnv({
+        AI_PROVIDER_ORDER: "nvidia",
+        AI_MAX_RATE_LIMIT_RETRIES: "0",
+        AI_MAX_RATE_LIMIT_WAIT_MS: "90000"
+      }),
+      async () => {
+        // Virtual clock advanced only by sleepFn, so the deadline is deterministic and the test
+        // never waits real time. Without the deadline this loop would spin forever (429 every pass).
+        let virtualNow = 1_000_000;
+        let attempts = 0;
+
+        await assert.rejects(
+          callLLMWithFallback({
+            messages: [{ role: "user", content: "score this" }],
+            config: getTraeConfig(),
+            validateContent: (content) => JSON.parse(content) as { ok: boolean },
+            plan: [
+              {
+                provider: "nvidia",
+                model: "z-ai/glm-5.2",
+                baseUrl: "https://integrate.api.nvidia.com/v1",
+                apiKeys: ["nvidia-key"]
+              }
+            ],
+            fetchFn: async () => {
+              attempts += 1;
+              return new Response("rate limited", { status: 429 });
+            },
+            sleepFn: async (delayMs) => {
+              virtualNow += delayMs;
+            },
+            nowFn: () => virtualNow
+          }),
+          (error) => {
+            assert.ok(error instanceof LLMFallbackError);
+            assert.ok(error.callLogs.every((log) => log.errorReason === "http_429"));
+            return true;
+          }
+        );
+
+        // The wall-clock ceiling (not the retry count, which is unlimited here) stops the loop
+        // after a small, bounded number of passes — proving it terminates instead of hanging.
+        assert.ok(attempts >= 2 && attempts <= 20, `expected a bounded attempt count, got ${attempts}`);
+      }
+    );
+  });
+
+  it("keeps riding out rate limits when the wall-clock ceiling is disabled (0)", async () => {
+    await withEnv(
+      zeroBudgetEnv({
+        AI_PROVIDER_ORDER: "nvidia",
+        AI_MAX_RATE_LIMIT_RETRIES: "3",
+        AI_MAX_RATE_LIMIT_WAIT_MS: "0"
+      }),
+      async () => {
+        let attempts = 0;
+
+        await assert.rejects(
+          callLLMWithFallback({
+            messages: [{ role: "user", content: "score this" }],
+            config: getTraeConfig(),
+            validateContent: (content) => JSON.parse(content) as { ok: boolean },
+            plan: [
+              {
+                provider: "nvidia",
+                model: "z-ai/glm-5.2",
+                baseUrl: "https://integrate.api.nvidia.com/v1",
+                apiKeys: ["nvidia-key"]
+              }
+            ],
+            fetchFn: async () => {
+              attempts += 1;
+              return new Response("rate limited", { status: 429 });
+            },
+            sleepFn: async () => undefined
+          }),
+          (error) => {
+            assert.ok(error instanceof LLMFallbackError);
+            return true;
+          }
+        );
+
+        // Ceiling disabled → only the retry-count cap (3) stops it: initial pass + 3 waits = 4.
+        assert.equal(attempts, 4);
       }
     );
   });

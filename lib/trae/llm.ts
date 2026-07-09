@@ -36,6 +36,8 @@ export interface CallLLMWithFallbackOptions<TParsed = string> {
   validateContent?: (content: string) => TParsed;
   fetchFn?: typeof fetch;
   sleepFn?: (delayMs: number) => Promise<void>;
+  /** Injectable clock for the rate-limit wall-clock deadline; defaults to Date.now. Tests advance a virtual clock via sleepFn. */
+  nowFn?: () => number;
   /**
    * When true (default), rate limits (HTTP 429 + soft-429) are retried — rotating keys —
    * until they clear, per aiMaxRateLimitRetries: a must-succeed judge call never gives up
@@ -167,12 +169,20 @@ export async function callLLMWithFallback<TParsed = string>({
   sleepFn = async (delayMs) => {
     await sleep(delayMs);
   },
+  nowFn = () => Date.now(),
   retryRateLimitsUntilCleared = true,
   plan
 }: CallLLMWithFallbackOptions<TParsed>): Promise<LLMCallResult<TParsed>> {
   const callLogs: TraeLLMCallLog[] = [];
   const resolvedPlan = plan ?? buildLLMFallbackPlan(config);
   let fullPlanRateLimitRetries = 0;
+  // Wall-clock ceiling for riding out rate limits. With aiMaxRateLimitRetries: 0 (unlimited
+  // count), this is the ONLY thing that stops a fully-throttled endpoint from looping forever
+  // and burning the entire cron budget on one call. 0 (or a best-effort caller) disables it.
+  const rateLimitDeadlineAt =
+    retryRateLimitsUntilCleared && config.aiMaxRateLimitWaitMs > 0
+      ? nowFn() + config.aiMaxRateLimitWaitMs
+      : null;
 
   while (true) {
     const saturatedProviders = new Set<TraeAIProvider>();
@@ -262,6 +272,12 @@ export async function callLLMWithFallback<TParsed = string>({
 
     fullPlanRateLimitRetries += 1;
     if (config.aiMaxRateLimitRetries > 0 && fullPlanRateLimitRetries > config.aiMaxRateLimitRetries) {
+      break;
+    }
+    // Give up once the wall-clock ceiling is reached, even with unlimited retry count, so this
+    // call fails fast and the caller can move on (the topic is retried on the next cron run)
+    // instead of hanging until Cloud Run kills the whole request.
+    if (rateLimitDeadlineAt !== null && nowFn() >= rateLimitDeadlineAt) {
       break;
     }
     await sleepFn(rateLimitBackoffMs(fullPlanRateLimitRetries));

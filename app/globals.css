@@ -70,16 +70,37 @@ a {
 
 .tech-shell .text-white,
 .tech-shell .text-slate-100,
+.tech-shell .text-stone-100,
+.tech-shell .text-gray-100,
+.tech-shell .text-zinc-100,
+.tech-shell .text-neutral-100,
+.tech-shell .text-slate-200,
+.tech-shell .text-stone-200,
+.tech-shell .text-gray-200,
+.tech-shell .text-zinc-200,
+.tech-shell .text-neutral-200,
 .tech-shell .text-cyan-100 {
   color: var(--ink);
 }
 
 .tech-shell .text-slate-300,
-.tech-shell .text-slate-400 {
+.tech-shell .text-slate-400,
+.tech-shell .text-stone-300,
+.tech-shell .text-stone-400,
+.tech-shell .text-gray-300,
+.tech-shell .text-gray-400,
+.tech-shell .text-zinc-300,
+.tech-shell .text-zinc-400,
+.tech-shell .text-neutral-300,
+.tech-shell .text-neutral-400 {
   color: var(--ink-soft);
 }
 
-.tech-shell .text-slate-500 {
+.tech-shell .text-slate-500,
+.tech-shell .text-stone-500,
+.tech-shell .text-gray-500,
+.tech-shell .text-zinc-500,
+.tech-shell .text-neutral-500 {
   color: var(--muted);
 }
 

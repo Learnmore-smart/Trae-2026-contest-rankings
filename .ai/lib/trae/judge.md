@@ -17,7 +17,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - Filters duplicate judge candidates by normalized topic title before selecting the run slice, so repeated posts do not consume multiple evaluator teams.
 - Handles 429, timeout, invalid JSON, validation errors, and model fallbacks.
 - Writes SQL `evaluations`, updates denormalized topic scoring fields, and records token usage through Data Connect.
-- Aborts the batch pipeline early when consecutive topics hit systemic LLM failures (≥2 models returning `empty_content_billed` in the fallback chain), preventing a single cron run from burning the entire API budget on a broken endpoint. Records the abort reason in run logs and preserves already-judged topics' scores.
+- Aborts the batch pipeline early when consecutive topics hit systemic LLM failures (≥2 models returning `empty_content_billed` in the fallback chain), preventing a single cron run from burning the entire API budget on a broken endpoint. Records the abort reason in run logs and preserves already-judged topics' scores. Every successful grade resets `consecutiveSystemicFailures` to 0, so the abort fires only on a genuine outage (systemic failures with no grade in between) — a merely flaky gateway no longer freezes progress.
 
 ## Public API
 
@@ -109,6 +109,8 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | 2026-07-02 | Planned changed-mode rejudge detection for edited posts whose topic update is newer than the latest evaluation. | Codex |
 | 2026-07-02 | Implemented changed-mode timestamp comparison without resetting public judged status during scrape. | Codex |
 | 2026-07-08 | Added systemic LLM failure early-abort: `judgeChangedTraeTopics` tracks `consecutiveSystemicFailures`; when 2 consecutive topics return `isSystemicLLMFallbackError`, throws `SystemicLLMFailureError` to stop `runWithConcurrency` and records the abort in `finishRun` logs. | Claude |
+| 2026-07-09 | Fixed stuck "已评分" count: `consecutiveSystemicFailures` was never reset on a successful grade (only on non-systemic failures), so it accumulated across the whole batch and any 2 systemic failures aborted the run — freezing progress on a flaky gateway. Now reset to 0 after each successful grade, restoring true consecutive semantics per the fix-empty-llm-response-handling spec. | Claude |
+| 2026-07-09 | Added a batch wall-clock deadline (`JudgeOptions.deadlineMs`, default `config.judgeBatchDeadlineMs` = 690s): once elapsed, workers stop taking new topics (`skippedForDeadline`) and let in-flight ones drain, so `finishRun` + snapshot refresh happen inside the Cloud Run 900s timeout instead of the batch being killed mid-flight (zombie RUNNING run + frozen snapshot). run-all passes 300s per pass. Status becomes `partial` when topics are skipped. | Claude |
 
 ## Bug Fix: Edited Posts Not Rejudged
 

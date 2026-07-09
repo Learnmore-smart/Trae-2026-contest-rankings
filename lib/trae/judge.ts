@@ -751,6 +751,12 @@ export interface JudgeOptions {
   mode?: JudgeMode;
   max?: number;
   concurrency?: number;
+  /**
+   * Wall-clock budget (ms) for this batch. Once elapsed, workers stop picking up new topics so
+   * the run finalizes within the cron request timeout. Defaults to config.judgeBatchDeadlineMs;
+   * the cron passes a smaller value to run-all's two back-to-back judge passes.
+   */
+  deadlineMs?: number;
 }
 
 export type JudgeMode = "unjudged" | "changed" | "low-confidence";
@@ -825,10 +831,13 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
   const max = options.max ?? config.maxJudgePerRun;
   const mode = options.mode ?? "unjudged";
   const concurrency = normalizeJudgeConcurrency(options.concurrency ?? config.judgeConcurrency, max);
+  const deadlineMs = options.deadlineMs ?? config.judgeBatchDeadlineMs;
+  const batchDeadlineAt = deadlineMs > 0 ? Date.now() + deadlineMs : null;
   const run = await startRun("judge", "preliminary");
   const dc = getDataConnectDb();
   let evaluatedCount = 0;
   let failedCount = 0;
+  let skippedForDeadline = 0;
 
   try {
     const rawTopics = await fetchJudgeBoardPages(dc);
@@ -893,10 +902,26 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
 
     try {
       await runWithConcurrency(topics, concurrency, async (topicObj) => {
+        // Batch wall-clock budget: once the deadline passes, stop picking up new topics and let
+        // in-flight ones drain, so the run finalizes (finishRun + snapshot) inside the Cloud Run
+        // timeout instead of being killed mid-flight. Skipped topics keep their prior state and
+        // are retried on the next run. Every remaining worker returns here quickly once tripped,
+        // so runWithConcurrency resolves instead of grinding through the rest of the batch.
+        if (batchDeadlineAt !== null && Date.now() >= batchDeadlineAt) {
+          skippedForDeadline += 1;
+          return;
+        }
         try {
           const evaluation = await judgeOneTopic(topicObj.topic, topicObj.match);
           await persistJudgedTopic(dc, topicObj.topic.id, evaluation);
           evaluatedCount += 1;
+          // Any successful grade proves the endpoint is alive, so reset the systemic-failure
+          // counter. Without this, `consecutiveSystemicFailures` is not truly "consecutive" —
+          // it accumulates across the whole batch and any two systemic failures (even hundreds
+          // of successful grades apart, on a merely flaky gateway) abort the entire run, which
+          // freezes the "已评分" count. Only a real outage (systemic failures with no grade in
+          // between) should abort. Matches fix-empty-llm-response-handling spec requirement.
+          consecutiveSystemicFailures = 0;
         } catch (error) {
           failedCount += 1;
           const llmCallLogs = error instanceof LLMFallbackError ? error.callLogs : [];
@@ -1026,13 +1051,16 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
     await finishRun(run.id, {
       status: systemicAbortReason !== null
         ? "error"
-        : failedCount > 0
+        : failedCount > 0 || skippedForDeadline > 0
           ? "partial"
           : "success",
       evaluatedCount,
       failedCount,
       logs: [
         `Evaluated ${evaluatedCount} topics; ${failedCount} failures; concurrency ${concurrency}.`,
+        ...(skippedForDeadline > 0
+          ? [`Batch deadline reached (${deadlineMs}ms): skipped ${skippedForDeadline} topics for the next run.`]
+          : []),
         ...(systemicAbortReason !== null ? [systemicAbortReason] : [])
       ]
     });
