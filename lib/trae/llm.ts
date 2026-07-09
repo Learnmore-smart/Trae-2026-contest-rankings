@@ -502,7 +502,11 @@ function emptyContentReason(
 ): "rate_limited" | "empty_content_billed" | "invalid_response" {
   try {
     const json = JSON.parse(rawResponse) as { choices?: unknown };
-    if (Array.isArray(json.choices) && json.choices.length === 0) return "rate_limited";
+    if (Array.isArray(json.choices) && json.choices.length === 0) {
+      // NVIDIA true soft-429: empty choices + usage:null (inputTokens=0) — retryable.
+      // friend gateway anomaly: empty choices WITH billed input tokens — not retryable.
+      return tokenUsage.inputTokens > 0 ? "empty_content_billed" : "rate_limited";
+    }
     // choices 非空但 content 为空 + 已计费 input token → 模型/网关级问题，重试无意义
     if (Array.isArray(json.choices) && json.choices.length > 0 && tokenUsage.inputTokens > 0) {
       return "empty_content_billed";

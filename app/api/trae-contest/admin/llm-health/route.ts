@@ -134,7 +134,9 @@ async function pingOneModel(entry: LLMFallbackPlanEntry): Promise<ModelHealthRes
   // Empty content — diagnose the failure mode.
   let errorReason: string;
   if (choices.length === 0) {
-    errorReason = "rate_limited"; // NVIDIA soft-429: empty choices, no content.
+    // NVIDIA true soft-429: empty choices + usage:null (inputTokens=0) — retryable.
+    // friend gateway anomaly: empty choices WITH billed input tokens — not retryable.
+    errorReason = inputTokens > 0 ? "empty_content_billed" : "rate_limited";
   } else if (inputTokens > 0) {
     errorReason = "empty_content_billed"; // The production failure pattern.
   } else {
