@@ -60,16 +60,16 @@ function zeroBudgetEnv(overrides: EnvPatch = {}): EnvPatch {
   return {
     TRAE_FRIEND_API: "friend-key",
     TRAE_FRIEND_BASE_URL: "https://friend.example/v1",
-    FRIEND_PRIMARY_MODEL: "minimaxai/minimax-m3",
-    FRIEND_FALLBACK_MODELS: "google/gemma-4-31b-it,deepseek-ai/deepseek-v4-pro,z-ai/glm-5.2",
-    FRIEND_IMAGE_MODEL: "minimaxai/minimax-m3",
-    FRIEND_IMAGE_FALLBACK_MODEL: "google/gemma-4-31b-it",
+    FRIEND_PRIMARY_MODEL: "google/gemma-4-31b-it",
+    FRIEND_FALLBACK_MODELS: "deepseek-ai/deepseek-v4-pro,z-ai/glm-5.2",
+    FRIEND_IMAGE_MODEL: "google/gemma-4-31b-it",
+    FRIEND_IMAGE_FALLBACK_MODEL: "deepseek-ai/deepseek-v4-pro",
     NVIDIA_API_KEY: "nvidia-key",
     NVIDIA_BASE_URL: "https://integrate.api.nvidia.com/v1",
-    NVIDIA_PRIMARY_MODEL: "minimaxai/minimax-m3",
-    NVIDIA_FALLBACK_MODELS: "google/gemma-4-31b-it,deepseek-ai/deepseek-v4-pro,z-ai/glm-5.2",
-    NVIDIA_IMAGE_MODEL: "minimaxai/minimax-m3",
-    NVIDIA_IMAGE_FALLBACK_MODEL: "google/gemma-4-31b-it",
+    NVIDIA_PRIMARY_MODEL: "google/gemma-4-31b-it",
+    NVIDIA_FALLBACK_MODELS: "deepseek-ai/deepseek-v4-pro,z-ai/glm-5.2",
+    NVIDIA_IMAGE_MODEL: "google/gemma-4-31b-it",
+    NVIDIA_IMAGE_FALLBACK_MODEL: "deepseek-ai/deepseek-v4-pro",
     AI_PROVIDER_ORDER: "friend,nvidia",
     AI_ZERO_BUDGET_ONLY: "true",
     AI_RPM_LIMIT: "60000",
@@ -95,30 +95,32 @@ describe("LLM zero-budget fallback client", () => {
     });
   });
 
-  it("defaults NVIDIA text order to MiniMax M3, Gemma 4 31B, DeepSeek V4 Pro, then GLM 5.2", () => {
+  it("defaults NVIDIA text order to Gemma 4 31B, DeepSeek V4 Pro, then GLM 5.2 (no MiniMax)", () => {
     withEnv(
       zeroBudgetEnv({
         NVIDIA_PRIMARY_MODEL: undefined,
-        NVIDIA_FALLBACK_MODELS: undefined
+        NVIDIA_FALLBACK_MODELS: undefined,
+        NVIDIA_IMAGE_MODEL: undefined,
+        NVIDIA_IMAGE_FALLBACK_MODEL: undefined
       }),
       () => {
         const config = getTraeConfig();
         const plan = buildLLMFallbackPlan(config);
-        // MiniMax M3 is the primary text model; Gemma 4 31B is the first fallback.
-        // DeepSeek V4 Flash (hangs) and GLM 5.1 (410 EOL 2026-07-02) are intentionally
-        // excluded from the defaults; kimi-k2.6 was removed upstream on 2026-07-08.
+        // Gemma 4 31B is primary; minimax-m3 removed (empty_content_billed).
+        // DeepSeek V4 Flash (hangs) and GLM 5.1 (410 EOL 2026-07-02) stay excluded.
         assert.deepEqual(
           plan
             .filter((entry) => entry.provider === "nvidia")
             .map((entry) => entry.model),
           [
-            "minimaxai/minimax-m3",
             "google/gemma-4-31b-it",
             "deepseek-ai/deepseek-v4-pro",
             "z-ai/glm-5.2"
           ]
         );
-        assert.equal(config.nvidiaImageModel, "minimaxai/minimax-m3");
+        assert.equal(config.nvidiaImageModel, "google/gemma-4-31b-it");
+        assert.equal(config.nvidiaImageFallbackModel, "deepseek-ai/deepseek-v4-pro");
+        assert.ok(!plan.some((entry) => entry.model.includes("minimax")));
       }
     );
   });
@@ -129,11 +131,9 @@ describe("LLM zero-budget fallback client", () => {
       assert.deepEqual(
         plan.map((entry) => `${entry.provider}:${entry.model}`),
         [
-          "friend:minimaxai/minimax-m3",
           "friend:google/gemma-4-31b-it",
           "friend:deepseek-ai/deepseek-v4-pro",
           "friend:z-ai/glm-5.2",
-          "nvidia:minimaxai/minimax-m3",
           "nvidia:google/gemma-4-31b-it",
           "nvidia:deepseek-ai/deepseek-v4-pro",
           "nvidia:z-ai/glm-5.2"
@@ -170,7 +170,7 @@ describe("LLM zero-budget fallback client", () => {
             authorization: headers.get("authorization")
           });
 
-          if (provider === "friend" && body.model === "minimaxai/minimax-m3") {
+          if (provider === "friend" && body.model === "google/gemma-4-31b-it") {
             friendPrimaryCalls += 1;
             // Two 429s in a row, then the limit clears — the client must wait it out.
             if (friendPrimaryCalls === 1) return new Response("rate limited", { status: 429 });
@@ -188,10 +188,10 @@ describe("LLM zero-budget fallback client", () => {
       // Friend has a balance/quota lane; when it throttles, direct NVIDIA keys should
       // be used before the client waits on Friend to clear.
       assert.equal(result.provider, "nvidia");
-      assert.equal(result.model, "minimaxai/minimax-m3");
+      assert.equal(result.model, "google/gemma-4-31b-it");
       assert.deepEqual(
         requests.map((request) => `${request.provider}:${request.model}`),
-        ["friend:minimaxai/minimax-m3", "nvidia:minimaxai/minimax-m3"]
+        ["friend:google/gemma-4-31b-it", "nvidia:google/gemma-4-31b-it"]
       );
       assert.deepEqual(
         requests.map((request) => request.authorization),
@@ -436,24 +436,23 @@ describe("LLM zero-budget fallback client", () => {
           const body = JSON.parse(String(init?.body)) as { model: string };
           const provider = String(url).startsWith("https://friend.example") ? "friend" : "nvidia";
           attempts.push(`${provider}:${body.model}`);
-          const content = provider === "nvidia" && body.model === "minimaxai/minimax-m3" ? JSON.stringify({ ok: true }) : "not json";
+          const content = provider === "nvidia" && body.model === "google/gemma-4-31b-it" ? JSON.stringify({ ok: true }) : "not json";
           return Response.json({ choices: [{ message: { content } }] });
         },
         sleepFn: async () => undefined
       });
 
       assert.equal(result.provider, "nvidia");
-      assert.equal(result.model, "minimaxai/minimax-m3");
+      assert.equal(result.model, "google/gemma-4-31b-it");
       assert.deepEqual(attempts, [
-        "friend:minimaxai/minimax-m3",
         "friend:google/gemma-4-31b-it",
         "friend:deepseek-ai/deepseek-v4-pro",
         "friend:z-ai/glm-5.2",
-        "nvidia:minimaxai/minimax-m3"
+        "nvidia:google/gemma-4-31b-it"
       ]);
       assert.deepEqual(
         result.callLogs.map((log) => log.errorReason),
-        ["invalid_json", "invalid_json", "invalid_json", "invalid_json", null]
+        ["invalid_json", "invalid_json", "invalid_json", null]
       );
     });
   });
@@ -485,11 +484,9 @@ describe("LLM zero-budget fallback client", () => {
       });
 
       assert.deepEqual(requests, [
-        { model: "minimaxai/minimax-m3", reasoningEffort: undefined, enableThinking: undefined },
         { model: "google/gemma-4-31b-it", reasoningEffort: undefined, enableThinking: undefined },
         { model: "deepseek-ai/deepseek-v4-pro", reasoningEffort: undefined, enableThinking: undefined },
         { model: "z-ai/glm-5.2", reasoningEffort: undefined, enableThinking: undefined },
-        { model: "minimaxai/minimax-m3", reasoningEffort: undefined, enableThinking: undefined },
         { model: "google/gemma-4-31b-it", reasoningEffort: undefined, enableThinking: true },
         { model: "deepseek-ai/deepseek-v4-pro", reasoningEffort: "max", enableThinking: undefined }
       ]);
@@ -611,7 +608,7 @@ describe("LLM zero-budget fallback client", () => {
       await callLLMWithFallback(options);
       await callLLMWithFallback(options);
 
-      assert.deepEqual(startedModels, ["minimaxai/minimax-m3", "minimaxai/minimax-m3"]);
+      assert.deepEqual(startedModels, ["google/gemma-4-31b-it", "google/gemma-4-31b-it"]);
       assert.equal(sleeps.length, 1);
       assert.ok(sleeps[0] >= 1400 && sleeps[0] <= 1500, `expected about 1500ms, got ${sleeps[0]}`);
     });
@@ -627,7 +624,7 @@ describe("LLM zero-budget fallback client", () => {
         validateContent: (content) => JSON.parse(content) as { ok: boolean },
         fetchFn: async (_url, init) => {
           const body = JSON.parse(String(init?.body)) as { model: string };
-          if (body.model === "minimaxai/minimax-m3") {
+          if (body.model === "google/gemma-4-31b-it") {
             primaryCalls += 1;
             // NVIDIA soft-throttle shape: HTTP 200 with no choices and null usage.
             if (primaryCalls <= 2) return Response.json({ id: "", choices: [], created: 0, model: "", usage: null });
@@ -640,7 +637,7 @@ describe("LLM zero-budget fallback client", () => {
       // Two soft-429s, then success on the SAME model — never falls through to DeepSeek.
       assert.equal(primaryCalls, 3);
       assert.equal(result.provider, "friend");
-      assert.equal(result.model, "minimaxai/minimax-m3");
+      assert.equal(result.model, "google/gemma-4-31b-it");
       assert.deepEqual(
         result.callLogs.map((log) => log.errorReason),
         ["rate_limited", "rate_limited", null]
@@ -690,10 +687,10 @@ describe("LLM zero-budget fallback client", () => {
       assert.deepEqual(
         plan.map((entry) => `${entry.provider}:${entry.model}`),
         [
-          "friend:minimaxai/minimax-m3",
           "friend:google/gemma-4-31b-it",
-          "nvidia:minimaxai/minimax-m3",
-          "nvidia:google/gemma-4-31b-it"
+          "friend:deepseek-ai/deepseek-v4-pro",
+          "nvidia:google/gemma-4-31b-it",
+          "nvidia:deepseek-ai/deepseek-v4-pro"
         ]
       );
     });
@@ -702,16 +699,16 @@ describe("LLM zero-budget fallback client", () => {
   it("deduplicates the vision plan per provider when a model and its fallback are the same", () => {
     withEnv(
       zeroBudgetEnv({
-        FRIEND_IMAGE_MODEL: "minimaxai/minimax-m3",
-        FRIEND_IMAGE_FALLBACK_MODEL: "minimaxai/minimax-m3",
-        NVIDIA_IMAGE_FALLBACK_MODEL: "minimaxai/minimax-m3"
+        FRIEND_IMAGE_MODEL: "google/gemma-4-31b-it",
+        FRIEND_IMAGE_FALLBACK_MODEL: "google/gemma-4-31b-it",
+        NVIDIA_IMAGE_FALLBACK_MODEL: "google/gemma-4-31b-it"
       }),
       () => {
         const plan = buildVisionLLMFallbackPlan(getTraeConfig());
         // Dedup is keyed by provider:model, so the same model on friend and nvidia is kept once each.
         assert.deepEqual(
           plan.map((entry) => `${entry.provider}:${entry.model}`),
-          ["friend:minimaxai/minimax-m3", "nvidia:minimaxai/minimax-m3"]
+          ["friend:google/gemma-4-31b-it", "nvidia:google/gemma-4-31b-it"]
         );
       }
     );
@@ -740,7 +737,7 @@ describe("LLM zero-budget fallback client", () => {
         sleepFn: async () => undefined
       });
 
-      assert.equal(requests[0]?.model, "minimaxai/minimax-m3");
+      assert.equal(requests[0]?.model, "google/gemma-4-31b-it");
       assert.equal(requests[0]?.responseFormat, undefined);
       assert.equal(result.content, "a description");
     });

@@ -73,6 +73,7 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 | 2026-07-04 | Added multi-key NVIDIA config and unlimited rate-limit retry budget. | Claude/Codex |
 | 2026-07-09 | Added `aiMaxRateLimitWaitMs` (`AI_MAX_RATE_LIMIT_WAIT_MS`, default 90s) per-call rate-limit wall-clock ceiling and `judgeBatchDeadlineMs` (`TRAE_JUDGE_BATCH_DEADLINE_MS`, default 690s) per-batch deadline, so a throttled endpoint can no longer hang one call or run the batch past the cron timeout. | Claude |
 | 2026-07-08 | Switched main text + image primary to `minimaxai/minimax-m3` on both friend and nvidia. Removed `moonshotai/kimi-k2.6` from every chain (upstream removed it). Added `google/gemma-4-31b-it` as first text fallback and image fallback; `deepseek-ai/deepseek-v4-pro` and `z-ai/glm-5.2` retained as deeper text fallbacks. | Claude |
+| 2026-07-10 | Removed `minimaxai/minimax-m3` entirely (empty_content_billed). Primary text+image is now `google/gemma-4-31b-it`; fallbacks `deepseek-ai/deepseek-v4-pro`, `z-ai/glm-5.2`; image fallback deepseek-v4-pro. | Grok |
 
 ## Planned Change: Judge Concurrency Config
 

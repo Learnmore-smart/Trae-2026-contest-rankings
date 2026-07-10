@@ -33,10 +33,11 @@ Provider 顺序：
 
 默认模型：
 
-- Friend/NVIDIA text primary: `minimaxai/minimax-m3`
-- Friend/NVIDIA text fallback: `google/gemma-4-31b-it`, `deepseek-ai/deepseek-v4-pro`, `z-ai/glm-5.2`
-- Friend/NVIDIA image/vision primary: `minimaxai/minimax-m3`（`*_IMAGE_MODEL`）
-- Friend/NVIDIA image/vision fallback: `google/gemma-4-31b-it`（`*_IMAGE_FALLBACK_MODEL`）
+- Friend/NVIDIA text primary: `google/gemma-4-31b-it`
+- Friend/NVIDIA text fallback: `deepseek-ai/deepseek-v4-pro`, `z-ai/glm-5.2`
+- Friend/NVIDIA image/vision primary: `google/gemma-4-31b-it`（`*_IMAGE_MODEL`）
+- Friend/NVIDIA image/vision fallback: `deepseek-ai/deepseek-v4-pro`（`*_IMAGE_FALLBACK_MODEL`）
+- `minimaxai/minimax-m3` is not used（empty_content_billed / no usable output）
 
 所有文本评分调用统一走 `callLLMWithFallback()`。遇到 429/5xx/timeout/invalid JSON 会按 `AI_MAX_RETRIES_PER_MODEL` 和指数退避处理，再切换同 provider fallback；Friend 全部失败后才尝试 NVIDIA。所有免费模型不可用或 JSON 无法校验时会记录 `judge_error`，等待下次定时任务重试。
 

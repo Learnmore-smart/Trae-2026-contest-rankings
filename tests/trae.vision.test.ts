@@ -57,16 +57,16 @@ function zeroBudgetEnv(overrides: EnvPatch = {}): EnvPatch {
   return {
     TRAE_FRIEND_API: "friend-key",
     TRAE_FRIEND_BASE_URL: "https://friend.example/v1",
-    FRIEND_PRIMARY_MODEL: "minimaxai/minimax-m3",
-    FRIEND_FALLBACK_MODELS: "google/gemma-4-31b-it,deepseek-ai/deepseek-v4-pro,z-ai/glm-5.2",
-    FRIEND_IMAGE_MODEL: "minimaxai/minimax-m3",
-    FRIEND_IMAGE_FALLBACK_MODEL: "google/gemma-4-31b-it",
+    FRIEND_PRIMARY_MODEL: "google/gemma-4-31b-it",
+    FRIEND_FALLBACK_MODELS: "deepseek-ai/deepseek-v4-pro,z-ai/glm-5.2",
+    FRIEND_IMAGE_MODEL: "google/gemma-4-31b-it",
+    FRIEND_IMAGE_FALLBACK_MODEL: "deepseek-ai/deepseek-v4-pro",
     NVIDIA_API_KEY: "nvidia-key",
     NVIDIA_BASE_URL: "https://integrate.api.nvidia.com/v1",
-    NVIDIA_PRIMARY_MODEL: "minimaxai/minimax-m3",
-    NVIDIA_FALLBACK_MODELS: "google/gemma-4-31b-it,deepseek-ai/deepseek-v4-pro,z-ai/glm-5.2",
-    NVIDIA_IMAGE_MODEL: "minimaxai/minimax-m3",
-    NVIDIA_IMAGE_FALLBACK_MODEL: "google/gemma-4-31b-it",
+    NVIDIA_PRIMARY_MODEL: "google/gemma-4-31b-it",
+    NVIDIA_FALLBACK_MODELS: "deepseek-ai/deepseek-v4-pro,z-ai/glm-5.2",
+    NVIDIA_IMAGE_MODEL: "google/gemma-4-31b-it",
+    NVIDIA_IMAGE_FALLBACK_MODEL: "deepseek-ai/deepseek-v4-pro",
     AI_PROVIDER_ORDER: "friend,nvidia",
     AI_ZERO_BUDGET_ONLY: "true",
     AI_RPM_LIMIT: "30",
@@ -274,11 +274,11 @@ describe("describeTopicImages", () => {
       );
 
       assert.equal(requests.length, 1);
-      assert.equal(requests[0]?.model, "minimaxai/minimax-m3");
+      assert.equal(requests[0]?.model, "google/gemma-4-31b-it");
       const parts = requests[0]?.content as Array<{ type: string; image_url?: { url: string } }>;
       assert.equal(parts.filter((part) => part.type === "image_url").length, 2);
       assert.equal(evidence?.summary, "这两张图片显示真实产品界面。");
-      assert.equal(evidence?.model, "minimaxai/minimax-m3");
+      assert.equal(evidence?.model, "google/gemma-4-31b-it");
     });
   });
 
@@ -441,16 +441,16 @@ describe("describeTopicImages", () => {
         fetchFn: async (_url, init) => {
           const body = JSON.parse(String(init?.body)) as { model: string };
           models.push(body.model);
-          if (body.model === "minimaxai/minimax-m3") {
+          if (body.model === "google/gemma-4-31b-it") {
             return Response.json({ id: "", choices: [], usage: null });
           }
-          return visionResponse("gemma 描述");
+          return visionResponse("deepseek 描述");
         },
         sleepFn: async () => undefined
       });
 
-      assert.deepEqual(models, ["minimaxai/minimax-m3", "google/gemma-4-31b-it"]);
-      assert.equal(evidence?.model, "google/gemma-4-31b-it");
+      assert.deepEqual(models, ["google/gemma-4-31b-it", "deepseek-ai/deepseek-v4-pro"]);
+      assert.equal(evidence?.model, "deepseek-ai/deepseek-v4-pro");
     });
   });
 
@@ -479,7 +479,7 @@ describe("describeDemoScreenshot", () => {
           return {
             summary: "Browser agent opened the demo, clicked the primary control, and captured an interactive product screen.",
             provider: "browser-agent",
-            model: "playwright+minimax-m3",
+            model: "playwright+gemma-4-31b-it",
             source: "browser_agent",
             auditStatus: "browser_verified",
             artifactType: "web"
@@ -522,7 +522,7 @@ describe("describeDemoScreenshot", () => {
           demoAuditFn: async () => ({
             summary: "Package auditor extracted index.html from the zip and captured a rendered product screen.",
             provider: "browser-agent",
-            model: "zip-html+minimax-m3",
+            model: "zip-html+gemma-4-31b-it",
             source: "package_agent",
             auditStatus: "package_verified",
             artifactType: "download"

@@ -141,32 +141,30 @@ export function getTraeConfig(): TraeConfig {
   return {
     friendApiKey: process.env.TRAE_FRIEND_API ?? null,
     friendBaseUrl: process.env.TRAE_FRIEND_BASE_URL ?? "http://47.93.17.237:8889/v1",
-    friendPrimaryModel: process.env.FRIEND_PRIMARY_MODEL ?? "minimaxai/minimax-m3",
-    // minimax-m3 is the primary text model; gemma-4-31b-it is the first fallback
-    // (NVIDIA integrate API). deepseek-v4-pro and glm-5.2 stay as deeper fallbacks.
+    // 2026-07-10: minimax-m3 removed entirely — it returns billed empty_content (HTTP 200,
+    // choices:[], output=0) and only burns wall-clock + fallback hops. gemma-4-31b-it is primary.
+    friendPrimaryModel: process.env.FRIEND_PRIMARY_MODEL ?? "google/gemma-4-31b-it",
+    // deepseek-v4-pro and glm-5.2 stay as deeper fallbacks.
     // kimi-k2.6 was removed by the upstream provider on 2026-07-08.
-    // deepseek-v4-flash (hangs past timeout) and glm-5.1 (410 EOL 2026-07-02) stay
-    // excluded — both fail on this backend and only burn wall-clock.
+    // deepseek-v4-flash (hangs past timeout), glm-5.1 (410 EOL), and minimax-m3 (empty_content_billed)
+    // stay excluded — they fail on this backend and only burn wall-clock.
     friendFallbackModels: listFromEnv("FRIEND_FALLBACK_MODELS", [
-      "google/gemma-4-31b-it",
       "deepseek-ai/deepseek-v4-pro",
       "z-ai/glm-5.2"
     ]),
-    friendImageModel: process.env.FRIEND_IMAGE_MODEL ?? "minimaxai/minimax-m3",
-    friendImageFallbackModel: process.env.FRIEND_IMAGE_FALLBACK_MODEL ?? "google/gemma-4-31b-it",
+    friendImageModel: process.env.FRIEND_IMAGE_MODEL ?? "google/gemma-4-31b-it",
+    friendImageFallbackModel: process.env.FRIEND_IMAGE_FALLBACK_MODEL ?? "deepseek-ai/deepseek-v4-pro",
     nvidiaApiKey: nvidiaApiKeys[0] ?? null,
     nvidiaApiKeys,
     nvidiaBaseUrl: process.env.NVIDIA_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
-    nvidiaPrimaryModel: process.env.NVIDIA_PRIMARY_MODEL ?? "minimaxai/minimax-m3",
-    // Mirrors the friend chain: minimax-m3 primary, gemma-4-31b-it first fallback.
-    // Same exclusions: flash hangs, glm-5.1 is 410 EOL, kimi-k2.6 was removed upstream.
+    nvidiaPrimaryModel: process.env.NVIDIA_PRIMARY_MODEL ?? "google/gemma-4-31b-it",
+    // Mirrors the friend chain: gemma-4-31b-it primary, then deepseek / glm. No minimax.
     nvidiaFallbackModels: listFromEnv("NVIDIA_FALLBACK_MODELS", [
-      "google/gemma-4-31b-it",
       "deepseek-ai/deepseek-v4-pro",
       "z-ai/glm-5.2"
     ]),
-    nvidiaImageModel: process.env.NVIDIA_IMAGE_MODEL ?? "minimaxai/minimax-m3",
-    nvidiaImageFallbackModel: process.env.NVIDIA_IMAGE_FALLBACK_MODEL ?? "google/gemma-4-31b-it",
+    nvidiaImageModel: process.env.NVIDIA_IMAGE_MODEL ?? "google/gemma-4-31b-it",
+    nvidiaImageFallbackModel: process.env.NVIDIA_IMAGE_FALLBACK_MODEL ?? "deepseek-ai/deepseek-v4-pro",
     aiProviderOrder: providerOrderFromEnv(),
     aiZeroBudgetOnly: booleanFromEnv("AI_ZERO_BUDGET_ONLY", true),
     aiRpmLimit,
