@@ -52,12 +52,24 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 - Do not put provider secrets or raw model output in this status payload.
 - Do not put the cron secret in a URL query parameter (it would leak into request logs); header only.
 
+## Bug Fix Plan: Zombie RUNNING + Fragile Handoff (2026-07-10)
+
+- Symptom: 已评分 stuck (e.g. 4567/6495); 开始评分 shows 运行中 then never advances scores. DB has many `judge_*` / `match_*` rows stuck at `RUNNING` for hours.
+- Root cause 1: July 9 self-invoke still used `void invokeCronRunAll` + 250ms sleep. On Cloud Run, CPU throttles after the response; outbound fetch often dies after `startRun` writes RUNNING but before `finishRun` → forever zombies.
+- Root cause 2: GET/POST treat any RUNNING row within 15 min as live. Zombies make the button report "running" or skip start while nothing scores. Cron `hasRecentRunningJudgeRun` (10 min) same issue.
+- Fix strategy:
+  1. `reclaimStaleRunningRuns()` on POST (and cron) via `lib/trae/runs.ts` so zombies become ERROR and no longer block.
+  2. `statusFromRuns` / skip guards only count **fresh** RUNNING rows (`isFreshRunningRun`).
+  3. Handoff: await self-invoke until a fresh RUNNING row appears (or fetch settles / early failure), keeping CPU on the POST request; then detach and let run-all continue request-bound. Early failure still falls back to in-process `runPipeline`. Do not return after a blind 250ms sleep.
+- Regression risk: keep cooldown, cron secret in header only, and source shapes required by tests.
+
 ## Bug Fixes
 
 | Date | Bug | Cause | Fix |
 |------|-----|-------|-----|
 | 2026-06-30 | Public run looked like a full scoring pass but only advanced 90 items. | The judge step is intentionally capped per run and the status message hid the cap. | Planned to include per-batch judge counts in the completion message. |
 | 2026-07-09 | 开始评分 button silently did nothing in production. | In-memory status is per-instance (split-brain with multi-instance Cloud Run) and fire-and-forget background work is CPU-throttled after the POST response. | POST self-invokes cron run-all (request-bound CPU); GET derives cross-instance status from the runs table; client adds a post-POST grace window. |
+| 2026-07-10 | 开始评分 still does not score; many forever-RUNNING runs in DB. | Self-invoke handoff too short (CPU throttle mid-flight) + zombie RUNNING rows block/skip new work. | Reclaim stale RUNNING; only treat fresh runs as active; hold POST open until pipeline handoff evidence. |
 
 ## Change History
 
@@ -65,6 +77,7 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 |------|--------|--------|
 | 2026-06-30 | Created route documentation and planned batch-count status fix. | Codex |
 | 2026-07-09 | Documented and fixed the Cloud Run split-brain/no-op button: cron self-invocation + DB-derived status. | Claude |
+| 2026-07-10 | Documented zombie reclaim + reliable run-all handoff for public scoring button. | Grok |
 
 ## Planned Change: Public Scrape Plus Immediate Judge
 

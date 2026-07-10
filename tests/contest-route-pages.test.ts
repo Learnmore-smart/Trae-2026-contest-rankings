@@ -127,6 +127,20 @@ test("project detail re-score starts with a non-blocking toast", () => {
   assert.match(detailClient, /rejudgeStarted: "评分已经开始，请耐心等待"/);
   assert.match(detailClient, /setRejudgeNotice\(\{ tone: "info", text: t\.rejudgeStarted \}\);/);
   assert.match(detailClient, /className=\{`fixed right-4 top-4 z-50/);
+  // Success path must refresh detail after an awaited POST completes (done), not only via poll.
+  assert.match(detailClient, /payload\?\.ok && \(payload\.done \|\| !payload\.started\)/);
+  assert.match(detailClient, /await refreshTopicDetail\(\)/);
+});
+
+test("topic rejudge awaits scoring instead of fire-and-forget background work", () => {
+  const rejudgeRoute = read(join(process.cwd(), "app/api/trae-contest/topics/[id]/rejudge/route.ts"));
+
+  // Cloud Run throttles CPU after the response; void background rejudge is a no-op in production.
+  assert.match(rejudgeRoute, /export const maxDuration = 900;/);
+  assert.match(rejudgeRoute, /await rejudgeTopicById\(id\)/);
+  assert.doesNotMatch(rejudgeRoute, /void runRejudgeInBackground/);
+  assert.doesNotMatch(rejudgeRoute, /maxDuration = 60/);
+  assert.match(rejudgeRoute, /done: true/);
 });
 
 test("data connect nested topic reads stay below deadline-prone size", () => {
@@ -429,6 +443,8 @@ test("public run status reports bounded judging batch counts", () => {
 test("public run button works across Cloud Run instances", () => {
   const route = read(runRoutePath);
   const client = read(clientPath);
+  const runsHelper = read(join(process.cwd(), "lib/trae/runs.ts"));
+  const cronRoute = read(cronRoutePath);
 
   // POST must not rely on fire-and-forget background work on Cloud Run: with the cron
   // secret configured it self-invokes cron run-all so the pipeline runs inside a request
@@ -436,19 +452,30 @@ test("public run button works across Cloud Run instances", () => {
   assert.match(route, /buildCronRunAllUrl\(request\)/);
   assert.match(route, /\/api\/trae-contest\/cron\/run-all/);
   assert.match(route, /"x-trae-cron-secret": cronSecret/);
-  assert.match(route, /if \(config\.cronSecret\) \{[\s\S]*?void invokeCronRunAll\(request, config\.cronSecret, state\);[\s\S]*?\} else \{[\s\S]*?void runPipeline\(state\);/);
+  // Await handoff (not a blind void+250ms sleep) so Cloud Run keeps CPU until run-all is live.
+  assert.match(route, /if \(config\.cronSecret\) \{[\s\S]*?await invokeCronRunAll\(request, config\.cronSecret, state\);[\s\S]*?\} else \{[\s\S]*?void runPipeline\(state\);/);
+  assert.match(route, /const HANDOFF_WAIT_MS = 25_000;/);
+  assert.doesNotMatch(route, /void invokeCronRunAll/);
   // The secret must never ride in the query string where it would leak into request logs.
   assert.doesNotMatch(route, /secret=\$\{/);
 
-  // GET must derive a cross-instance status from the persistent runs table so status polls
-  // landing on another instance don't silently reset the button to idle.
-  assert.match(route, /const derived = statusFromRuns\(await readRecentRuns\(state\)\);/);
-  assert.match(route, /run\.status === "running" && now - Date\.parse\(run\.startedAt\) < RUNNING_RUN_WINDOW_MS/);
-  assert.match(route, /listRuns\(10\)/);
+  // GET/POST must derive cross-instance status from fresh RUNNING rows only, and reclaim
+  // zombie forever-RUNNING batches left by killed Cloud Run requests.
+  assert.match(runsHelper, /export const STALE_RUNNING_RUN_MS = 15 \* 60 \* 1000;/);
+  assert.match(runsHelper, /export function isFreshRunningRun/);
+  assert.match(runsHelper, /export async function reclaimStaleRunningRuns/);
+  assert.match(route, /isFreshRunningRun/);
+  assert.match(route, /reclaimStaleRunningRuns/);
+  assert.match(route, /statusFromRuns\(/);
+  assert.match(route, /listRuns\(/);
 
   // POST must honor a run already in flight elsewhere (no double start) and the DB cooldown.
   assert.match(route, /if \(dbStatus\?\.running\) \{\s*return NextResponse\.json\(dbStatus\);/);
   assert.match(route, /latestFinishedAtMs\(runs, state\.status\)/);
+
+  // Cron skip guard must reclaim zombies and only skip on fresh RUNNING judges.
+  assert.match(cronRoute, /reclaimStaleRunningRuns/);
+  assert.match(cronRoute, /isFreshRunningRun\(run\)/);
 
   // The client keeps polling through the start-up window instead of settling on the first
   // "not running" poll before the run's first RUNNING row is visible.

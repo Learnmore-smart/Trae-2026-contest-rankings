@@ -3,6 +3,7 @@ import { extractBearerToken, isValidCronSecret } from "@/lib/trae/auth";
 import { listRuns, writeBoardSnapshot } from "@/lib/trae/api";
 import { judgeChangedTraeTopics } from "@/lib/trae/judge";
 import { runTraeMatching } from "@/lib/trae/matcher";
+import { isFreshRunningRun, reclaimStaleRunningRuns } from "@/lib/trae/runs";
 import { scrapeAllTraeSources, scrapeTraeSource } from "@/lib/trae/scraper";
 
 export const runtime = "nodejs";
@@ -16,14 +17,11 @@ const CRON_JUDGE_MAX = 500;
 
 async function hasRecentRunningJudgeRun(): Promise<boolean> {
   try {
-    const runs = await listRuns(5);
-    const tenMinAgo = Date.now() - 10 * 60 * 1000;
-    return runs.some(
-      (run) =>
-        run.type === "judge" &&
-        run.status === "running" &&
-        Date.parse(run.startedAt) > tenMinAgo
-    );
+    const runs = await listRuns(20);
+    // Forever-RUNNING rows from killed batches must not block new scoring forever.
+    await reclaimStaleRunningRuns(runs);
+    const freshRuns = await listRuns(20);
+    return freshRuns.some((run) => run.type === "judge" && isFreshRunningRun(run));
   } catch {
     return false;
   }

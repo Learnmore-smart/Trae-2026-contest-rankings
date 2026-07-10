@@ -44,6 +44,11 @@ Renders full AI scoring details for one preliminary Demo topic.
 - Do not render raw forum HTML.
 - Do not expose provider API keys or authorization headers.
 
+## Bug Fix: Re-score Must Complete On POST (2026-07-10)
+
+- Server no longer fire-and-forgets rejudge (Cloud Run CPU throttle). POST awaits the full re-score.
+- Client: keep `rejudgeStarted` toast at click; on `ok && done` refresh detail and show success; only poll GET when the server returns `started` without `done` (legacy/fallback). Do not treat empty `error: null` on another instance as success without a detail refresh that shows a new evaluation.
+
 ## Change History
 
 | Date | Change | Author |
@@ -53,6 +58,7 @@ Renders full AI scoring details for one preliminary Demo topic.
 | 2026-07-01 | Planned removal of the public AI scoring audit input/output section. | Codex |
 | 2026-07-04 | Planned non-blocking toast feedback for public re-score starts. | Codex |
 | 2026-07-04 | Implemented re-score start toast and removed browser confirmation. | Codex |
+| 2026-07-10 | Align client re-score completion with awaited POST (no false success from multi-instance GET). | Grok |
 
 ## Change Plan: AI I/O Implementation Alignment
 

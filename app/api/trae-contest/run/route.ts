@@ -5,10 +5,13 @@ import { getTraeConfig } from "@/lib/trae/config";
 import { judgeChangedTraeTopics } from "@/lib/trae/judge";
 import { DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY } from "@/lib/trae/judge-policy";
 import { runTraeMatching } from "@/lib/trae/matcher";
+import { isFreshRunningRun, reclaimStaleRunningRuns, STALE_RUNNING_RUN_MS } from "@/lib/trae/runs";
 import { scrapeAllTraeSources } from "@/lib/trae/scraper";
 import type { TraeRun } from "@/lib/trae/types";
 
 export const runtime = "nodejs";
+// Allow the POST handoff (or in-process fallback) to stay alive under Cloud Run's long timeout.
+export const maxDuration = 900;
 
 // One public "update now" button drives the whole pipeline (scrape -> match -> judge).
 // The same pipeline also runs automatically on the Cloud Scheduler cron; this endpoint
@@ -21,6 +24,10 @@ export const runtime = "nodejs";
 // a different instance than the click). Instead, POST self-invokes the cron run-all
 // endpoint — the work then runs inside a request that keeps CPU for the full 900s service
 // timeout — and GET derives a cross-instance status from the persistent runs table.
+//
+// Handoff: POST keeps the request open (CPU allocated) until run-all has written a fresh
+// RUNNING row (or the self-invoke settles / fails early). Returning after a blind 250ms
+// sleep left zombies: startRun wrote RUNNING, then CPU throttle killed the outbound fetch.
 
 export type RunPhase = "idle" | "scrape" | "match" | "judge" | "done" | "error";
 
@@ -34,12 +41,8 @@ export interface PipelineStatus {
 }
 
 const COOLDOWN_MS = 30_000;
-// A RUNNING run older than this is a zombie (killed mid-flight); ignore it for status.
-// Must exceed judgeBatchDeadlineMs (690s) so a legit long batch still reads as running.
-const RUNNING_RUN_WINDOW_MS = 15 * 60 * 1000;
-// After the last run finishes, keep reporting "done" to pollers for this long so the
-// client that started the run gets its completion signal (and board refresh) even when
-// the memory that produced the run lives on another instance.
+// Keep reporting "done" to pollers after finish so the client that started the run gets
+// its completion signal even when the memory that produced the run lives on another instance.
 const DONE_RUN_WINDOW_MS = 2 * 60 * 1000;
 // In-memory "running" older than this is stale (background pipeline died without a
 // finally); fall through to DB status and let POST start a fresh run.
@@ -52,6 +55,8 @@ const RUNS_CACHE_TTL_MS = 2_500;
 // failures (e.g. undici's 300s headers timeout outliving the 900s run) mean the work
 // is still running server-side; starting a second pipeline would double-grade.
 const EARLY_INVOKE_FAILURE_MS = 10_000;
+// How long POST holds open waiting for run-all to prove it started (fresh RUNNING row).
+const HANDOFF_WAIT_MS = 25_000;
 
 interface PipelineState {
   status: PipelineStatus;
@@ -85,10 +90,14 @@ function isStaleRunningStatus(status: PipelineStatus): boolean {
   return !Number.isFinite(startedAt) || Date.now() - startedAt > STALE_MEMORY_RUNNING_MS;
 }
 
-async function readRecentRuns(state: PipelineState): Promise<TraeRun[]> {
+function invalidateRunsCache(state: PipelineState): void {
+  state.runsCache = undefined;
+}
+
+async function readRecentRuns(state: PipelineState, limit = 20): Promise<TraeRun[]> {
   const now = Date.now();
   if (state.runsCache && now - state.runsCache.at < RUNS_CACHE_TTL_MS) return state.runsCache.runs;
-  const runs = await listRuns(10);
+  const runs = await listRuns(limit);
   state.runsCache = { at: now, runs };
   return runs;
 }
@@ -110,11 +119,8 @@ const PHASE_MESSAGE: Partial<Record<RunPhase, string>> = {
  * the table says nothing relevant (no fresh RUNNING run, no recent finish), so callers can
  * fall back to this process's in-memory state.
  */
-function statusFromRuns(runs: TraeRun[]): PipelineStatus | null {
-  const now = Date.now();
-  const runningRuns = runs.filter(
-    (run) => run.status === "running" && now - Date.parse(run.startedAt) < RUNNING_RUN_WINDOW_MS
-  );
+function statusFromRuns(runs: TraeRun[], now = Date.now()): PipelineStatus | null {
+  const runningRuns = runs.filter((run) => isFreshRunningRun(run, now, STALE_RUNNING_RUN_MS));
   if (runningRuns.length > 0) {
     // listRuns is startedAt DESC: latest run's type decides the phase shown, the oldest
     // running run anchors startedAt.
@@ -237,51 +243,105 @@ function buildCronRunAllUrl(request: NextRequest): string {
   if (forwardedHost) url.host = forwardedHost;
   if (forwardedProto) url.protocol = `${forwardedProto}:`;
   // Preserve the basePath prefix by swapping only the route suffix.
-  url.pathname = url.pathname.replace(/\/api\/trae-contest\/run$/, "/api/trae-contest/cron/run-all");
+  url.pathname = url.pathname.replace(/\/api\/trae-contest\/run\/?$/, "/api/trae-contest/cron/run-all");
   url.search = "";
   return url.toString();
+}
+
+type CronRunAllPayload = {
+  result?: { evaluatedCount?: number; failedCount?: number };
+  skipped?: string;
+} | null;
+
+function applyCronPayloadToState(state: PipelineState, payload: CronRunAllPayload): void {
+  state.status = {
+    ...state.status,
+    running: false,
+    phase: "done",
+    finishedAt: new Date().toISOString(),
+    message: payload?.skipped
+      ? "后台已有评分批次在运行，本次点击已并入该批次。"
+      : `本轮抓取、匹配、评分已完成；评分 ${payload?.result?.evaluatedCount ?? 0} 个，失败 ${payload?.result?.failedCount ?? 0} 个。`,
+    error: null
+  };
 }
 
 /**
  * Run the pipeline through the cron run-all endpoint so it executes inside its own request
  * (full CPU up to the Cloud Run service timeout) instead of as throttled background work.
  * The secret goes in a header — never the query string — so it stays out of request logs.
+ *
+ * Keeps this request alive until handoff evidence (fresh RUNNING row) so Cloud Run does not
+ * throttle CPU before the outbound self-invoke is established. Once handoff is confirmed,
+ * detaches from the full 900s response and lets clients poll the runs table.
  */
 async function invokeCronRunAll(request: NextRequest, cronSecret: string, state: PipelineState): Promise<void> {
   const dispatchedAt = Date.now();
-  try {
-    const response = await fetch(buildCronRunAllUrl(request), {
-      method: "POST",
-      headers: { "x-trae-cron-secret": cronSecret },
-      cache: "no-store"
-    });
-    if (!response.ok) throw new Error(`cron run-all responded ${response.status}`);
-    const payload = (await response.json().catch(() => null)) as
-      | { result?: { evaluatedCount?: number; failedCount?: number }; skipped?: string }
-      | null;
-    state.status = {
-      ...state.status,
-      running: false,
-      phase: "done",
-      finishedAt: new Date().toISOString(),
-      message: payload?.skipped
-        ? "后台已有评分批次在运行，本次点击已并入该批次。"
-        : `本轮抓取、匹配、评分已完成；评分 ${payload?.result?.evaluatedCount ?? 0} 个，失败 ${payload?.result?.failedCount ?? 0} 个。`,
-      error: null
-    };
-  } catch (error) {
-    if (Date.now() - dispatchedAt < EARLY_INVOKE_FAILURE_MS) {
-      // The run-all request never started; grade in-process so the click still does work.
-      console.error("[trae] cron run-all self-invocation failed to start; falling back in-process:", error);
-      await runPipeline(state);
+  let fetchError: unknown = null;
+  let fetchSettled = false;
+  let payload: CronRunAllPayload = null;
+
+  const fetchPromise = (async () => {
+    try {
+      const response = await fetch(buildCronRunAllUrl(request), {
+        method: "POST",
+        headers: { "x-trae-cron-secret": cronSecret },
+        cache: "no-store"
+      });
+      if (!response.ok) throw new Error(`cron run-all responded ${response.status}`);
+      payload = (await response.json().catch(() => null)) as CronRunAllPayload;
+    } catch (error) {
+      fetchError = error;
+    } finally {
+      fetchSettled = true;
+    }
+  })();
+
+  while (Date.now() - dispatchedAt < HANDOFF_WAIT_MS) {
+    if (fetchSettled) break;
+
+    invalidateRunsCache(state);
+    const runs = await readRecentRuns(state);
+    const handedOff = runs.some(
+      (run) => isFreshRunningRun(run) && Date.parse(run.startedAt) >= dispatchedAt - 2_000
+    );
+    if (handedOff) {
+      // run-all is request-bound elsewhere (or on this instance as a concurrent request).
+      // Detach: do not await the full 900s response on this POST.
+      void fetchPromise.then(() => {
+        if (!fetchError) applyCronPayloadToState(state, payload);
+        else {
+          console.error("[trae] cron run-all self-invocation lost its response after handoff:", fetchError);
+          state.status = { ...state.status, running: false, phase: "idle", message: "等待运行。" };
+        }
+      });
       return;
     }
-    // Late failure: the fetch died (e.g. client-side headers timeout) but the server-side
-    // run is still going. Release this instance's memory lock and let the runs table drive
-    // status; starting a second pipeline here would double-grade the same topics.
-    console.error("[trae] cron run-all self-invocation lost its response; deferring to runs table:", error);
-    state.status = { ...state.status, running: false, phase: "idle", message: "等待运行。" };
+
+    await sleep(400);
   }
+
+  // Fetch finished inside the handoff window (skip, fast path, or error).
+  if (fetchSettled) {
+    if (fetchError) {
+      if (Date.now() - dispatchedAt < EARLY_INVOKE_FAILURE_MS) {
+        console.error("[trae] cron run-all self-invocation failed to start; falling back in-process:", fetchError);
+        await runPipeline(state);
+        return;
+      }
+      console.error("[trae] cron run-all self-invocation lost its response; deferring to runs table:", fetchError);
+      state.status = { ...state.status, running: false, phase: "idle", message: "等待运行。" };
+      return;
+    }
+    applyCronPayloadToState(state, payload);
+    return;
+  }
+
+  // Still no RUNNING row and fetch not settled — connection may be stuck. Fall back
+  // in-process while this request still holds CPU so the click does real work.
+  console.error("[trae] cron run-all handoff timed out without RUNNING evidence; falling back in-process");
+  void fetchPromise; // abandon waiting; avoid double work only if run-all later starts
+  await runPipeline(state);
 }
 
 export async function GET(): Promise<NextResponse> {
@@ -290,7 +350,14 @@ export async function GET(): Promise<NextResponse> {
     return NextResponse.json(state.status);
   }
 
-  const derived = statusFromRuns(await readRecentRuns(state));
+  const runs = await readRecentRuns(state);
+  // Best-effort zombie cleanup on poll so the UI does not stick on "运行中" for dead batches.
+  const reclaimed = await reclaimStaleRunningRuns(runs);
+  if (reclaimed > 0) {
+    invalidateRunsCache(state);
+  }
+  const freshRuns = reclaimed > 0 ? await readRecentRuns(state) : runs;
+  const derived = statusFromRuns(freshRuns);
   if (derived) return NextResponse.json(derived);
   return NextResponse.json(state.status);
 }
@@ -304,9 +371,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json(state.status);
   }
 
-  // Cross-instance guards: a run already in flight anywhere reports as running instead of
-  // double-starting, and a run that just finished anywhere still honors the cooldown.
-  const runs = await readRecentRuns(state);
+  // Reclaim zombies first so forever-RUNNING rows do not block this click.
+  invalidateRunsCache(state);
+  let runs = await readRecentRuns(state);
+  const reclaimed = await reclaimStaleRunningRuns(runs);
+  if (reclaimed > 0) {
+    invalidateRunsCache(state);
+    runs = await readRecentRuns(state);
+  }
+
+  // Cross-instance guards: a *fresh* run already in flight anywhere reports as running
+  // instead of double-starting, and a run that just finished anywhere still honors cooldown.
   const dbStatus = statusFromRuns(runs);
   if (dbStatus?.running) {
     return NextResponse.json(dbStatus);
@@ -332,11 +407,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const config = getTraeConfig();
   if (config.cronSecret) {
-    // Fire-and-forget the self-invocation; the response returns immediately and clients
-    // poll GET (runs-table backed) for progress. The short sleep lets the outbound request
-    // flush before Cloud Run throttles this instance's CPU post-response.
-    void invokeCronRunAll(request, config.cronSecret, state);
-    await sleep(250);
+    // Await handoff (not the full 900s batch) so CPU stays allocated until run-all is live.
+    await invokeCronRunAll(request, config.cronSecret, state);
   } else {
     // Local dev: no cron secret, and the process keeps CPU — run in-process as before.
     void runPipeline(state);

@@ -250,8 +250,26 @@ export default function ProjectDetailClient({ id }: { id: string }) {
     return () => stopRejudgePolling();
   }, [stopRejudgePolling]);
 
+  const refreshTopicDetail = useCallback(async () => {
+    try {
+      const detailResponse = await fetch(`${API_BASE}/api/trae-contest/topics/${encodeURIComponent(id)}`, {
+        cache: "no-store"
+      });
+      if (detailResponse.ok) {
+        const freshItem = (await detailResponse.json()) as RankingItem;
+        setItem(freshItem);
+      }
+    } catch {
+      // Best-effort: scoring may have succeeded even if detail refresh fails.
+    }
+  }, [id]);
+
   const startRejudgePolling = useCallback(() => {
     stopRejudgePolling();
+    // Fallback path only: older servers returned { started: true } and finished in the
+    // background. Current servers await the full rejudge on POST (done: true). Polling
+    // must not treat another instance's empty in-memory state as success.
+    const baselineCreatedAt = item?.evaluation?.createdAt ?? null;
     pollRef.current = window.setInterval(async () => {
       try {
         const statusResponse = await fetch(`${API_BASE}/api/trae-contest/topics/${encodeURIComponent(id)}/rejudge`, {
@@ -260,27 +278,35 @@ export default function ProjectDetailClient({ id }: { id: string }) {
         const status = (await statusResponse.json().catch(() => null)) as
           | { running?: boolean; error?: string | null }
           | null;
-        if (!status || status.running) return;
-        stopRejudgePolling();
-        if (status.error === null || status.error === undefined) {
-          // Re-judge succeeded — refresh the topic detail so the new score shows.
-          try {
-            const detailResponse = await fetch(`${API_BASE}/api/trae-contest/topics/${encodeURIComponent(id)}`, {
-              cache: "no-store"
-            });
-            if (detailResponse.ok) {
-              const freshItem = (await detailResponse.json()) as RankingItem;
-              setItem(freshItem);
-            }
-          } catch {
-            // Best-effort: the re-judge itself succeeded; detail refresh failure is non-fatal.
-          }
+        if (!status) return;
+        if (status.running) return;
+
+        // When status is not running, confirm via detail payload that a new evaluation exists.
+        // Multi-instance Cloud Run GET may report running:false with error:null while work
+        // never ran on this instance — do not toast success without a fresher evaluation.
+        const detailResponse = await fetch(`${API_BASE}/api/trae-contest/topics/${encodeURIComponent(id)}`, {
+          cache: "no-store"
+        });
+        if (!detailResponse.ok) return;
+        const freshItem = (await detailResponse.json()) as RankingItem;
+        const nextCreatedAt = freshItem.evaluation?.createdAt ?? null;
+        const evaluationAdvanced =
+          nextCreatedAt !== null && (baselineCreatedAt === null || nextCreatedAt !== baselineCreatedAt);
+
+        if (evaluationAdvanced) {
+          stopRejudgePolling();
+          setItem(freshItem);
           setRejudgeNotice({ tone: "success", text: t.rejudgeSuccess });
-        } else {
+          setRejudging(false);
+          return;
+        }
+
+        if (status.error) {
+          stopRejudgePolling();
           const code = status.error === "not_found" || status.error === "empty" ? status.error : "error";
           setRejudgeNotice({ tone: rejudgeNoticeTone(code), text: rejudgeNoticeText(code, t) });
+          setRejudging(false);
         }
-        setRejudging(false);
       } catch {
         // Transient network error — keep polling until timeout.
       }
@@ -291,7 +317,7 @@ export default function ProjectDetailClient({ id }: { id: string }) {
       setRejudgeNotice({ tone: "error", text: t.rejudgeTimeout });
       setRejudging(false);
     }, 10 * 60 * 1000);
-  }, [id, stopRejudgePolling, t.rejudgeSuccess, t.rejudgeTimeout]);
+  }, [id, item?.evaluation?.createdAt, stopRejudgePolling, t]);
 
   async function handleRejudge() {
     if (rejudging) return;
@@ -303,13 +329,23 @@ export default function ProjectDetailClient({ id }: { id: string }) {
         method: "POST"
       });
       const payload = (await response.json().catch(() => null)) as
-        | { ok?: boolean; started?: boolean; error?: string; code?: string }
+        | { ok?: boolean; done?: boolean; started?: boolean; error?: string; code?: string }
         | null;
+
+      // Current server: POST awaits the full rejudge and returns { ok, done }.
+      if (response.ok && payload?.ok && (payload.done || !payload.started)) {
+        await refreshTopicDetail();
+        setRejudgeNotice({ tone: "success", text: t.rejudgeSuccess });
+        return;
+      }
+
+      // Legacy/async server: { started: true } then poll until evaluation advances.
       if (response.ok && payload?.started) {
         polling = true;
         startRejudgePolling();
         return;
       }
+
       setRejudgeNotice({ tone: rejudgeNoticeTone(payload?.code), text: rejudgeNoticeText(payload?.code, t) });
     } catch {
       setRejudgeNotice({ tone: "error", text: t.rejudgeFailed });
