@@ -452,10 +452,17 @@ test("public run button works across Cloud Run instances", () => {
   assert.match(route, /buildCronRunAllUrl\(request\)/);
   assert.match(route, /\/api\/trae-contest\/cron\/run-all/);
   assert.match(route, /"x-trae-cron-secret": cronSecret/);
+  // Loopback self-invoke: avoid public ingress/egress (connect timeout → silent no-op).
+  assert.match(route, /127\.0\.0\.1/);
+  assert.match(route, /process\.env\.PORT/);
   // Await handoff (not a blind void+250ms sleep) so Cloud Run keeps CPU until run-all is live.
   assert.match(route, /if \(config\.cronSecret\) \{[\s\S]*?await invokeCronRunAll\(request, config\.cronSecret, state\);[\s\S]*?\} else \{[\s\S]*?void runPipeline\(state\);/);
   assert.match(route, /const HANDOFF_WAIT_MS = 25_000;/);
   assert.doesNotMatch(route, /void invokeCronRunAll/);
+  // Self-invoke failure without RUNNING handoff must fall back in-process — never silent idle.
+  assert.match(route, /hasDispatchHandoff/);
+  assert.match(route, /falling back in-process/);
+  assert.match(route, /await runPipeline\(state\)/);
   // The secret must never ride in the query string where it would leak into request logs.
   assert.doesNotMatch(route, /secret=\$\{/);
 
@@ -482,6 +489,9 @@ test("public run button works across Cloud Run instances", () => {
   assert.match(client, /const RUN_START_GRACE_MS = 15_000;/);
   assert.match(client, /graceUntilRef\.current = Date\.now\(\) \+ RUN_START_GRACE_MS;/);
   assert.match(client, /if \(!next\.running && Date\.now\(\) < graceUntilRef\.current\) return;/);
+  // Poll starts on click (not only after POST body); silent idle is surfaced as error.
+  assert.match(client, /startPolling\(\);\s*try \{/);
+  assert.match(client, /!next\.running && next\.phase === "idle"/);
 });
 
 test("cron judge tasks rejudge changed topics, not only unjudged topics", () => {

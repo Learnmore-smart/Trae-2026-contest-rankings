@@ -702,16 +702,30 @@ function RunButton({ language, onCompleted }: { language: ContestLanguage; onCom
     if (status?.running) return;
     graceUntilRef.current = Date.now() + RUN_START_GRACE_MS;
     setStatus({ running: true, phase: "judge", startedAt: null, finishedAt: null, message: t.judging, error: null });
+    // Poll immediately: POST may hold open for handoff (seconds) or in-process fallback
+    // (minutes). Waiting for the body before polling left the UI frozen on optimistic state.
+    startPolling();
     try {
       const response = await fetch(`${API_BASE}/api/trae-contest/run`, { method: "POST" });
       const next = (await response.json()) as PipelineStatus;
-      setStatus(next);
-      if (next.running) startPolling();
-      else handleSettled(next);
+      // Server used to return silent idle after a failed self-invoke; surface that as retryable
+      // error. Do not rewrite cooldown replies (same phase/running shape, different message).
+      const isCooldown = typeof next.message === "string" && next.message.includes("刚刚已更新过");
+      const normalized =
+        !next.running && next.phase === "idle" && !isCooldown
+          ? { ...next, phase: "error" as const, message: t.failed, error: next.message || t.failed }
+          : next;
+      setStatus(normalized);
+      if (normalized.running) startPolling();
+      else {
+        stopPolling();
+        handleSettled(normalized);
+      }
     } catch {
-      setStatus({ running: false, phase: "error", startedAt: null, finishedAt: null, message: t.failed, error: "Network error" });
+      // Keep polling through the grace window — the server request may still be scoring.
+      setStatus({ running: true, phase: "judge", startedAt: null, finishedAt: null, message: t.judging, error: null });
     }
-  }, [handleSettled, startPolling, status?.running, t.failed, t.judging]);
+  }, [handleSettled, startPolling, stopPolling, status?.running, t.failed, t.judging]);
 
   const phase: RunPhase = status?.phase ?? "idle";
   const running = status?.running ?? false;

@@ -50,11 +50,6 @@ const STALE_MEMORY_RUNNING_MS = 20 * 60 * 1000;
 // Polling clients hit GET every 2s; cache the runs read briefly so status polls cost
 // at most ~1 Data Connect query per interval regardless of how many tabs are open.
 const RUNS_CACHE_TTL_MS = 2_500;
-// A self-invocation failure within this window means the request never really started
-// (connection refused / 401 / DNS) — fall back to the in-process pipeline. Later
-// failures (e.g. undici's 300s headers timeout outliving the 900s run) mean the work
-// is still running server-side; starting a second pipeline would double-grade.
-const EARLY_INVOKE_FAILURE_MS = 10_000;
 // How long POST holds open waiting for run-all to prove it started (fresh RUNNING row).
 const HANDOFF_WAIT_MS = 25_000;
 
@@ -237,15 +232,23 @@ async function runPipeline(state: PipelineState): Promise<void> {
 }
 
 function buildCronRunAllUrl(request: NextRequest): string {
-  const url = new URL(request.url);
-  const forwardedHost = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  const forwardedProto = request.headers.get("x-forwarded-proto");
-  if (forwardedHost) url.host = forwardedHost;
-  if (forwardedProto) url.protocol = `${forwardedProto}:`;
-  // Preserve the basePath prefix by swapping only the route suffix.
-  url.pathname = url.pathname.replace(/\/api\/trae-contest\/run\/?$/, "/api/trae-contest/cron/run-all");
-  url.search = "";
-  return url.toString();
+  // Loopback keeps the handoff inside this container: no public ingress/egress, no
+  // dependency on the external hostname resolving from Cloud Run. Preserve basePath by
+  // swapping only the route suffix on the incoming pathname.
+  const pathname = new URL(request.url).pathname.replace(
+    /\/api\/trae-contest\/run\/?$/,
+    "/api/trae-contest/cron/run-all"
+  );
+  const port = process.env.PORT || "8080";
+  return `http://127.0.0.1:${port}${pathname}`;
+}
+
+async function hasDispatchHandoff(state: PipelineState, dispatchedAt: number): Promise<boolean> {
+  invalidateRunsCache(state);
+  const runs = await readRecentRuns(state);
+  return runs.some(
+    (run) => isFreshRunningRun(run) && Date.parse(run.startedAt) >= dispatchedAt - 2_000
+  );
 }
 
 type CronRunAllPayload = {
@@ -300,18 +303,14 @@ async function invokeCronRunAll(request: NextRequest, cronSecret: string, state:
   while (Date.now() - dispatchedAt < HANDOFF_WAIT_MS) {
     if (fetchSettled) break;
 
-    invalidateRunsCache(state);
-    const runs = await readRecentRuns(state);
-    const handedOff = runs.some(
-      (run) => isFreshRunningRun(run) && Date.parse(run.startedAt) >= dispatchedAt - 2_000
-    );
-    if (handedOff) {
+    if (await hasDispatchHandoff(state, dispatchedAt)) {
       // run-all is request-bound elsewhere (or on this instance as a concurrent request).
       // Detach: do not await the full 900s response on this POST.
       void fetchPromise.then(() => {
         if (!fetchError) applyCronPayloadToState(state, payload);
         else {
           console.error("[trae] cron run-all self-invocation lost its response after handoff:", fetchError);
+          // Handoff already proved work started; let GET/statusFromRuns drive the rest.
           state.status = { ...state.status, running: false, phase: "idle", message: "等待运行。" };
         }
       });
@@ -324,21 +323,26 @@ async function invokeCronRunAll(request: NextRequest, cronSecret: string, state:
   // Fetch finished inside the handoff window (skip, fast path, or error).
   if (fetchSettled) {
     if (fetchError) {
-      if (Date.now() - dispatchedAt < EARLY_INVOKE_FAILURE_MS) {
-        console.error("[trae] cron run-all self-invocation failed to start; falling back in-process:", fetchError);
-        await runPipeline(state);
+      // Only defer to the runs table when this dispatch actually started server-side.
+      // Connect timeouts / 401 / DNS never write a RUNNING row — those must fall back
+      // in-process. The old timer-based "late failure ⇒ idle" path made 开始评分 a silent
+      // no-op when undici's ~10s connect timeout landed just after a 10s early window.
+      if (await hasDispatchHandoff(state, dispatchedAt)) {
+        console.error("[trae] cron run-all self-invocation lost its response after handoff; deferring to runs table:", fetchError);
+        state.status = { ...state.status, running: false, phase: "idle", message: "等待运行。" };
         return;
       }
-      console.error("[trae] cron run-all self-invocation lost its response; deferring to runs table:", fetchError);
-      state.status = { ...state.status, running: false, phase: "idle", message: "等待运行。" };
+      console.error("[trae] cron run-all self-invocation failed to start; falling back in-process:", fetchError);
+      await runPipeline(state);
       return;
     }
     applyCronPayloadToState(state, payload);
     return;
   }
 
-  // Still no RUNNING row and fetch not settled — connection may be stuck. Fall back
-  // in-process while this request still holds CPU so the click does real work.
+  // Still no RUNNING row and fetch not settled — connection may be stuck (e.g. container
+  // concurrency=1 deadlock on self-fetch). Fall back in-process while this request still
+  // holds CPU so the click does real work.
   console.error("[trae] cron run-all handoff timed out without RUNNING evidence; falling back in-process");
   void fetchPromise; // abandon waiting; avoid double work only if run-all later starts
   await runPipeline(state);

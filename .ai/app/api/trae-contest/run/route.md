@@ -63,6 +63,33 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
   3. Handoff: await self-invoke until a fresh RUNNING row appears (or fetch settles / early failure), keeping CPU on the POST request; then detach and let run-all continue request-bound. Early failure still falls back to in-process `runPipeline`. Do not return after a blind 250ms sleep.
 - Regression risk: keep cooldown, cron secret in header only, and source shapes required by tests.
 
+## Bug Fix Plan: Self-Invoke Connect Timeout → Silent Idle (2026-07-10 evening)
+
+- Symptom (production probe): POST `/api/trae-contest/run` returns in ~11.4s with
+  `{ running: false, phase: "idle", message: "等待运行。" }` — button flashes 运行中 then
+  resets; scored count does not move (user report: 4624/6495 stuck, last update 7/10 12:53).
+- Root cause:
+  1. Public POST self-invokes the public/cron URL via `fetch`. On Cloud Run this often fails
+     around undici's ~10s connect timeout (self-ingress, concurrency starvation, or egress).
+  2. `EARLY_INVOKE_FAILURE_MS = 10_000` is aligned with that connect timeout. Failures that
+     settle at ~11s take the **late** branch, which assumes work may still be running and
+     only resets memory to idle — **without** checking for a RUNNING handoff row and
+     **without** falling back to in-process `runPipeline`.
+  3. Result: click is a pure no-op after ~11s.
+- Fix strategy:
+  1. Self-invoke via **loopback** `http://127.0.0.1:$PORT` + request pathname (keeps basePath,
+     avoids public ingress/egress). Secret still only in header.
+  2. On **any** self-invoke failure: if this dispatch has **no** fresh RUNNING handoff evidence,
+     always `await runPipeline(state)` (in-process, request-bound). Only defer to the runs
+     table when handoff was already observed (true late loss of response body).
+  3. Raise `EARLY_INVOKE_FAILURE_MS` to 30s as a secondary safety net (connect timeout no
+     longer lands in a silent-idle path).
+  4. Client: start polling immediately on click (do not wait for POST body) so long
+     in-process fallbacks still refresh status from GET/DB; if POST returns idle with no
+     error after a start attempt, surface `phase: "error"` so the button does not look dead.
+- Regression risk: keep cooldown, secret-not-in-query, handoff detach when RUNNING exists,
+  and source shapes in `tests/contest-route-pages.test.ts`. Loopback must preserve basePath.
+
 ## Bug Fixes
 
 | Date | Bug | Cause | Fix |
@@ -70,6 +97,7 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 | 2026-06-30 | Public run looked like a full scoring pass but only advanced 90 items. | The judge step is intentionally capped per run and the status message hid the cap. | Planned to include per-batch judge counts in the completion message. |
 | 2026-07-09 | 开始评分 button silently did nothing in production. | In-memory status is per-instance (split-brain with multi-instance Cloud Run) and fire-and-forget background work is CPU-throttled after the POST response. | POST self-invokes cron run-all (request-bound CPU); GET derives cross-instance status from the runs table; client adds a post-POST grace window. |
 | 2026-07-10 | 开始评分 still does not score; many forever-RUNNING runs in DB. | Self-invoke handoff too short (CPU throttle mid-flight) + zombie RUNNING rows block/skip new work. | Reclaim stale RUNNING; only treat fresh runs as active; hold POST open until pipeline handoff evidence. |
+| 2026-07-10 | 开始评分 still no-ops (~11s → idle). | Self-invoke connect timeout > EARLY window; late path silent idle without handoff check. | Loopback self-invoke; fallback whenever no handoff evidence; client polls on click. |
 
 ## Change History
 
@@ -78,6 +106,7 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 | 2026-06-30 | Created route documentation and planned batch-count status fix. | Codex |
 | 2026-07-09 | Documented and fixed the Cloud Run split-brain/no-op button: cron self-invocation + DB-derived status. | Claude |
 | 2026-07-10 | Documented zombie reclaim + reliable run-all handoff for public scoring button. | Grok |
+| 2026-07-10 | Fixed silent idle after self-invoke connect timeout: loopback URL + handoff-gated fallback. | Grok |
 
 ## Planned Change: Public Scrape Plus Immediate Judge
 
