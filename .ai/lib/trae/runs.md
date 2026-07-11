@@ -1,6 +1,6 @@
 # lib/trae/runs.ts
 
-> Last updated: 2026-07-10 | Protection: STANDARD
+> Last updated: 2026-07-11 | Protection: STANDARD
 
 ## Purpose
 
@@ -55,3 +55,4 @@ Creates and updates SQL `runs` records for scraper, matcher, and judge jobs.
 | 2026-06-30 | Planned Data Connect run-tracking cleanup. | Codex |
 | 2026-06-30 | Implemented Data Connect run-tracking import cleanup. | Codex |
 | 2026-07-10 | Documented zombie RUNNING reclaim for public/cron scoring unblock. | Grok |
+| 2026-07-11 | Reclaim remains the safety net; primary fix for 1600s reclaim UX is hard-drain finishRun in judge so zombies should become rare. | Grok |

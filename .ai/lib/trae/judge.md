@@ -1,6 +1,6 @@
 # lib/trae/judge.ts
 
-> Last updated: 2026-07-04 | Protection: STANDARD
+> Last updated: 2026-07-11 | Protection: STANDARD
 
 ## Purpose
 
@@ -111,6 +111,21 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | 2026-07-08 | Added systemic LLM failure early-abort: `judgeChangedTraeTopics` tracks `consecutiveSystemicFailures`; when 2 consecutive topics return `isSystemicLLMFallbackError`, throws `SystemicLLMFailureError` to stop `runWithConcurrency` and records the abort in `finishRun` logs. | Claude |
 | 2026-07-09 | Fixed stuck "已评分" count: `consecutiveSystemicFailures` was never reset on a successful grade (only on non-systemic failures), so it accumulated across the whole batch and any 2 systemic failures aborted the run — freezing progress on a flaky gateway. Now reset to 0 after each successful grade, restoring true consecutive semantics per the fix-empty-llm-response-handling spec. | Claude |
 | 2026-07-09 | Added a batch wall-clock deadline (`JudgeOptions.deadlineMs`, default `config.judgeBatchDeadlineMs` = 690s): once elapsed, workers stop taking new topics (`skippedForDeadline`) and let in-flight ones drain, so `finishRun` + snapshot refresh happen inside the Cloud Run 900s timeout instead of the batch being killed mid-flight (zombie RUNNING run + frozen snapshot). run-all passes 300s per pass. Status becomes `partial` when topics are skipped. | Claude |
+| 2026-07-11 | Soft deadline alone was insufficient: in-flight topics (vision + 4 evaluators + consensus, concurrency 16) can drain past Cloud Run 900s → process killed before `finishRun` → zombie RUNNING → UI "运行中断 / Reclaimed stale RUNNING run after 1600s". Added hard drain race (`hardDrainMs` / `judgeBatchHardDrainMs`, default 90s after soft deadline): stop awaiting concurrency after hard deadline and always `finishRun` partial so reclaim is not the only finalizer. | Grok |
+
+## Bug Fix: Soft Deadline Still Leaves Zombie RUNNING (2026-07-11)
+
+**Discovered**: 2026-07-11  
+**Description**: Public 重试评分 shows `运行中断，请稍后重试` with `Reclaimed stale RUNNING run after 1600s (process likely killed before finishRun)`.  
+**Root Cause**: Soft `batchDeadlineAt` only skips *new* topics. In-flight `judgeOneTopic` work has no wall-clock cap; under rate limits a single topic (or 16 concurrent) can outlive Cloud Run's 900s request timeout. The process is SIGKILL'd mid-await → no `finishRun` → forever RUNNING until reclaim (~15 min) surfaces ERROR. In-process `runPipeline` also used default 690s × two passes, far over 900s.  
+**Fix Strategy**:
+1. Soft deadline: stop new topics (existing).
+2. Hard deadline = soft + `hardDrainMs` (default 90s): `Promise.race` concurrency vs sleep; after hard hit, `finishRun(partial)` immediately even if workers still run (late writes OK).
+3. `runPipeline` / public fallback pass `deadlineMs: 300_000` like cron run-all.
+4. UI treats reclaimed-stale errors as retryable timeout copy (not opaque pipeline crash).
+
+**Impact**: `lib/trae/judge.ts`, `lib/trae/config.ts`, `app/api/trae-contest/run/route.ts`, tests  
+**Test Plan**: Source guards for hard race + runPipeline deadline; config default 90s hard drain.
 
 ## Bug Fix: Edited Posts Not Rejudged
 

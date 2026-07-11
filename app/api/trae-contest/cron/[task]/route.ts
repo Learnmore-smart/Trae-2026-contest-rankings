@@ -72,10 +72,14 @@ async function runCronTask(task: string): Promise<NextResponse> {
     // The old sequential approach (scrape → match → judge) wasted most of the timeout on
     // scraping, leaving little time for judging — causing only ~4 topics graded per day.
     const halfMax = Math.floor(CRON_JUDGE_MAX / 2);
-    // run-all fits scrape + match + TWO judge passes into one ~900s request, so each judge pass
-    // gets a smaller wall-clock budget than a standalone judge cron. firstJudge runs alongside
-    // scrape/match; secondJudge runs after, so ~300s each keeps the whole task inside the window.
+    // run-all fits scrape + match + TWO judge passes into one ~900s request. Soft 300s per
+    // judge pass + hard drain (~90s in judge) must leave headroom for snapshot + response.
+    // Overall budget also shrinks the second pass when scrape/match ate the clock so Cloud
+    // Run does not kill mid-second-pass and leave a zombie RUNNING row.
     const RUN_ALL_JUDGE_DEADLINE_MS = 300_000;
+    const RUN_ALL_BUDGET_MS = 840_000;
+    const MIN_SECOND_JUDGE_MS = 45_000;
+    const runAllStartedAt = Date.now();
     const scrapeAndMatch = (async () => {
       await scrapeAllTraeSources();
       await runTraeMatching();
@@ -87,7 +91,21 @@ async function runCronTask(task: string): Promise<NextResponse> {
 
     const [, firstResult] = await Promise.all([scrapeAndMatch, firstJudge]);
 
-    const secondResult = await judgeChangedTraeTopics({ mode: "changed", max: halfMax, deadlineMs: RUN_ALL_JUDGE_DEADLINE_MS });
+    const remainingMs = RUN_ALL_BUDGET_MS - (Date.now() - runAllStartedAt);
+    // Reserve ~90s for judge hard-drain + snapshot; only start second pass if enough wall clock left.
+    let secondResult = { evaluatedCount: 0, failedCount: 0 };
+    if (remainingMs >= MIN_SECOND_JUDGE_MS + 90_000) {
+      const secondDeadlineMs = Math.min(RUN_ALL_JUDGE_DEADLINE_MS, remainingMs - 90_000);
+      secondResult = await judgeChangedTraeTopics({
+        mode: "changed",
+        max: halfMax,
+        deadlineMs: secondDeadlineMs
+      });
+    } else {
+      console.warn(
+        `[trae] run-all skipping second judge pass: only ${remainingMs}ms left under ${RUN_ALL_BUDGET_MS}ms budget`
+      );
+    }
     const merged = {
       evaluatedCount: firstResult.evaluatedCount + secondResult.evaluatedCount,
       failedCount: firstResult.failedCount + secondResult.failedCount

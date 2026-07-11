@@ -1,6 +1,6 @@
 # lib/trae/config.ts
 
-> Last updated: 2026-07-04 | Protection: STANDARD
+> Last updated: 2026-07-11 | Protection: STANDARD
 
 ## Purpose
 
@@ -15,7 +15,8 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 - Supplies `aiMaxRateLimitRetries` (`AI_MAX_RATE_LIMIT_RETRIES`, default 0) where 0 means unlimited rate-limit retries.
 - Supplies `aiMaxRateLimitWaitMs` (`AI_MAX_RATE_LIMIT_WAIT_MS`, default 90_000) as a per-call wall-clock ceiling that bounds the unlimited retry count so one throttled call can't hang the cron; 0 disables it.
 - Supplies `judgeConcurrency` (`TRAE_JUDGE_CONCURRENCY`, default from `DEFAULT_JUDGE_CONCURRENCY`, currently 8) for bounded topic-level judge parallelism.
-- Supplies `judgeBatchDeadlineMs` (`TRAE_JUDGE_BATCH_DEADLINE_MS`, default 690_000) as the per-batch wall-clock budget after which `judgeChangedTraeTopics` stops taking new topics so the run finalizes within the Cloud Run timeout; 0 disables it.
+- Supplies `judgeBatchDeadlineMs` (`TRAE_JUDGE_BATCH_DEADLINE_MS`, default 690_000) as the soft per-batch wall-clock budget after which `judgeChangedTraeTopics` stops taking new topics so the run finalizes within the Cloud Run timeout; 0 disables it.
+- Supplies `judgeBatchHardDrainMs` (`TRAE_JUDGE_BATCH_HARD_DRAIN_MS`, default 90_000) as the max wait after the soft deadline before abandoning the concurrency await and calling `finishRun` (hard guarantee against zombie RUNNING rows).
 - Does not expose a judge strategy switch. Scoring quality requires the four-evaluator plus consensus referee path only.
 - Tunes the matcher's forum signup lookups: `maxForumLookupsPerRun` (env `TRAE_MAX_FORUM_LOOKUPS_PER_RUN`, default `0` = unlimited), `forumLookupConcurrency` (`TRAE_FORUM_LOOKUP_CONCURRENCY`, default 16), `forumMinRequestMs` per-host start spacing (`TRAE_FORUM_MIN_REQUEST_MS`, default 150), and `forumMaxRetries` (`TRAE_FORUM_MAX_RETRIES`, default 5). Defaults favor fastest convergence; the forum host is the only real limiter (Retry-After + host-wide cooldown + backoff cover throttling).
 - Keeps NVIDIA text judging order explicit and separate from the preferred NVIDIA image/multimodal model, plus a distinct `nvidiaImageFallbackModel` (env `NVIDIA_IMAGE_FALLBACK_MODEL`, default `google/gemma-4-31b-it`) used when the primary image model soft-throttles.
@@ -74,6 +75,7 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 | 2026-07-09 | Added `aiMaxRateLimitWaitMs` (`AI_MAX_RATE_LIMIT_WAIT_MS`, default 90s) per-call rate-limit wall-clock ceiling and `judgeBatchDeadlineMs` (`TRAE_JUDGE_BATCH_DEADLINE_MS`, default 690s) per-batch deadline, so a throttled endpoint can no longer hang one call or run the batch past the cron timeout. | Claude |
 | 2026-07-08 | Switched main text + image primary to `minimaxai/minimax-m3` on both friend and nvidia. Removed `moonshotai/kimi-k2.6` from every chain (upstream removed it). Added `google/gemma-4-31b-it` as first text fallback and image fallback; `deepseek-ai/deepseek-v4-pro` and `z-ai/glm-5.2` retained as deeper text fallbacks. | Claude |
 | 2026-07-10 | Removed `minimaxai/minimax-m3` entirely (empty_content_billed). Primary text+image is now `google/gemma-4-31b-it`; fallbacks `deepseek-ai/deepseek-v4-pro`, `z-ai/glm-5.2`; image fallback deepseek-v4-pro. | Grok |
+| 2026-07-11 | Added `judgeBatchHardDrainMs` (`TRAE_JUDGE_BATCH_HARD_DRAIN_MS`, default 90s) so soft deadline + drain always finishes under Cloud Run 900s. | Grok |
 
 ## Planned Change: Judge Concurrency Config
 

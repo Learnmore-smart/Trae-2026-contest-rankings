@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import { runWithConcurrency } from "./concurrency.ts";
 import { getTraeConfig } from "./config.ts";
 import { getDataConnectDb, isMissingDataConnectOperationError, nowIso, withSqlRetry } from "./dataconnect.ts";
@@ -752,11 +753,18 @@ export interface JudgeOptions {
   max?: number;
   concurrency?: number;
   /**
-   * Wall-clock budget (ms) for this batch. Once elapsed, workers stop picking up new topics so
-   * the run finalizes within the cron request timeout. Defaults to config.judgeBatchDeadlineMs;
+   * Soft wall-clock budget (ms) for this batch. Once elapsed, workers stop picking up new topics
+   * so the run finalizes within the cron request timeout. Defaults to config.judgeBatchDeadlineMs;
    * the cron passes a smaller value to run-all's two back-to-back judge passes.
    */
   deadlineMs?: number;
+  /**
+   * Max ms to wait for in-flight topics after the soft deadline before abandoning the concurrency
+   * await and calling finishRun. Defaults to config.judgeBatchHardDrainMs. Without this, a single
+   * hung topic (or a full concurrency wave under rate limits) can outlive Cloud Run's timeout and
+   * leave a zombie RUNNING row. 0 = wait forever for drain.
+   */
+  hardDrainMs?: number;
 }
 
 export type JudgeMode = "unjudged" | "changed" | "low-confidence";
@@ -832,12 +840,18 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
   const mode = options.mode ?? "unjudged";
   const concurrency = normalizeJudgeConcurrency(options.concurrency ?? config.judgeConcurrency, max);
   const deadlineMs = options.deadlineMs ?? config.judgeBatchDeadlineMs;
+  const hardDrainMs = options.hardDrainMs ?? config.judgeBatchHardDrainMs;
+  // Soft: stop taking NEW topics. Hard: stop awaiting the concurrency pool so finishRun always
+  // runs before Cloud Run kills the request (soft-only left zombies when in-flight hung).
   const batchDeadlineAt = deadlineMs > 0 ? Date.now() + deadlineMs : null;
+  const hardDeadlineAt =
+    batchDeadlineAt !== null && hardDrainMs > 0 ? batchDeadlineAt + hardDrainMs : null;
   const run = await startRun("judge", "preliminary");
   const dc = getDataConnectDb();
   let evaluatedCount = 0;
   let failedCount = 0;
   let skippedForDeadline = 0;
+  let hardDeadlineHit = false;
 
   try {
     const rawTopics = await fetchJudgeBoardPages(dc);
@@ -899,159 +913,183 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
     // broken, not a transient blip — abort the batch instead of burning the cron budget.
     let consecutiveSystemicFailures = 0;
     let systemicAbortReason: string | null = null;
+    let concurrencyError: unknown = null;
 
-    try {
-      await runWithConcurrency(topics, concurrency, async (topicObj) => {
-        // Batch wall-clock budget: once the deadline passes, stop picking up new topics and let
-        // in-flight ones drain, so the run finalizes (finishRun + snapshot) inside the Cloud Run
-        // timeout instead of being killed mid-flight. Skipped topics keep their prior state and
-        // are retried on the next run. Every remaining worker returns here quickly once tripped,
-        // so runWithConcurrency resolves instead of grinding through the rest of the batch.
-        if (batchDeadlineAt !== null && Date.now() >= batchDeadlineAt) {
-          skippedForDeadline += 1;
-          return;
-        }
-        try {
-          const evaluation = await judgeOneTopic(topicObj.topic, topicObj.match);
-          await persistJudgedTopic(dc, topicObj.topic.id, evaluation);
-          evaluatedCount += 1;
-          // Any successful grade proves the endpoint is alive, so reset the systemic-failure
-          // counter. Without this, `consecutiveSystemicFailures` is not truly "consecutive" —
-          // it accumulates across the whole batch and any two systemic failures (even hundreds
-          // of successful grades apart, on a merely flaky gateway) abort the entire run, which
-          // freezes the "已评分" count. Only a real outage (systemic failures with no grade in
-          // between) should abort. Matches fix-empty-llm-response-handling spec requirement.
-          consecutiveSystemicFailures = 0;
-        } catch (error) {
-          failedCount += 1;
-          const llmCallLogs = error instanceof LLMFallbackError ? error.callLogs : [];
-
-          // A transient LLM failure (rate limit / quota / timeout / bad JSON) must NEVER
-          // discard a topic's existing valid score. If this topic was already successfully
-          // judged, keep its prior JUDGED evaluation intact and only count the failed
-          // re-judge attempt. Without this guard, a quota outage during a "changed" re-judge
-          // steadily flips good topics to JUDGE_ERROR (totalScore -1) and bleeds the public
-          // "已评分" count downward. Only genuinely unscored topics (needs_judging /
-          // judge_error / never scored) get downgraded to JUDGE_ERROR so the next run retries.
-          await recordTokenUsage(llmCallLogs);
-
-          // Systemic LLM failure early-abort: when the fallback chain keeps returning
-          // 200 OK with billed input tokens but empty content (empty_content_billed),
-          // retrying more topics just wastes tokens. Track consecutive systemic failures
-          // across workers and abort once two stack up. The hadValidScore guard below
-          // still runs for non-systemic failures, so existing valid scores are never
-          // discarded; a systemic throw skips the JUDGE_ERROR downgrade entirely, leaving
-          // the topic's prior state untouched for the next run.
-          if (isSystemicLLMFallbackError(error)) {
-            consecutiveSystemicFailures += 1;
-            if (consecutiveSystemicFailures >= 2) {
-              throw new SystemicLLMFailureError(
-                "pipeline aborted due to systemic LLM failure (2 consecutive topics with empty_content_billed)"
-              );
-            }
-          } else {
-            consecutiveSystemicFailures = 0;
+    const workPromise = (async () => {
+      try {
+        await runWithConcurrency(topics, concurrency, async (topicObj) => {
+          // Soft + hard wall-clock budgets: soft stops new work; hard also trips workers that
+          // somehow still pick items so we wind down. finishRun is guaranteed by racing this
+          // pool against hardDeadlineAt below — do not rely on in-flight LLM calls finishing.
+          if (hardDeadlineAt !== null && Date.now() >= hardDeadlineAt) {
+            hardDeadlineHit = true;
+            skippedForDeadline += 1;
+            return;
           }
+          if (batchDeadlineAt !== null && Date.now() >= batchDeadlineAt) {
+            skippedForDeadline += 1;
+            return;
+          }
+          try {
+            const evaluation = await judgeOneTopic(topicObj.topic, topicObj.match);
+            await persistJudgedTopic(dc, topicObj.topic.id, evaluation);
+            evaluatedCount += 1;
+            // Any successful grade proves the endpoint is alive, so reset the systemic-failure
+            // counter. Without this, `consecutiveSystemicFailures` is not truly "consecutive" —
+            // it accumulates across the whole batch and any two systemic failures (even hundreds
+            // of successful grades apart, on a merely flaky gateway) abort the entire run, which
+            // freezes the "已评分" count. Only a real outage (systemic failures with no grade in
+            // between) should abort. Matches fix-empty-llm-response-handling spec requirement.
+            consecutiveSystemicFailures = 0;
+          } catch (error) {
+            failedCount += 1;
+            const llmCallLogs = error instanceof LLMFallbackError ? error.callLogs : [];
 
-          const hadValidScore =
-            topicObj.topic.status === "judged" &&
-            typeof topicObj.latestEvaluation?.totalScore === "number" &&
-            topicObj.latestEvaluation.totalScore >= 0;
-          if (hadValidScore) return;
+            // A transient LLM failure (rate limit / quota / timeout / bad JSON) must NEVER
+            // discard a topic's existing valid score. If this topic was already successfully
+            // judged, keep its prior JUDGED evaluation intact and only count the failed
+            // re-judge attempt. Without this guard, a quota outage during a "changed" re-judge
+            // steadily flips good topics to JUDGE_ERROR (totalScore -1) and bleeds the public
+            // "已评分" count downward. Only genuinely unscored topics (needs_judging /
+            // judge_error / never scored) get downgraded to JUDGE_ERROR so the next run retries.
+            await recordTokenUsage(llmCallLogs);
 
-          const errorText = error instanceof Error ? error.message : String(error);
-          const lastCallLog = llmCallLogs.at(-1);
-          const failedPrompt = buildJudgePrompt(topicObj.topic, topicObj.match);
-          const failedTokens = tokensFromLogs(llmCallLogs);
+            // Systemic LLM failure early-abort: when the fallback chain keeps returning
+            // 200 OK with billed input tokens but empty content (empty_content_billed),
+            // retrying more topics just wastes tokens. Track consecutive systemic failures
+            // across workers and abort once two stack up. The hadValidScore guard below
+            // still runs for non-systemic failures, so existing valid scores are never
+            // discarded; a systemic throw skips the JUDGE_ERROR downgrade entirely, leaving
+            // the topic's prior state untouched for the next run.
+            if (isSystemicLLMFallbackError(error)) {
+              consecutiveSystemicFailures += 1;
+              if (consecutiveSystemicFailures >= 2) {
+                throw new SystemicLLMFailureError(
+                  "pipeline aborted due to systemic LLM failure (2 consecutive topics with empty_content_billed)"
+                );
+              }
+            } else {
+              consecutiveSystemicFailures = 0;
+            }
 
-          await withSqlRetry(() => updateTopicEvaluationState(dc as any, {
-            id: topicObj.topic.id,
-            status: "JUDGE_ERROR",
-            totalScore: -1,
-            innovationScore: -1,
-            practicalityScore: -1,
-            completionScore: -1,
-            designScore: -1,
-            complianceRiskScore: -1,
-            directionConsistencyScore: null,
-            confidenceScore: -1,
-            competitionLevel: null
-          } as any));
+            const hadValidScore =
+              topicObj.topic.status === "judged" &&
+              typeof topicObj.latestEvaluation?.totalScore === "number" &&
+              topicObj.latestEvaluation.totalScore >= 0;
+            if (hadValidScore) return;
 
-          const failedEvaluation: TraeEvaluation = {
-            id: `${topicObj.topic.id}_${Date.now()}_error`,
-            topicId: topicObj.topic.id,
-            sourceType: "preliminary",
-            provider: lastCallLog?.provider ?? null,
-            model: lastCallLog?.model ?? "unknown",
-            promptVersion: PROMPT_VERSION,
-            totalScore: 0,
-            innovationScore: 0,
-            practicalityScore: 0,
-            completionScore: 0,
-            designScore: 0,
-            complianceRiskScore: 10,
-            directionConsistencyScore: null,
-            confidenceScore: 0,
-            competitionLevel: "较弱",
-            summary: "评分失败，等待重试。",
-            strengths: [],
-            weaknesses: ["模型调用或 JSON 校验失败"],
-            suggestions: ["稍后重试评分"],
-            complianceRisks: [],
-            dimensionComments: {
-              innovation: "未评分",
-              practicality: "未评分",
-              completion: "未评分",
-              design: "未评分"
-            },
-            matchComment: null,
-            promptText: failedPrompt,
-            systemPrompt: JUDGE_SYSTEM_PROMPT,
-            inputTokens: failedTokens.inputTokens,
-            outputTokens: failedTokens.outputTokens,
-            rawModelResponse: lastCallLog?.rawResponse ?? "",
-            llmCallLogs,
-            error: errorText,
-            createdAt: nowIso()
-          };
+            const errorText = error instanceof Error ? error.message : String(error);
+            const lastCallLog = llmCallLogs.at(-1);
+            const failedPrompt = buildJudgePrompt(topicObj.topic, topicObj.match);
+            const failedTokens = tokensFromLogs(llmCallLogs);
 
-          const failedEvaluationInput = toUpsertEvaluationVariables(failedEvaluation);
-          await withSqlRetry(() => upsertEvaluation(dc as any, {
-            ...failedEvaluationInput,
-            provider: failedEvaluation.provider ? providerMap[failedEvaluation.provider] : null,
-            competitionLevel: competitionLevelMap[failedEvaluation.competitionLevel],
-            strengths: [],
-            weaknesses: ["模型调用或 JSON 校验失败"],
-            suggestions: ["稍后重试评分"],
-            complianceRisks: [],
-            llmCallLogs,
-            dimensionComments: failedEvaluation.dimensionComments,
-            promptText: failedPrompt,
-            systemPrompt: JUDGE_SYSTEM_PROMPT,
-            inputTokens: failedTokens.inputTokens,
-            outputTokens: failedTokens.outputTokens,
-            matchComment: null,
-            error: errorText
-          } as any));
+            await withSqlRetry(() => updateTopicEvaluationState(dc as any, {
+              id: topicObj.topic.id,
+              status: "JUDGE_ERROR",
+              totalScore: -1,
+              innovationScore: -1,
+              practicalityScore: -1,
+              completionScore: -1,
+              designScore: -1,
+              complianceRiskScore: -1,
+              directionConsistencyScore: null,
+              confidenceScore: -1,
+              competitionLevel: null
+            } as any));
+
+            const failedEvaluation: TraeEvaluation = {
+              id: `${topicObj.topic.id}_${Date.now()}_error`,
+              topicId: topicObj.topic.id,
+              sourceType: "preliminary",
+              provider: lastCallLog?.provider ?? null,
+              model: lastCallLog?.model ?? "unknown",
+              promptVersion: PROMPT_VERSION,
+              totalScore: 0,
+              innovationScore: 0,
+              practicalityScore: 0,
+              completionScore: 0,
+              designScore: 0,
+              complianceRiskScore: 10,
+              directionConsistencyScore: null,
+              confidenceScore: 0,
+              competitionLevel: "较弱",
+              summary: "评分失败，等待重试。",
+              strengths: [],
+              weaknesses: ["模型调用或 JSON 校验失败"],
+              suggestions: ["稍后重试评分"],
+              complianceRisks: [],
+              dimensionComments: {
+                innovation: "未评分",
+                practicality: "未评分",
+                completion: "未评分",
+                design: "未评分"
+              },
+              matchComment: null,
+              promptText: failedPrompt,
+              systemPrompt: JUDGE_SYSTEM_PROMPT,
+              inputTokens: failedTokens.inputTokens,
+              outputTokens: failedTokens.outputTokens,
+              rawModelResponse: lastCallLog?.rawResponse ?? "",
+              llmCallLogs,
+              error: errorText,
+              createdAt: nowIso()
+            };
+
+            const failedEvaluationInput = toUpsertEvaluationVariables(failedEvaluation);
+            await withSqlRetry(() => upsertEvaluation(dc as any, {
+              ...failedEvaluationInput,
+              provider: failedEvaluation.provider ? providerMap[failedEvaluation.provider] : null,
+              competitionLevel: competitionLevelMap[failedEvaluation.competitionLevel],
+              strengths: [],
+              weaknesses: ["模型调用或 JSON 校验失败"],
+              suggestions: ["稍后重试评分"],
+              complianceRisks: [],
+              llmCallLogs,
+              dimensionComments: failedEvaluation.dimensionComments,
+              promptText: failedPrompt,
+              systemPrompt: JUDGE_SYSTEM_PROMPT,
+              inputTokens: failedTokens.inputTokens,
+              outputTokens: failedTokens.outputTokens,
+              matchComment: null,
+              error: errorText
+            } as any));
+          }
+        });
+      } catch (error) {
+        // SystemicLLMFailureError: intentional abort — record and finish partial.
+        // Other errors: stash for rethrow only if we did not hit the hard deadline race.
+        if (error instanceof SystemicLLMFailureError) {
+          systemicAbortReason = error.message;
+        } else {
+          concurrencyError = error;
         }
-      });
-    } catch (error) {
-      // A SystemicLLMFailureError means the batch was intentionally aborted; record the
-      // reason and fall through to finishRun instead of rethrowing so the run is still
-      // finalized with the counts accumulated so far. Any other error is unexpected and
-      // propagates to the outer catch for the normal error-handling path.
-      if (error instanceof SystemicLLMFailureError) {
-        systemicAbortReason = error.message;
-      } else {
-        throw error;
       }
+    })();
+
+    if (hardDeadlineAt !== null) {
+      const remainingMs = Math.max(0, hardDeadlineAt - Date.now());
+      await Promise.race([
+        workPromise,
+        sleep(remainingMs).then(() => {
+          hardDeadlineHit = true;
+        })
+      ]);
+      // Detached workers may still finish late writes; never leave an unhandled rejection.
+      void workPromise.catch((error) => {
+        console.error("[trae] judge batch continued after hard deadline:", error);
+      });
+    } else {
+      await workPromise;
+    }
+
+    if (concurrencyError && !hardDeadlineHit) {
+      throw concurrencyError;
     }
 
     await finishRun(run.id, {
       status: systemicAbortReason !== null
         ? "error"
-        : failedCount > 0 || skippedForDeadline > 0
+        : failedCount > 0 || skippedForDeadline > 0 || hardDeadlineHit
           ? "partial"
           : "success",
       evaluatedCount,
@@ -1060,6 +1098,9 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
         `Evaluated ${evaluatedCount} topics; ${failedCount} failures; concurrency ${concurrency}.`,
         ...(skippedForDeadline > 0
           ? [`Batch deadline reached (${deadlineMs}ms): skipped ${skippedForDeadline} topics for the next run.`]
+          : []),
+        ...(hardDeadlineHit
+          ? [`Hard drain deadline reached (${hardDrainMs}ms after soft): finalized partial run without waiting for all in-flight topics.`]
           : []),
         ...(systemicAbortReason !== null ? [systemicAbortReason] : [])
       ]

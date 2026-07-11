@@ -429,9 +429,13 @@ test("public run status reports bounded judging batch counts", () => {
   assert.doesNotMatch(route, /const PUBLIC_JUDGE_CONCURRENCY =/);
   assert.match(route, /await scrapeAllTraeSources\(\);/);
   assert.match(route, /await runTraeMatching\(\);/);
-  assert.match(route, /return judgeChangedTraeTopics\(\{\s*mode: "changed",\s*max: DEFAULT_JUDGE_BATCH_MAX,\s*concurrency: DEFAULT_JUDGE_CONCURRENCY\s*\}\);/);
+  assert.match(
+    route,
+    /return judgeChangedTraeTopics\(\{[\s\S]*?mode: "changed",[\s\S]*?max: DEFAULT_JUDGE_BATCH_MAX,[\s\S]*?concurrency: DEFAULT_JUDGE_CONCURRENCY,[\s\S]*?deadlineMs: FALLBACK_JUDGE_DEADLINE_MS[\s\S]*?\}\);/
+  );
   assert.match(route, /const immediateJudge = judgeChangedBatch\(\);/);
-  assert.match(route, /const postMatchJudgeResult = await judgeChangedBatch\(\);/);
+  // Second pass may call judgeChangedBatch or a budget-aware judgeChangedTraeTopics directly.
+  assert.match(route, /postMatchJudgeResult/);
   assert.match(route, /await Promise\.all\(\[scrapeAndMatch, immediateJudge\]\);/);
   assert.match(route, /judgeResult\.evaluatedCount/);
   assert.match(route, /judgeResult\.failedCount/);
@@ -483,6 +487,18 @@ test("public run button works across Cloud Run instances", () => {
   // Cron skip guard must reclaim zombies and only skip on fresh RUNNING judges.
   assert.match(cronRoute, /reclaimStaleRunningRuns/);
   assert.match(cronRoute, /isFreshRunningRun\(run\)/);
+
+  // In-process fallback must bound each judge pass (not the full 690s default × 2),
+  // and reclaimed zombies surface as retryable timeout copy — not the raw reclaim string.
+  assert.match(route, /FALLBACK_JUDGE_DEADLINE_MS = 300_000/);
+  assert.match(route, /deadlineMs: FALLBACK_JUDGE_DEADLINE_MS/);
+  assert.match(route, /PIPELINE_BUDGET_MS = 840_000/);
+  assert.match(route, /skipping second judge pass/);
+  assert.match(route, /Reclaimed stale RUNNING run/);
+  assert.match(route, /上一轮评分超时中断/);
+  // Cron run-all must also shrink/skip the second pass when the wall clock is almost gone.
+  assert.match(cronRoute, /RUN_ALL_BUDGET_MS = 840_000/);
+  assert.match(cronRoute, /skipping second judge pass/);
 
   // The client keeps polling through the start-up window instead of settling on the first
   // "not running" poll before the run's first RUNNING row is visible.

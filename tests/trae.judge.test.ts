@@ -459,6 +459,23 @@ describe("judge strategy surface", () => {
       /batchDeadlineAt !== null && Date\.now\(\) >= batchDeadlineAt[\s\S]*?skippedForDeadline \+= 1;[\s\S]*?return;/
     );
   });
+
+  it("races the concurrency pool against a hard drain deadline so finishRun always runs", () => {
+    const judgeSource = readFileSync("lib/trae/judge.ts", "utf8");
+
+    // Soft deadline alone left zombie RUNNING rows when in-flight topics hung past Cloud Run
+    // kill. Hard deadline must Promise.race the pool and still call finishRun(partial).
+    assert.match(judgeSource, /hardDeadlineAt/);
+    assert.match(judgeSource, /hardDrainMs/);
+    assert.match(
+      judgeSource,
+      /Promise\.race\(\[\s*workPromise,\s*sleep\(remainingMs\)\.then/
+    );
+    assert.match(
+      judgeSource,
+      /Hard drain deadline reached/
+    );
+  });
 });
 
 describe("judge batch wall-clock budget", () => {
@@ -470,6 +487,17 @@ describe("judge batch wall-clock budget", () => {
     } finally {
       if (previous === undefined) delete process.env.TRAE_JUDGE_BATCH_DEADLINE_MS;
       else process.env.TRAE_JUDGE_BATCH_DEADLINE_MS = previous;
+    }
+  });
+
+  it("defaults the hard drain budget to 90s after the soft deadline", () => {
+    const previous = process.env.TRAE_JUDGE_BATCH_HARD_DRAIN_MS;
+    delete process.env.TRAE_JUDGE_BATCH_HARD_DRAIN_MS;
+    try {
+      assert.equal(getTraeConfig().judgeBatchHardDrainMs, 90_000);
+    } finally {
+      if (previous === undefined) delete process.env.TRAE_JUDGE_BATCH_HARD_DRAIN_MS;
+      else process.env.TRAE_JUDGE_BATCH_HARD_DRAIN_MS = previous;
     }
   });
 });

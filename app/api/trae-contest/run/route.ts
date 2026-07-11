@@ -52,6 +52,9 @@ const STALE_MEMORY_RUNNING_MS = 20 * 60 * 1000;
 const RUNS_CACHE_TTL_MS = 2_500;
 // How long POST holds open waiting for run-all to prove it started (fresh RUNNING row).
 const HANDOFF_WAIT_MS = 25_000;
+// In-process fallback must fit two judge passes under Cloud Run's ~900s request timeout
+// (same budget as cron run-all). Soft 300s + hard drain ~90s per pass ≈ 390s × 2.
+const FALLBACK_JUDGE_DEADLINE_MS = 300_000;
 
 interface PipelineState {
   status: PipelineStatus;
@@ -134,13 +137,21 @@ function statusFromRuns(runs: TraeRun[], now = Date.now()): PipelineStatus | nul
   if (!finished || now - Date.parse(finished.finishedAt as string) >= DONE_RUN_WINDOW_MS) return null;
 
   if (finished.status === "error") {
+    const rawError = finished.error ?? "Pipeline failed.";
+    // Reclaimed zombies are timeouts of a previous killed batch, not a permanent failure —
+    // surface a clear retryable message instead of the internal reclaim string.
+    const reclaimed = /Reclaimed stale RUNNING run/i.test(rawError);
     return {
       running: false,
       phase: "error",
       startedAt: finished.startedAt,
       finishedAt: finished.finishedAt,
-      message: "运行中断，请稍后重试。",
-      error: finished.error ?? "Pipeline failed."
+      message: reclaimed
+        ? "上一轮评分超时中断，可立即重试。"
+        : "运行中断，请稍后重试。",
+      error: reclaimed
+        ? "上一轮评分在云端超时前未能正常结束，已自动清理。请再点一次重试评分。"
+        : rawError
     };
   }
 
@@ -167,7 +178,10 @@ function judgeChangedBatch(): Promise<JudgeBatchResult> {
   return judgeChangedTraeTopics({
     mode: "changed",
     max: DEFAULT_JUDGE_BATCH_MAX,
-    concurrency: DEFAULT_JUDGE_CONCURRENCY
+    concurrency: DEFAULT_JUDGE_CONCURRENCY,
+    // Match cron run-all: two sequential-ish passes must not each take the full 690s default
+    // or Cloud Run kills the request mid-flight and leaves zombie RUNNING rows.
+    deadlineMs: FALLBACK_JUDGE_DEADLINE_MS
   });
 }
 
@@ -187,6 +201,11 @@ async function runPipeline(state: PipelineState): Promise<void> {
   const set = (patch: Partial<PipelineStatus>) => {
     state.status = { ...state.status, ...patch };
   };
+  // Same overall budget as cron run-all: leave headroom under Cloud Run 900s so the second
+  // judge pass (and finishRun) are not cut off when scrape/match is slow.
+  const pipelineStartedAt = Date.now();
+  const PIPELINE_BUDGET_MS = 840_000;
+  const MIN_SECOND_JUDGE_MS = 45_000;
 
   try {
     set({ phase: "judge", message: "正在评分现有未评分作品，同时抓取公开帖子…" });
@@ -201,8 +220,22 @@ async function runPipeline(state: PipelineState): Promise<void> {
 
     const [, immediateJudgeResult] = await Promise.all([scrapeAndMatch, immediateJudge]);
 
-    set({ phase: "judge", message: "正在评分新匹配的未评分作品…" });
-    const postMatchJudgeResult = await judgeChangedBatch();
+    const remainingMs = PIPELINE_BUDGET_MS - (Date.now() - pipelineStartedAt);
+    let postMatchJudgeResult: JudgeBatchResult = { evaluatedCount: 0, failedCount: 0 };
+    if (remainingMs >= MIN_SECOND_JUDGE_MS + 90_000) {
+      set({ phase: "judge", message: "正在评分新匹配的未评分作品…" });
+      const secondDeadlineMs = Math.min(FALLBACK_JUDGE_DEADLINE_MS, remainingMs - 90_000);
+      postMatchJudgeResult = await judgeChangedTraeTopics({
+        mode: "changed",
+        max: DEFAULT_JUDGE_BATCH_MAX,
+        concurrency: DEFAULT_JUDGE_CONCURRENCY,
+        deadlineMs: secondDeadlineMs
+      });
+    } else {
+      console.warn(
+        `[trae] in-process pipeline skipping second judge pass: only ${remainingMs}ms left under ${PIPELINE_BUDGET_MS}ms budget`
+      );
+    }
     const judgeResult = mergeJudgeResults([immediateJudgeResult, postMatchJudgeResult]);
 
     // Refresh the board snapshot so the next public load reads 1 doc instead of re-scanning

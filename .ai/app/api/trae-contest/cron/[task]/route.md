@@ -1,6 +1,6 @@
 # app/api/trae-contest/cron/[task]/route.ts
 
-> Last updated: 2026-07-04 | Protection: STANDARD
+> Last updated: 2026-07-11 | Protection: STANDARD
 
 ## Purpose
 
@@ -32,6 +32,11 @@ Runs authorized cron tasks for scraping, matching, judging, and the combined TRA
 - Symptom: cron/public run-all returns `skipped: judge_already_running` even when nothing is scoring.
 - Cause: `hasRecentRunningJudgeRun` only checks status=RUNNING within 10 min and never finalizes killed batches.
 - Fix: reclaim stale RUNNING rows first; only skip when a **fresh** RUNNING judge remains.
+
+## Bug Fix: run-all Overall Budget (2026-07-11)
+
+- Symptom: Reclaimed stale RUNNING after ~1600s; second judge pass started after slow scrape and was killed at Cloud Run 900s.
+- Fix: `RUN_ALL_BUDGET_MS = 840_000`; shrink or skip second judge when remaining wall clock is insufficient; judge hard-drain guarantees finishRun.
 
 ## Important Notes / NEVER Change
 

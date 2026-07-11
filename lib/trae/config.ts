@@ -47,12 +47,18 @@ export interface TraeConfig {
   aiRequestTimeoutMs: number;
   judgeConcurrency: number;
   /**
-   * Wall-clock budget (ms) for one judge batch. Once elapsed, workers stop picking up NEW
+   * Soft wall-clock budget (ms) for one judge batch. Once elapsed, workers stop picking up NEW
    * topics and let in-flight ones drain, so the run finalizes (finishRun + board snapshot)
    * within the Cloud Run request timeout instead of being killed mid-flight — which would
    * leave a zombie RUNNING run and a frozen public snapshot. 0 = unlimited (legacy behavior).
    */
   judgeBatchDeadlineMs: number;
+  /**
+   * After the soft deadline, how long (ms) to wait for in-flight topics before abandoning the
+   * concurrency await and calling finishRun anyway. Soft + hardDrain must stay under the Cloud
+   * Run request timeout (~900s). 0 = wait forever for drain (legacy soft-only behavior).
+   */
+  judgeBatchHardDrainMs: number;
   scraperUserAgent: string;
   adminToken: string | null;
   cronSecret: string | null;
@@ -177,6 +183,10 @@ export function getTraeConfig(): TraeConfig {
     // in-flight wave to drain (each call bounded by aiMaxRateLimitWaitMs) plus finishRun +
     // snapshot. 0 disables the batch deadline (legacy: run until Cloud Run kills it).
     judgeBatchDeadlineMs: Math.max(0, Math.floor(numberFromEnv("TRAE_JUDGE_BATCH_DEADLINE_MS", 690_000))),
+    // Default 90s hard drain after soft deadline: if in-flight topics hang (rate limits /
+    // vision / multi-evaluator), still finishRun before Cloud Run's 900s kill leaves a zombie.
+    // 690 + 90 = 780 < 900; run-all's 300 + 90 = 390 per pass.
+    judgeBatchHardDrainMs: Math.max(0, Math.floor(numberFromEnv("TRAE_JUDGE_BATCH_HARD_DRAIN_MS", 90_000))),
     scraperUserAgent:
       process.env.TRAE_SCRAPER_USER_AGENT ??
       "RateMinistere TRAE Contest Rank Bot; contact: noahzh52@gmail.com",

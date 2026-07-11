@@ -1,6 +1,6 @@
 # app/api/trae-contest/run/route.ts
 
-> Last updated: 2026-07-09 | Protection: STANDARD
+> Last updated: 2026-07-11 | Protection: STANDARD
 
 ## Purpose
 
@@ -98,6 +98,7 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 | 2026-07-09 | 开始评分 button silently did nothing in production. | In-memory status is per-instance (split-brain with multi-instance Cloud Run) and fire-and-forget background work is CPU-throttled after the POST response. | POST self-invokes cron run-all (request-bound CPU); GET derives cross-instance status from the runs table; client adds a post-POST grace window. |
 | 2026-07-10 | 开始评分 still does not score; many forever-RUNNING runs in DB. | Self-invoke handoff too short (CPU throttle mid-flight) + zombie RUNNING rows block/skip new work. | Reclaim stale RUNNING; only treat fresh runs as active; hold POST open until pipeline handoff evidence. |
 | 2026-07-10 | 开始评分 still no-ops (~11s → idle). | Self-invoke connect timeout > EARLY window; late path silent idle without handoff check. | Loopback self-invoke; fallback whenever no handoff evidence; client polls on click. |
+| 2026-07-11 | 重试评分 → 运行中断 / Reclaimed stale RUNNING after 1600s. | Soft deadline only; in-flight drain past 900s kill; runPipeline used 690s×2. | Hard drain finishRun; runPipeline 300s/pass deadlines; friendlier reclaim message. |
 
 ## Change History
 
