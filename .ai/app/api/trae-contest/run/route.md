@@ -9,7 +9,7 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 ## What It Does
 
 - Exposes `GET` for pipeline status: prefers fresh in-memory state, otherwise derives a cross-instance status from the persistent runs table (`listRuns`).
-- Exposes `POST` to start one manual pipeline run, guarded by an in-process lock, a DB-backed "already running" check, and a cooldown (memory + DB `finishedAt`).
+- Exposes `POST` to start one manual pipeline run, guarded by an in-process lock and a DB-backed "already running" check. No cooldown — the user wants immediate retry after a run finishes (the `running` guard already prevents double-starting).
 - On Cloud Run (cron secret configured), POST self-invokes `/api/trae-contest/cron/run-all` with `x-trae-cron-secret` so the work runs inside a request that keeps CPU allocated up to the 900s service timeout. Without a cron secret (local dev), it falls back to the legacy in-process fire-and-forget `runPipeline`.
 
 ## Public API
@@ -110,6 +110,7 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 | 2026-07-10 | Documented zombie reclaim + reliable run-all handoff for public scoring button. | Grok |
 | 2026-07-10 | Fixed silent idle after self-invoke connect timeout: loopback URL + handoff-gated fallback. | Grok |
 | 2026-07-12 | Added `FALLBACK_MATCH_DEADLINE_MS = 300_000` and passed to `runTraeMatching()` so the match phase stops after 300s instead of running past Cloud Run's 900s timeout. | GLM |
+| 2026-07-12 | Removed `COOLDOWN_MS`, `latestFinishedAtMs`, and all cooldown logic from POST + client. The `running` guard already prevents double-starting; the user wants immediate retry after a run finishes. | GLM |
 
 ## Planned Change: Public Scrape Plus Immediate Judge
 

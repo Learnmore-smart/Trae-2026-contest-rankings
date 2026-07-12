@@ -16,7 +16,7 @@ export const maxDuration = 900;
 // One public "update now" button drives the whole pipeline (scrape -> match -> judge).
 // The same pipeline also runs automatically on the Cloud Scheduler cron; this endpoint
 // is only a manual trigger, so it is intentionally token-free but guarded by a single
-// in-flight lock plus a short cooldown to avoid hammering the public forum.
+// in-flight lock (no cooldown — the user wants immediate retry after a run finishes).
 //
 // Cloud Run reality check: in-memory state is per-instance, and CPU is throttled once a
 // response is sent. So POST must NOT rely on fire-and-forget background work (it stalls
@@ -40,7 +40,6 @@ export interface PipelineStatus {
   error: string | null;
 }
 
-const COOLDOWN_MS = 30_000;
 // Keep reporting "done" to pollers after finish so the client that started the run gets
 // its completion signal even when the memory that produced the run lives on another instance.
 const DONE_RUN_WINDOW_MS = 2 * 60 * 1000;
@@ -168,14 +167,6 @@ function statusFromRuns(runs: TraeRun[], now = Date.now()): PipelineStatus | nul
     message: `本轮后台运行已完成；最近一批评分 ${latestJudge?.evaluatedCount ?? 0} 个，失败 ${latestJudge?.failedCount ?? 0} 个。`,
     error: null
   };
-}
-
-function latestFinishedAtMs(runs: TraeRun[], memory: PipelineStatus): number | null {
-  const candidates = [
-    ...runs.map((run) => (run.finishedAt ? Date.parse(run.finishedAt) : Number.NaN)),
-    memory.finishedAt ? Date.parse(memory.finishedAt) : Number.NaN
-  ].filter((value) => Number.isFinite(value));
-  return candidates.length > 0 ? Math.max(...candidates) : null;
 }
 
 function judgeChangedBatch(): Promise<JudgeBatchResult> {
@@ -421,20 +412,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     runs = await readRecentRuns(state);
   }
 
-  // Cross-instance guards: a *fresh* run already in flight anywhere reports as running
-  // instead of double-starting, and a run that just finished anywhere still honors cooldown.
+  // Cross-instance guard: a *fresh* run already in flight anywhere reports as running
+  // instead of double-starting. No cooldown — the user wants immediate retry after a run.
   const dbStatus = statusFromRuns(runs);
   if (dbStatus?.running) {
     return NextResponse.json(dbStatus);
-  }
-
-  const lastFinishedAt = latestFinishedAtMs(runs, state.status);
-  if (lastFinishedAt !== null && Date.now() - lastFinishedAt < COOLDOWN_MS) {
-    return NextResponse.json({
-      ...state.status,
-      running: false,
-      message: "刚刚已更新过，请稍后再试。"
-    });
   }
 
   state.status = {

@@ -43,13 +43,13 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 
 - Owner reported clicking 开始评分 "似乎没有用". On Cloud Run the status poll can land on a different instance than the click (in-memory pipeline state is per-process), so the first poll reported `running: false, phase: "idle"`; the client called `stopPolling()` and reset the button with zero feedback ~2s after the click.
 - Fix strategy (client half; server half lives in `.ai/app/api/trae-contest/run/route.md`): add `RUN_START_GRACE_MS = 15_000`. `trigger()` stamps `graceUntilRef` before POST; the poll callback ignores `running: false` responses until the grace expires, giving the server-side run time to write its first RUNNING row into the runs table (which now backs GET status across instances).
-- Regression risk: keep the exact `setStatus({ running: true, phase: "judge", ... message: t.judging ... })` trigger line and the cooldown/message rendering asserted by `tests/contest-route-pages.test.ts`. The grace window must not swallow the POST response itself (cooldown/error replies come through the POST path, not the poll path).
+- Regression risk: keep the exact `setStatus({ running: true, phase: "judge", ... message: t.judging ... })` trigger line and the message rendering asserted by `tests/contest-route-pages.test.ts`. The grace window must not swallow the POST response itself (error replies come through the POST path, not the poll path).
 
 ## Bug Fix Plan: Poll Immediately + Surface Idle No-Op (2026-07-10)
 
 - Production POST can take 10–900s (self-invoke handoff or in-process fallback). Waiting for the POST body before `startPolling()` leaves the UI stuck on optimistic 运行中 with no GET/DB updates, and if the server returns silent `phase: "idle"` the button resets with no error.
 - Fix strategy: in `trigger()`, call `startPolling()` immediately after optimistic `setStatus(running)`. When POST returns `!running && phase === "idle"`, map to `phase: "error"` with `t.failed` so the user can retry. Keep grace window for poll races.
-- Regression risk: preserve optimistic `setStatus({ running: true, phase: "judge", ... t.judging })` and cooldown rendering.
+- Regression risk: preserve optimistic `setStatus({ running: true, phase: "judge", ... t.judging })` and message rendering.
 
 ## Bug Fix Plan: Stats Request Must Survive Topic Deadline
 
@@ -113,6 +113,7 @@ Implements the public contest landing and ranking client now mounted at `/` and 
 | 2026-07-03 | Planned official contest banner image in the landing hero. | Codex |
 | 2026-07-03 | Implemented official contest banner image above the hero command deck. | Codex |
 | 2026-07-10 | Run button: poll on click; surface silent idle no-op as error (not cooldown). | Grok |
+| 2026-07-12 | Removed cooldown logic (isCooldown, cooldown variable, t.cooldown copy) — the user wants immediate retry after a run finishes. | GLM |
 
 ## Change Plan: Public Run Starts Scoring Immediately
 

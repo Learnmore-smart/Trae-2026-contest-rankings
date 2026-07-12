@@ -27,7 +27,7 @@ Documents the route handlers created for public, admin, and cron TRAE APIs.
 | `POST /api/trae-contest/cron/[task]` | route | Secret-protected scheduler endpoint. |
 | `GET /api/trae-contest/cron/[task]` | route | Secret-protected scheduler endpoint for cron providers that issue GET requests. |
 | `POST /api/trae-contest/dev/run` | route | Localhost-only development runner. |
-| `POST /api/trae-contest/run` | route | Public one-button pipeline trigger (scrape→match→judge). Token-free; guarded by an in-flight lock + 30s cooldown. Fire-and-forget; returns immediately. |
+| `POST /api/trae-contest/run` | route | Public one-button pipeline trigger (scrape→match→judge). Token-free; guarded by an in-flight lock (no cooldown). |
 | `GET /api/trae-contest/run` | route | Public pipeline status for the run button to poll (`{running, phase, message, error}`). |
 
 ## Dependencies

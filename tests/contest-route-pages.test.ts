@@ -440,7 +440,7 @@ test("public run status reports bounded judging batch counts", () => {
   assert.match(route, /judgeResult\.evaluatedCount/);
   assert.match(route, /judgeResult\.failedCount/);
   assert.match(client, /setStatus\(\{ running: true, phase: "judge", startedAt: null, finishedAt: null, message: t\.judging, error: null \}\);/);
-  assert.match(client, /cooldown \? t\.cooldown : status\?\.message \?\? phaseMessage\(phase, language\)/);
+  assert.match(client, /status\?\.message \?\? phaseMessage\(phase, language\)/);
   assert.match(client, /phase === "error" && status\?\.error/);
 });
 
@@ -480,9 +480,8 @@ test("public run button works across Cloud Run instances", () => {
   assert.match(route, /statusFromRuns\(/);
   assert.match(route, /listRuns\(/);
 
-  // POST must honor a run already in flight elsewhere (no double start) and the DB cooldown.
+  // POST must honor a run already in flight elsewhere (no double start). No cooldown.
   assert.match(route, /if \(dbStatus\?\.running\) \{\s*return NextResponse\.json\(dbStatus\);/);
-  assert.match(route, /latestFinishedAtMs\(runs, state\.status\)/);
 
   // Cron skip guard must reclaim zombies and only skip on fresh RUNNING judges.
   assert.match(cronRoute, /reclaimStaleRunningRuns/);

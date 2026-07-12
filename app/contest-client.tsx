@@ -155,7 +155,6 @@ const COPY = {
     matching: "匹配报名方向…",
     judging: "生成评分…",
     failed: "运行失败",
-    cooldown: "刚刚已运行，请稍后重试",
     disclaimer:
       "免责声明：本站评分由 AI 根据 TRAE 中文社区公开帖子内容生成，仅供学习、观摩和参考，不代表 TRAE 官方结果，也不冒充官方评分或预测最终名次。",
     prelim: "初赛",
@@ -263,7 +262,6 @@ const COPY = {
     matching: "Matching signup direction…",
     judging: "Generating scores…",
     failed: "Run failed",
-    cooldown: "Just ran. Try again later.",
     disclaimer:
       "Disclaimer: scores are generated from public TRAE Chinese forum posts for learning and observation only. They are not official TRAE results and do not predict final placement.",
     prelim: "Preliminary",
@@ -709,10 +707,9 @@ function RunButton({ language, onCompleted }: { language: ContestLanguage; onCom
       const response = await fetch(`${API_BASE}/api/trae-contest/run`, { method: "POST" });
       const next = (await response.json()) as PipelineStatus;
       // Server used to return silent idle after a failed self-invoke; surface that as retryable
-      // error. Do not rewrite cooldown replies (same phase/running shape, different message).
-      const isCooldown = typeof next.message === "string" && next.message.includes("刚刚已更新过");
+      // error so the button does not look dead.
       const normalized =
-        !next.running && next.phase === "idle" && !isCooldown
+        !next.running && next.phase === "idle"
           ? { ...next, phase: "error" as const, message: t.failed, error: next.message || t.failed }
           : next;
       setStatus(normalized);
@@ -729,7 +726,6 @@ function RunButton({ language, onCompleted }: { language: ContestLanguage; onCom
 
   const phase: RunPhase = status?.phase ?? "idle";
   const running = status?.running ?? false;
-  const cooldown = Boolean(status && !running && status.message.includes("刚刚已更新过"));
   const label = running ? t.running : phase === "done" ? t.done : phase === "error" ? t.retry : t.start;
   const buttonIcon = running ? <Loader2 className="h-4 w-4 animate-spin" /> : phase === "done" ? <Check className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />;
 
@@ -739,10 +735,10 @@ function RunButton({ language, onCompleted }: { language: ContestLanguage; onCom
         {buttonIcon}
         {label}
       </button>
-      {!running && (phase === "done" || phase === "error" || cooldown) ? (
+      {!running && (phase === "done" || phase === "error") ? (
         <span className={`pipeline-status ${phase === "error" ? "is-error" : phase === "done" ? "is-done" : ""}`}>
           <span className="min-w-0">
-            <span className="block">{cooldown ? t.cooldown : status?.message ?? phaseMessage(phase, language)}</span>
+            <span className="block">{status?.message ?? phaseMessage(phase, language)}</span>
             {phase === "error" && status?.error ? (
               <span className="mt-1 block max-w-[42rem] truncate text-xs font-semibold text-rose-900 dark:text-rose-100/80">
                 {status.error}
