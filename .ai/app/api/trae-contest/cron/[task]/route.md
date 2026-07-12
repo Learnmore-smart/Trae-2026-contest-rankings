@@ -1,6 +1,6 @@
 # app/api/trae-contest/cron/[task]/route.ts
 
-> Last updated: 2026-07-11 | Protection: STANDARD
+> Last updated: 2026-07-12 | Protection: STANDARD
 
 ## Purpose
 
@@ -38,6 +38,11 @@ Runs authorized cron tasks for scraping, matching, judging, and the combined TRA
 - Symptom: Reclaimed stale RUNNING after ~1600s; second judge pass started after slow scrape and was killed at Cloud Run 900s.
 - Fix: `RUN_ALL_BUDGET_MS = 840_000`; shrink or skip second judge when remaining wall clock is insufficient; judge hard-drain guarantees finishRun.
 
+## Bug Fix: Match Phase Deadline (2026-07-12)
+
+- Symptom: 开始评分 produces no new evaluations; match phase (`runTraeMatching`) with unlimited forum lookups on ~6000 preliminaries takes >900s, killing the Cloud Run request before the second judge pass can run.
+- Fix: Added `RUN_ALL_MATCH_DEADLINE_MS = 300_000` (run-all) and 780s deadline (standalone `match` task). Pass to `runTraeMatching(deadlineMs)` so the match phase stops after the deadline and the pipeline proceeds to the second judge pass. Skipped topics are picked up by the next run.
+
 ## Important Notes / NEVER Change
 
 - Do not make cron tasks public without secret validation.
@@ -50,3 +55,4 @@ Runs authorized cron tasks for scraping, matching, judging, and the combined TRA
 | 2026-07-04 | Created doc and planned changed-mode cron rejudge. | Codex |
 | 2026-07-04 | Implemented changed-mode cron rejudge and verified source guard. | Codex |
 | 2026-07-10 | Planned zombie RUNNING reclaim before judge skip guard. | Grok |
+| 2026-07-12 | Added `RUN_ALL_MATCH_DEADLINE_MS = 300_000` and 780s standalone match deadline; pass to `runTraeMatching()` so match doesn't kill the Cloud Run request. | GLM |

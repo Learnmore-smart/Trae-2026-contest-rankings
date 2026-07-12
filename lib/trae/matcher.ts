@@ -244,17 +244,19 @@ async function fetchAllTopicsBySourceType(dc: any, sourceType: "PRELIMINARY" | "
   return all;
 }
 
-export async function runTraeMatching(): Promise<{
+export async function runTraeMatching(deadlineMs = 0): Promise<{
   matchedCount: number;
   failedCount: number;
   forumMatchedCount: number;
   forumLookups: number;
+  skippedCount: number;
 }> {
   const run = await startRun("match", null);
   const dc = getDataConnectDb();
   const config = getTraeConfig();
   const forumCap = config.maxForumLookupsPerRun; // <= 0 ⇒ unlimited
   let forumLookups = 0;
+  const matchStartedAt = Date.now();
 
   try {
     const [preliminaries, signups] = await Promise.all([
@@ -301,6 +303,14 @@ export async function runTraeMatching(): Promise<{
 
     const outcomes = await mapWithConcurrency(preliminaries, config.forumLookupConcurrency, async (preliminary) => {
       try {
+        // Deadline check: when the match budget is exhausted, stop doing expensive
+        // forum lookups and DB writes for remaining topics. They'll be picked up
+        // by the next run. This prevents the match phase from running past Cloud
+        // Run's 900s request timeout and killing the entire pipeline.
+        if (deadlineMs > 0 && Date.now() - matchStartedAt >= deadlineMs) {
+          return { matched: false, forumMatched: false, failed: false, skipped: true };
+        }
+
         let best = bestInPool(preliminary);
         const hasConfidentAuthorMatch =
           Boolean(best.signupTopicId) && best.matchMethod === "same_author" && best.matchConfidence >= 60;
@@ -339,26 +349,27 @@ export async function runTraeMatching(): Promise<{
 
         const matched = Boolean(best.signupTopicId);
         const forumMatched = matched && forumSourcedIds.has(best.signupTopicId as string);
-        return { matched, forumMatched, failed: false };
+        return { matched, forumMatched, failed: false, skipped: false };
       } catch {
-        return { matched: false, forumMatched: false, failed: true };
+        return { matched: false, forumMatched: false, failed: true, skipped: false };
       }
     });
 
     const matchedCount = outcomes.filter((outcome) => outcome.matched).length;
     const forumMatchedCount = outcomes.filter((outcome) => outcome.forumMatched).length;
     const failedCount = outcomes.filter((outcome) => outcome.failed).length;
+    const skippedCount = outcomes.filter((outcome) => outcome.skipped).length;
 
     await finishRun(run.id, {
-      status: failedCount > 0 ? "partial" : "success",
+      status: skippedCount > 0 || failedCount > 0 ? "partial" : "success",
       matchedCount,
       failedCount,
       logs: [
-        `Matched ${matchedCount}/${preliminaries.length} preliminary topics (${forumMatchedCount} via forum author search); ${failedCount} failures.`,
+        `Matched ${matchedCount}/${preliminaries.length} preliminary topics (${forumMatchedCount} via forum author search); ${failedCount} failures; ${skippedCount} skipped (deadline).`,
         `Forum author lookups: ${forumLookups} unique${forumCap > 0 ? ` (cap ${forumCap})` : " (unlimited)"}; concurrency ${config.forumLookupConcurrency}, min ${config.forumMinRequestMs}ms/req.`
       ]
     });
-    return { matchedCount, failedCount, forumMatchedCount, forumLookups };
+    return { matchedCount, failedCount, forumMatchedCount, forumLookups, skippedCount };
   } catch (error) {
     await finishRun(run.id, {
       status: "error",
@@ -369,3 +380,5 @@ export async function runTraeMatching(): Promise<{
     throw error;
   }
 }
+
+

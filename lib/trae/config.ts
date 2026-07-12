@@ -147,14 +147,12 @@ export function getTraeConfig(): TraeConfig {
   return {
     friendApiKey: process.env.TRAE_FRIEND_API ?? null,
     friendBaseUrl: process.env.TRAE_FRIEND_BASE_URL ?? "http://47.93.17.237:8889/v1",
-    // 2026-07-10: minimax-m3 removed entirely — it returns billed empty_content (HTTP 200,
-    // choices:[], output=0) and only burns wall-clock + fallback hops. gemma-4-31b-it is primary.
-    friendPrimaryModel: process.env.FRIEND_PRIMARY_MODEL ?? "google/gemma-4-31b-it",
-    // deepseek-v4-pro and glm-5.2 stay as deeper fallbacks.
-    // kimi-k2.6 was removed by the upstream provider on 2026-07-08.
-    // deepseek-v4-flash (hangs past timeout), glm-5.1 (410 EOL), and minimax-m3 (empty_content_billed)
-    // stay excluded — they fail on this backend and only burn wall-clock.
+    // 2026-07-12: grok-4.5 promoted to primary (friend-gateway exclusive, tested HTTP 200 +
+    // valid JSON mode). gemma-4-31b-it demoted to first fallback; deepseek-v4-pro and glm-5.2
+    // remain as deeper fallbacks. Vision chain still uses gemma (grok-4.5 vision unverified).
+    friendPrimaryModel: process.env.FRIEND_PRIMARY_MODEL ?? "grok-4.5",
     friendFallbackModels: listFromEnv("FRIEND_FALLBACK_MODELS", [
+      "google/gemma-4-31b-it",
       "deepseek-ai/deepseek-v4-pro",
       "z-ai/glm-5.2"
     ]),

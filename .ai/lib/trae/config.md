@@ -1,6 +1,6 @@
 # lib/trae/config.ts
 
-> Last updated: 2026-07-11 | Protection: STANDARD
+> Last updated: 2026-07-12 | Protection: STANDARD
 
 ## Purpose
 
@@ -76,6 +76,7 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 | 2026-07-08 | Switched main text + image primary to `minimaxai/minimax-m3` on both friend and nvidia. Removed `moonshotai/kimi-k2.6` from every chain (upstream removed it). Added `google/gemma-4-31b-it` as first text fallback and image fallback; `deepseek-ai/deepseek-v4-pro` and `z-ai/glm-5.2` retained as deeper text fallbacks. | Claude |
 | 2026-07-10 | Removed `minimaxai/minimax-m3` entirely (empty_content_billed). Primary text+image is now `google/gemma-4-31b-it`; fallbacks `deepseek-ai/deepseek-v4-pro`, `z-ai/glm-5.2`; image fallback deepseek-v4-pro. | Grok |
 | 2026-07-11 | Added `judgeBatchHardDrainMs` (`TRAE_JUDGE_BATCH_HARD_DRAIN_MS`, default 90s) so soft deadline + drain always finishes under Cloud Run 900s. | Grok |
+| 2026-07-12 | Changed `FRIEND_PRIMARY_MODEL` default to `grok-4.5` (friend gateway only; tested HTTP 200 + valid content + JSON mode). Demoted `google/gemma-4-31b-it` to first fallback. NVIDIA chain unchanged. Vision chain unchanged (grok-4.5 vision unverified). | GLM |
 
 ## Planned Change: Judge Concurrency Config
 

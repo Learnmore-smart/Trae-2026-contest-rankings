@@ -55,6 +55,10 @@ const HANDOFF_WAIT_MS = 25_000;
 // In-process fallback must fit two judge passes under Cloud Run's ~900s request timeout
 // (same budget as cron run-all). Soft 300s + hard drain ~90s per pass ≈ 390s × 2.
 const FALLBACK_JUDGE_DEADLINE_MS = 300_000;
+// Match phase has the same 300s ceiling so scrape+match never blocks the second judge
+// pass from running. Without this, unlimited forum lookups on ~6000 preliminaries
+// regularly exceed 900s and Cloud Run kills the request, leaving zombie RUNNING rows.
+const FALLBACK_MATCH_DEADLINE_MS = 300_000;
 
 interface PipelineState {
   status: PipelineStatus;
@@ -215,7 +219,7 @@ async function runPipeline(state: PipelineState): Promise<void> {
       await scrapeAllTraeSources();
 
       set({ phase: "match", message: "正在匹配报名方向…" });
-      await runTraeMatching();
+      await runTraeMatching(FALLBACK_MATCH_DEADLINE_MS);
     })();
 
     const [, immediateJudgeResult] = await Promise.all([scrapeAndMatch, immediateJudge]);

@@ -1,6 +1,6 @@
 # app/api/trae-contest/run/route.ts
 
-> Last updated: 2026-07-11 | Protection: STANDARD
+> Last updated: 2026-07-12 | Protection: STANDARD
 
 ## Purpose
 
@@ -99,6 +99,7 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 | 2026-07-10 | 开始评分 still does not score; many forever-RUNNING runs in DB. | Self-invoke handoff too short (CPU throttle mid-flight) + zombie RUNNING rows block/skip new work. | Reclaim stale RUNNING; only treat fresh runs as active; hold POST open until pipeline handoff evidence. |
 | 2026-07-10 | 开始评分 still no-ops (~11s → idle). | Self-invoke connect timeout > EARLY window; late path silent idle without handoff check. | Loopback self-invoke; fallback whenever no handoff evidence; client polls on click. |
 | 2026-07-11 | 重试评分 → 运行中断 / Reclaimed stale RUNNING after 1600s. | Soft deadline only; in-flight drain past 900s kill; runPipeline used 690s×2. | Hard drain finishRun; runPipeline 300s/pass deadlines; friendlier reclaim message. |
+| 2026-07-12 | 开始评分 still produces no new evaluations; match phase runs >900s. | `runTraeMatching()` had no deadline; `Promise.all([scrapeAndMatch, immediateJudge])` waited for match, which exceeded Cloud Run's 900s timeout. | Added `FALLBACK_MATCH_DEADLINE_MS = 300_000`; pass to `runTraeMatching()` so match stops after 300s and the second judge pass can run. |
 
 ## Change History
 
@@ -108,6 +109,7 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 | 2026-07-09 | Documented and fixed the Cloud Run split-brain/no-op button: cron self-invocation + DB-derived status. | Claude |
 | 2026-07-10 | Documented zombie reclaim + reliable run-all handoff for public scoring button. | Grok |
 | 2026-07-10 | Fixed silent idle after self-invoke connect timeout: loopback URL + handoff-gated fallback. | Grok |
+| 2026-07-12 | Added `FALLBACK_MATCH_DEADLINE_MS = 300_000` and passed to `runTraeMatching()` so the match phase stops after 300s instead of running past Cloud Run's 900s timeout. | GLM |
 
 ## Planned Change: Public Scrape Plus Immediate Judge
 

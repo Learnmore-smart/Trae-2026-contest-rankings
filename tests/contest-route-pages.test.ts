@@ -428,7 +428,7 @@ test("public run status reports bounded judging batch counts", () => {
   assert.doesNotMatch(route, /const PUBLIC_JUDGE_MAX =/);
   assert.doesNotMatch(route, /const PUBLIC_JUDGE_CONCURRENCY =/);
   assert.match(route, /await scrapeAllTraeSources\(\);/);
-  assert.match(route, /await runTraeMatching\(\);/);
+  assert.match(route, /await runTraeMatching\(FALLBACK_MATCH_DEADLINE_MS\);/);
   assert.match(
     route,
     /return judgeChangedTraeTopics\(\{[\s\S]*?mode: "changed",[\s\S]*?max: DEFAULT_JUDGE_BATCH_MAX,[\s\S]*?concurrency: DEFAULT_JUDGE_CONCURRENCY,[\s\S]*?deadlineMs: FALLBACK_JUDGE_DEADLINE_MS[\s\S]*?\}\);/

@@ -50,7 +50,10 @@ async function runCronTask(task: string): Promise<NextResponse> {
     return NextResponse.json({ ok: true, result });
   }
   if (task === "match") {
-    const result = await runTraeMatching();
+    // Standalone match task also runs under Cloud Run's 900s timeout. Use a generous
+    // 780s deadline (leaving ~120s for snapshot + response) so unlimited forum lookups
+    // don't create another zombie RUNNING row.
+    const result = await runTraeMatching(780_000);
     await refreshSnapshot();
     return NextResponse.json({ ok: true, result });
   }
@@ -77,12 +80,13 @@ async function runCronTask(task: string): Promise<NextResponse> {
     // Overall budget also shrinks the second pass when scrape/match ate the clock so Cloud
     // Run does not kill mid-second-pass and leave a zombie RUNNING row.
     const RUN_ALL_JUDGE_DEADLINE_MS = 300_000;
+    const RUN_ALL_MATCH_DEADLINE_MS = 300_000;
     const RUN_ALL_BUDGET_MS = 840_000;
     const MIN_SECOND_JUDGE_MS = 45_000;
     const runAllStartedAt = Date.now();
     const scrapeAndMatch = (async () => {
       await scrapeAllTraeSources();
-      await runTraeMatching();
+      await runTraeMatching(RUN_ALL_MATCH_DEADLINE_MS);
     })();
     const firstJudge = judgeChangedTraeTopics({ mode: "changed", max: halfMax, deadlineMs: RUN_ALL_JUDGE_DEADLINE_MS }).catch((error) => {
       console.error("[trae] first judge batch failed:", error);
