@@ -214,7 +214,10 @@ export async function callLLMWithFallback<TParsed = string>({
 
     while (!advanceToNextModel) {
       const apiKey = apiKeys[keyCursor % apiKeys.length];
-      await waitForLLMRateLimit(apiKey, config.aiRpmLimit, sleepFn);
+      // NVIDIA direct enforces a much lower per-key rpm than the friend gateway; pacing each
+      // provider at its own ceiling lets all keys run in parallel without tripping NVIDIA's 429.
+      const rpmForKey = entry.provider === "nvidia" ? config.nvidiaRpmLimit : config.aiRpmLimit;
+      await waitForLLMRateLimit(apiKey, rpmForKey, sleepFn);
       const attempt = await callOneModel({
         entry,
         apiKey,

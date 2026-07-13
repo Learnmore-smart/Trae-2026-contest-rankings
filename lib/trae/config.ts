@@ -32,8 +32,15 @@ export interface TraeConfig {
   nvidiaImageFallbackModel: string;
   aiProviderOrder: AIProvider[];
   aiZeroBudgetOnly: boolean;
-  /** Requests-per-minute ceiling enforced PER API KEY (not globally). 40 keys × 40 rpm = 1600 rpm total. */
+  /** Requests-per-minute ceiling enforced PER API KEY (not globally). Applies to the friend gateway (high limit). */
   aiRpmLimit: number;
+  /**
+   * Requests-per-minute ceiling enforced PER NVIDIA API KEY. NVIDIA integrate direct only allows
+   * ~40 rpm/key, far below the friend gateway. Pacing NVIDIA keys at the friend rate (aiRpmLimit)
+   * causes HTTP 429s and raises the error rate, so NVIDIA gets its own lower ceiling. With 2 keys
+   * this is 2 × nvidiaRpmLimit total NVIDIA throughput, used in parallel with the friend gateway.
+   */
+  nvidiaRpmLimit: number;
   /** Retry budget for non-rate-limit transient errors (5xx/timeout/network/bad JSON) before falling to the next model. */
   aiMaxRetriesPerModel: number;
   /** Retry budget for rate limits (HTTP 429 + NVIDIA soft-429). 0 = unlimited: retry (rotating keys) until it clears. */
@@ -142,44 +149,47 @@ export function getTraeConfig(): TraeConfig {
   const aiMaxRateLimitWaitMs = Math.max(0, Math.floor(numberFromEnv("AI_MAX_RATE_LIMIT_WAIT_MS", 90_000)));
   const aiRequestTimeoutMs = Math.max(1, Math.floor(numberFromEnv("AI_REQUEST_TIMEOUT_MS", 120_000)));
   const aiRpmLimit = Math.max(1, Math.floor(numberFromEnv("AI_RPM_LIMIT", 40)));
+  // NVIDIA integrate direct is ~40 rpm/key; keep its own ceiling so friend can run much higher
+  // without tripping NVIDIA's 429 limit. Defaults to min(aiRpmLimit, 40) when unset.
+  const nvidiaRpmLimit = Math.max(1, Math.floor(numberFromEnv("NVIDIA_RPM_LIMIT", Math.min(aiRpmLimit, 40))));
   const nvidiaApiKeys = collectNvidiaApiKeys();
 
   return {
     friendApiKey: process.env.TRAE_FRIEND_API ?? null,
     friendBaseUrl: process.env.TRAE_FRIEND_BASE_URL ?? "http://47.93.17.237:8889/v1",
-    // 2026-07-13: Text chain uses deepseek-ai/deepseek-v4-pro (1.2s response) as primary,
-    // z-ai/glm-5.2 (1.1s) as first fallback, grok-4.5 (30-120s, reasoning) as second.
-    // google/gemma-4-31b-it times out on the friend gateway for BOTH text and vision,
-    // so it is excluded from the text fallback chain.
+    // 2026-07-13 full-gateway probe (probe.mjs / scan.mjs). Reliable + fast text models on the
+    // friend gateway that return clean JSON with real output tokens:
+    //   openai/gpt-oss-120b (~3.5s, most stable) → deepseek-ai/DeepSeek-V3.2 (~2.3s) →
+    //   nvidia/nemotron-3-ultra-550b-a55b (~4s). NVIDIA direct runs z-ai/glm-5.2 (~1.2s, 2 keys).
+    // Excluded (timeout / degraded / dirty output): deepseek-v4-pro (43-60s, flaky),
+    //   z-ai/glm-5.2 on friend (timeout), grok-4.5 (timeout / empty), minimax-m3 (400 DEGRADED),
+    //   minimax-m2.7 (>60s), DeepSeek-V3.1 (wraps JSON in ``` fences), deepseek-v4-flash (garbled).
     //
-    // Vision chain: grok-4.5 is the only vision model that responds on the friend gateway
-    // (30-120s, slow but works). google/gemma-4-31b-it also supports vision but times out
-    // on the friend gateway — kept as fallback in case of intermittent availability.
-    // deepseek-v4-pro and glm-5.2 are text-only, NOT vision models.
-    // NVIDIA direct (fallback provider) has gemma-4-31b-it which works for vision at 40 RPM.
+    // Vision is best-effort (falls through to null, never blocks text). No model reads images
+    // reliably on the gateway right now; chain is grok-4.5 → gemma-4-31b-it → minimax-m3.
     friendPrimaryModel: process.env.FRIEND_PRIMARY_MODEL ?? "deepseek-ai/deepseek-v4-pro",
     friendFallbackModels: listFromEnv("FRIEND_FALLBACK_MODELS", [
-      "z-ai/glm-5.2",
-      "grok-4.5"
+      "nvidia/nemotron-3-ultra-550b-a55b"
     ]),
     friendImageModel: process.env.FRIEND_IMAGE_MODEL ?? "grok-4.5",
     friendImageFallbackModel: process.env.FRIEND_IMAGE_FALLBACK_MODEL ?? "google/gemma-4-31b-it",
     nvidiaApiKey: nvidiaApiKeys[0] ?? null,
     nvidiaApiKeys,
     nvidiaBaseUrl: process.env.NVIDIA_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
-    nvidiaPrimaryModel: process.env.NVIDIA_PRIMARY_MODEL ?? "google/gemma-4-31b-it",
+    // z-ai/glm-5.2 is the fastest reliable model on NVIDIA direct (~1.2s) and runs across both
+    // NVIDIA keys in parallel with the friend gateway. gemma-4-31b-it is a slow last resort.
+    nvidiaPrimaryModel: process.env.NVIDIA_PRIMARY_MODEL ?? "z-ai/glm-5.2",
     nvidiaFallbackModels: listFromEnv("NVIDIA_FALLBACK_MODELS", [
-      "deepseek-ai/deepseek-v4-pro",
-      "z-ai/glm-5.2"
+      "google/gemma-4-31b-it"
     ]),
+    // NVIDIA vision uses ONLY gemma-4-31b-it (no NVIDIA fallback). Vision chain overall:
+    // grok-4.5 (friend) → gemma (friend) → gemma (NVIDIA). Vision is best-effort.
     nvidiaImageModel: process.env.NVIDIA_IMAGE_MODEL ?? "google/gemma-4-31b-it",
-    // Empty by default: deepseek-v4-pro and glm-5.2 are text-only, NOT vision models.
-    // The vision chain is grok-4.5 (friend) → gemma-4-31b-it (friend, may time out) →
-    // gemma-4-31b-it (NVIDIA direct, 40 RPM). No fourth vision model exists on NVIDIA.
     nvidiaImageFallbackModel: process.env.NVIDIA_IMAGE_FALLBACK_MODEL ?? "",
     aiProviderOrder: providerOrderFromEnv(),
     aiZeroBudgetOnly: booleanFromEnv("AI_ZERO_BUDGET_ONLY", true),
     aiRpmLimit,
+    nvidiaRpmLimit,
     aiMaxRetriesPerModel,
     aiMaxRateLimitRetries,
     aiMaxRateLimitWaitMs,

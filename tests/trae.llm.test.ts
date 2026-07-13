@@ -29,6 +29,7 @@ const aiEnvKeys = [
   "AI_PROVIDER_ORDER",
   "AI_ZERO_BUDGET_ONLY",
   "AI_RPM_LIMIT",
+  "NVIDIA_RPM_LIMIT",
   "AI_MAX_RETRIES_PER_MODEL",
   "AI_MAX_RATE_LIMIT_RETRIES",
   "AI_MAX_RATE_LIMIT_WAIT_MS",
@@ -73,6 +74,7 @@ function zeroBudgetEnv(overrides: EnvPatch = {}): EnvPatch {
     AI_PROVIDER_ORDER: "friend,nvidia",
     AI_ZERO_BUDGET_ONLY: "true",
     AI_RPM_LIMIT: "60000",
+    NVIDIA_RPM_LIMIT: "60000",
     AI_MAX_RETRIES_PER_MODEL: "1",
     AI_REQUEST_TIMEOUT_MS: "120000",
     ...overrides
@@ -86,6 +88,17 @@ describe("LLM zero-budget fallback client", () => {
     });
   });
 
+  it("caps NVIDIA per-key rpm at 40 by default, independent of the (higher) friend rpm", () => {
+    withEnv(zeroBudgetEnv({ AI_RPM_LIMIT: "300", NVIDIA_RPM_LIMIT: undefined }), () => {
+      const config = getTraeConfig();
+      assert.equal(config.aiRpmLimit, 300);
+      assert.equal(config.nvidiaRpmLimit, 40);
+    });
+    withEnv(zeroBudgetEnv({ NVIDIA_RPM_LIMIT: "80" }), () => {
+      assert.equal(getTraeConfig().nvidiaRpmLimit, 80);
+    });
+  });
+
   it("defaults the per-call rate-limit wall-clock ceiling to 90s and honors the env override", () => {
     withEnv(zeroBudgetEnv({ AI_MAX_RATE_LIMIT_WAIT_MS: undefined }), () => {
       assert.equal(getTraeConfig().aiMaxRateLimitWaitMs, 90_000);
@@ -95,7 +108,7 @@ describe("LLM zero-budget fallback client", () => {
     });
   });
 
-  it("defaults NVIDIA text order to Gemma 4 31B, DeepSeek V4 Pro, then GLM 5.2 (no MiniMax)", () => {
+  it("defaults NVIDIA text order to GLM 5.2 then Gemma 4 31B (no MiniMax in the text plan)", () => {
     withEnv(
       zeroBudgetEnv({
         NVIDIA_PRIMARY_MODEL: undefined,
@@ -106,20 +119,19 @@ describe("LLM zero-budget fallback client", () => {
       () => {
         const config = getTraeConfig();
         const plan = buildLLMFallbackPlan(config);
-        // Gemma 4 31B is primary; minimax-m3 removed (empty_content_billed).
-        // DeepSeek V4 Flash (hangs) and GLM 5.1 (410 EOL 2026-07-02) stay excluded.
+        // 2026-07-13 probe: z-ai/glm-5.2 is the fastest reliable NVIDIA model (~1.2s); gemma is a
+        // slow last resort. deepseek-v4-pro dropped (43-60s, flaky). minimax stays out of text.
         assert.deepEqual(
           plan
             .filter((entry) => entry.provider === "nvidia")
             .map((entry) => entry.model),
           [
-            "google/gemma-4-31b-it",
-            "deepseek-ai/deepseek-v4-pro",
-            "z-ai/glm-5.2"
+            "z-ai/glm-5.2",
+            "google/gemma-4-31b-it"
           ]
         );
         assert.equal(config.nvidiaImageModel, "google/gemma-4-31b-it");
-        // deepseek-v4-pro is text-only, NOT a vision model — fallback is empty.
+        // NVIDIA vision uses ONLY gemma-4-31b-it — no NVIDIA image fallback.
         assert.equal(config.nvidiaImageFallbackModel, "");
         assert.ok(!plan.some((entry) => entry.model.includes("minimax")));
       }
