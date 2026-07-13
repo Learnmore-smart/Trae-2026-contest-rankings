@@ -100,6 +100,7 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 | 2026-07-10 | 开始评分 still no-ops (~11s → idle). | Self-invoke connect timeout > EARLY window; late path silent idle without handoff check. | Loopback self-invoke; fallback whenever no handoff evidence; client polls on click. |
 | 2026-07-11 | 重试评分 → 运行中断 / Reclaimed stale RUNNING after 1600s. | Soft deadline only; in-flight drain past 900s kill; runPipeline used 690s×2. | Hard drain finishRun; runPipeline 300s/pass deadlines; friendlier reclaim message. |
 | 2026-07-12 | 开始评分 still produces no new evaluations; match phase runs >900s. | `runTraeMatching()` had no deadline; `Promise.all([scrapeAndMatch, immediateJudge])` waited for match, which exceeded Cloud Run's 900s timeout. | Added `FALLBACK_MATCH_DEADLINE_MS = 300_000`; pass to `runTraeMatching()` so match stops after 300s and the second judge pass can run. |
+| 2026-07-12 | evaluatedCount stuck at 4625; OOM crashes kill pipeline before finishRun. | Two compounding issues: (1) `buildCronRunAllUrl` used `new URL(request.url).pathname` which on Next.js 15/Cloud Run sometimes strips basePath → self-invoke 404 → fallback to in-process `runPipeline`; (2) in-process pipeline with Grok 4.5 (reasoning model, 30-120s/call) + 4000 maxJudgePerRun accumulated heap until `FATAL ERROR: Reached heap limit` (2GiB). Process killed before any deadline could fire finishRun, leaving forever-RUNNING rows. | (A) Rewrite `buildCronRunAllUrl` to use `request.nextUrl.basePath + nextUrl.pathname` so basePath is always present; (B) lower `TRAE_MAX_JUDGE_PER_RUN` 4000→500 to match cron CRON_JUDGE_MAX and cap per-batch memory; (C) revert `FRIEND_PRIMARY_MODEL` grok-4.5→google/gemma-4-31b-it (non-reasoning, faster, lower memory), grok-4.5 demoted to first fallback; (D) raise Cloud Run memory 2GiB→4GiB. |
 
 ## Change History
 
@@ -111,6 +112,7 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 | 2026-07-10 | Fixed silent idle after self-invoke connect timeout: loopback URL + handoff-gated fallback. | Grok |
 | 2026-07-12 | Added `FALLBACK_MATCH_DEADLINE_MS = 300_000` and passed to `runTraeMatching()` so the match phase stops after 300s instead of running past Cloud Run's 900s timeout. | GLM |
 | 2026-07-12 | Removed `COOLDOWN_MS`, `latestFinishedAtMs`, and all cooldown logic from POST + client. The `running` guard already prevents double-starting; the user wants immediate retry after a run finishes. | GLM |
+| 2026-07-12 | Rewrote `buildCronRunAllUrl` to use `request.nextUrl.basePath + nextUrl.pathname` (was `new URL(request.url).pathname`). Old form lost basePath on Next.js 15/Cloud Run → self-invoke 404 → in-process fallback → OOM. | GLM |
 
 ## Planned Change: Public Scrape Plus Immediate Judge
 

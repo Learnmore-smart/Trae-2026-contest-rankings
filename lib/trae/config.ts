@@ -147,28 +147,36 @@ export function getTraeConfig(): TraeConfig {
   return {
     friendApiKey: process.env.TRAE_FRIEND_API ?? null,
     friendBaseUrl: process.env.TRAE_FRIEND_BASE_URL ?? "http://47.93.17.237:8889/v1",
-    // 2026-07-12: grok-4.5 promoted to primary (friend-gateway exclusive, tested HTTP 200 +
-    // valid JSON mode). gemma-4-31b-it demoted to first fallback; deepseek-v4-pro and glm-5.2
-    // remain as deeper fallbacks. Vision chain still uses gemma (grok-4.5 vision unverified).
-    friendPrimaryModel: process.env.FRIEND_PRIMARY_MODEL ?? "grok-4.5",
+    // 2026-07-13: Text chain uses deepseek-ai/deepseek-v4-pro (1.2s response) as primary,
+    // z-ai/glm-5.2 (1.1s) as first fallback, grok-4.5 (30-120s, reasoning) as second.
+    // google/gemma-4-31b-it times out on the friend gateway for BOTH text and vision,
+    // so it is excluded from the text fallback chain.
+    //
+    // Vision chain: grok-4.5 is the only vision model that responds on the friend gateway
+    // (30-120s, slow but works). google/gemma-4-31b-it also supports vision but times out
+    // on the friend gateway — kept as fallback in case of intermittent availability.
+    // deepseek-v4-pro and glm-5.2 are text-only, NOT vision models.
+    // NVIDIA direct (fallback provider) has gemma-4-31b-it which works for vision at 40 RPM.
+    friendPrimaryModel: process.env.FRIEND_PRIMARY_MODEL ?? "deepseek-ai/deepseek-v4-pro",
     friendFallbackModels: listFromEnv("FRIEND_FALLBACK_MODELS", [
-      "google/gemma-4-31b-it",
-      "deepseek-ai/deepseek-v4-pro",
-      "z-ai/glm-5.2"
+      "z-ai/glm-5.2",
+      "grok-4.5"
     ]),
-    friendImageModel: process.env.FRIEND_IMAGE_MODEL ?? "google/gemma-4-31b-it",
-    friendImageFallbackModel: process.env.FRIEND_IMAGE_FALLBACK_MODEL ?? "deepseek-ai/deepseek-v4-pro",
+    friendImageModel: process.env.FRIEND_IMAGE_MODEL ?? "grok-4.5",
+    friendImageFallbackModel: process.env.FRIEND_IMAGE_FALLBACK_MODEL ?? "google/gemma-4-31b-it",
     nvidiaApiKey: nvidiaApiKeys[0] ?? null,
     nvidiaApiKeys,
     nvidiaBaseUrl: process.env.NVIDIA_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
     nvidiaPrimaryModel: process.env.NVIDIA_PRIMARY_MODEL ?? "google/gemma-4-31b-it",
-    // Mirrors the friend chain: gemma-4-31b-it primary, then deepseek / glm. No minimax.
     nvidiaFallbackModels: listFromEnv("NVIDIA_FALLBACK_MODELS", [
       "deepseek-ai/deepseek-v4-pro",
       "z-ai/glm-5.2"
     ]),
     nvidiaImageModel: process.env.NVIDIA_IMAGE_MODEL ?? "google/gemma-4-31b-it",
-    nvidiaImageFallbackModel: process.env.NVIDIA_IMAGE_FALLBACK_MODEL ?? "deepseek-ai/deepseek-v4-pro",
+    // Empty by default: deepseek-v4-pro and glm-5.2 are text-only, NOT vision models.
+    // The vision chain is grok-4.5 (friend) → gemma-4-31b-it (friend, may time out) →
+    // gemma-4-31b-it (NVIDIA direct, 40 RPM). No fourth vision model exists on NVIDIA.
+    nvidiaImageFallbackModel: process.env.NVIDIA_IMAGE_FALLBACK_MODEL ?? "",
     aiProviderOrder: providerOrderFromEnv(),
     aiZeroBudgetOnly: booleanFromEnv("AI_ZERO_BUDGET_ONLY", true),
     aiRpmLimit,

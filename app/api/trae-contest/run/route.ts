@@ -1,33 +1,24 @@
-import { NextRequest, NextResponse } from "next/server";
-import { setTimeout as sleep } from "node:timers/promises";
-import { listRuns, writeBoardSnapshot } from "@/lib/trae/api";
-import { getTraeConfig } from "@/lib/trae/config";
-import { judgeChangedTraeTopics } from "@/lib/trae/judge";
-import { DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY } from "@/lib/trae/judge-policy";
-import { runTraeMatching } from "@/lib/trae/matcher";
+import { NextResponse } from "next/server";
+import { listRuns } from "@/lib/trae/api";
+import { runFullPipeline } from "@/lib/trae/pipeline";
 import { isFreshRunningRun, reclaimStaleRunningRuns, STALE_RUNNING_RUN_MS } from "@/lib/trae/runs";
-import { scrapeAllTraeSources } from "@/lib/trae/scraper";
 import type { TraeRun } from "@/lib/trae/types";
 
 export const runtime = "nodejs";
-// Allow the POST handoff (or in-process fallback) to stay alive under Cloud Run's long timeout.
+// Allow the POST to stay alive under Cloud Run's long timeout if the client keeps waiting.
 export const maxDuration = 900;
 
 // One public "update now" button drives the whole pipeline (scrape -> match -> judge).
-// The same pipeline also runs automatically on the Cloud Scheduler cron; this endpoint
-// is only a manual trigger, so it is intentionally token-free but guarded by a single
-// in-flight lock (no cooldown — the user wants immediate retry after a run finishes).
+// POST fire-and-forgets runFullPipeline() and returns immediately; the client polls GET
+// for cross-instance status derived from the persistent runs table. This works because
+// Cloud Run has cpu-throttling=false on this service, so background work keeps full CPU
+// even after the POST response is sent.
 //
-// Cloud Run reality check: in-memory state is per-instance, and CPU is throttled once a
-// response is sent. So POST must NOT rely on fire-and-forget background work (it stalls
-// mid-flight), and GET must NOT rely on this process's memory alone (the poll may land on
-// a different instance than the click). Instead, POST self-invokes the cron run-all
-// endpoint — the work then runs inside a request that keeps CPU for the full 900s service
-// timeout — and GET derives a cross-instance status from the persistent runs table.
-//
-// Handoff: POST keeps the request open (CPU allocated) until run-all has written a fresh
-// RUNNING row (or the self-invoke settles / fails early). Returning after a blind 250ms
-// sleep left zombies: startRun wrote RUNNING, then CPU throttle killed the outbound fetch.
+// Previous design self-invoked the cron run-all endpoint via loopback HTTP to keep CPU
+// allocated, but Next.js 15 route handlers don't pass nextConfig to NextURL, making
+// basePath reconstruction unreliable on loopback — every self-invoke 404'd, fell back
+// in-process, and the POST blocked for the full 900s. Direct in-process call is simpler
+// and equally reliable with cpu-throttling=false.
 
 export type RunPhase = "idle" | "scrape" | "match" | "judge" | "done" | "error";
 
@@ -49,22 +40,11 @@ const STALE_MEMORY_RUNNING_MS = 20 * 60 * 1000;
 // Polling clients hit GET every 2s; cache the runs read briefly so status polls cost
 // at most ~1 Data Connect query per interval regardless of how many tabs are open.
 const RUNS_CACHE_TTL_MS = 2_500;
-// How long POST holds open waiting for run-all to prove it started (fresh RUNNING row).
-const HANDOFF_WAIT_MS = 25_000;
-// In-process fallback must fit two judge passes under Cloud Run's ~900s request timeout
-// (same budget as cron run-all). Soft 300s + hard drain ~90s per pass ≈ 390s × 2.
-const FALLBACK_JUDGE_DEADLINE_MS = 300_000;
-// Match phase has the same 300s ceiling so scrape+match never blocks the second judge
-// pass from running. Without this, unlimited forum lookups on ~6000 preliminaries
-// regularly exceed 900s and Cloud Run kills the request, leaving zombie RUNNING rows.
-const FALLBACK_MATCH_DEADLINE_MS = 300_000;
 
 interface PipelineState {
   status: PipelineStatus;
   runsCache?: { at: number; runs: TraeRun[] };
 }
-
-type JudgeBatchResult = Awaited<ReturnType<typeof judgeChangedTraeTopics>>;
 
 // Persist across Next.js dev hot-reloads / route module re-evaluation.
 const globalState = globalThis as typeof globalThis & { __traePipeline?: PipelineState };
@@ -169,211 +149,35 @@ function statusFromRuns(runs: TraeRun[], now = Date.now()): PipelineStatus | nul
   };
 }
 
-function judgeChangedBatch(): Promise<JudgeBatchResult> {
-  return judgeChangedTraeTopics({
-    mode: "changed",
-    max: DEFAULT_JUDGE_BATCH_MAX,
-    concurrency: DEFAULT_JUDGE_CONCURRENCY,
-    // Match cron run-all: two sequential-ish passes must not each take the full 690s default
-    // or Cloud Run kills the request mid-flight and leaves zombie RUNNING rows.
-    deadlineMs: FALLBACK_JUDGE_DEADLINE_MS
-  });
-}
-
-function mergeJudgeResults(results: JudgeBatchResult[]): Pick<JudgeBatchResult, "evaluatedCount" | "failedCount"> {
-  return results.reduce(
-    (summary, result) => ({
-      evaluatedCount: summary.evaluatedCount + result.evaluatedCount,
-      failedCount: summary.failedCount + result.failedCount
-    }),
-    { evaluatedCount: 0, failedCount: 0 }
-  );
-}
-
-// Legacy in-process pipeline: only used when no cron secret is configured (local dev,
-// where the process keeps CPU) or when the cron self-invocation fails to start.
-async function runPipeline(state: PipelineState): Promise<void> {
-  const set = (patch: Partial<PipelineStatus>) => {
-    state.status = { ...state.status, ...patch };
-  };
-  // Same overall budget as cron run-all: leave headroom under Cloud Run 900s so the second
-  // judge pass (and finishRun) are not cut off when scrape/match is slow.
-  const pipelineStartedAt = Date.now();
-  const PIPELINE_BUDGET_MS = 840_000;
-  const MIN_SECOND_JUDGE_MS = 45_000;
-
-  try {
-    set({ phase: "judge", message: "正在评分现有未评分作品，同时抓取公开帖子…" });
-    const immediateJudge = judgeChangedBatch();
-    const scrapeAndMatch = (async () => {
-      set({ phase: "scrape", message: "正在抓取报名与初赛专区，同时评分未评分作品…" });
-      await scrapeAllTraeSources();
-
-      set({ phase: "match", message: "正在匹配报名方向…" });
-      await runTraeMatching(FALLBACK_MATCH_DEADLINE_MS);
-    })();
-
-    const [, immediateJudgeResult] = await Promise.all([scrapeAndMatch, immediateJudge]);
-
-    const remainingMs = PIPELINE_BUDGET_MS - (Date.now() - pipelineStartedAt);
-    let postMatchJudgeResult: JudgeBatchResult = { evaluatedCount: 0, failedCount: 0 };
-    if (remainingMs >= MIN_SECOND_JUDGE_MS + 90_000) {
-      set({ phase: "judge", message: "正在评分新匹配的未评分作品…" });
-      const secondDeadlineMs = Math.min(FALLBACK_JUDGE_DEADLINE_MS, remainingMs - 90_000);
-      postMatchJudgeResult = await judgeChangedTraeTopics({
-        mode: "changed",
-        max: DEFAULT_JUDGE_BATCH_MAX,
-        concurrency: DEFAULT_JUDGE_CONCURRENCY,
-        deadlineMs: secondDeadlineMs
-      });
-    } else {
-      console.warn(
-        `[trae] in-process pipeline skipping second judge pass: only ${remainingMs}ms left under ${PIPELINE_BUDGET_MS}ms budget`
-      );
-    }
-    const judgeResult = mergeJudgeResults([immediateJudgeResult, postMatchJudgeResult]);
-
-    // Refresh the board snapshot so the next public load reads 1 doc instead of re-scanning
-    // 5 collections. Best-effort: a failure here doesn't undo the pipeline's work.
-    try {
-      await writeBoardSnapshot();
-    } catch (error) {
-      console.error("[trae] writeBoardSnapshot failed:", error);
-    }
-
-    set({
-      running: false,
-      phase: "done",
-      finishedAt: new Date().toISOString(),
-      message: `本轮抓取、匹配、评分已完成；评分 ${judgeResult.evaluatedCount} 个，失败 ${judgeResult.failedCount} 个。`,
-      error: null
-    });
-  } catch (error) {
-    set({
-      running: false,
-      phase: "error",
-      finishedAt: new Date().toISOString(),
-      message: "运行中断，请稍后重试。",
-      error: error instanceof Error ? error.message : "Pipeline failed."
-    });
-  }
-}
-
-function buildCronRunAllUrl(request: NextRequest): string {
-  // Loopback keeps the handoff inside this container: no public ingress/egress, no
-  // dependency on the external hostname resolving from Cloud Run. Preserve basePath by
-  // swapping only the route suffix on the incoming pathname.
-  const pathname = new URL(request.url).pathname.replace(
-    /\/api\/trae-contest\/run\/?$/,
-    "/api/trae-contest/cron/run-all"
-  );
-  const port = process.env.PORT || "8080";
-  return `http://127.0.0.1:${port}${pathname}`;
-}
-
-async function hasDispatchHandoff(state: PipelineState, dispatchedAt: number): Promise<boolean> {
-  invalidateRunsCache(state);
-  const runs = await readRecentRuns(state);
-  return runs.some(
-    (run) => isFreshRunningRun(run) && Date.parse(run.startedAt) >= dispatchedAt - 2_000
-  );
-}
-
-type CronRunAllPayload = {
-  result?: { evaluatedCount?: number; failedCount?: number };
-  skipped?: string;
-} | null;
-
-function applyCronPayloadToState(state: PipelineState, payload: CronRunAllPayload): void {
-  state.status = {
-    ...state.status,
-    running: false,
-    phase: "done",
-    finishedAt: new Date().toISOString(),
-    message: payload?.skipped
-      ? "后台已有评分批次在运行，本次点击已并入该批次。"
-      : `本轮抓取、匹配、评分已完成；评分 ${payload?.result?.evaluatedCount ?? 0} 个，失败 ${payload?.result?.failedCount ?? 0} 个。`,
-    error: null
-  };
-}
-
 /**
- * Run the pipeline through the cron run-all endpoint so it executes inside its own request
- * (full CPU up to the Cloud Run service timeout) instead of as throttled background work.
- * The secret goes in a header — never the query string — so it stays out of request logs.
- *
- * Keeps this request alive until handoff evidence (fresh RUNNING row) so Cloud Run does not
- * throttle CPU before the outbound self-invoke is established. Once handoff is confirmed,
- * detaches from the full 900s response and lets clients poll the runs table.
+ * Fire-and-forget the full pipeline. Updates in-memory state on completion so same-instance
+ * GETs see the result without a DB round-trip. The runs table (updated by judge/match
+ * sub-tasks) drives cross-instance status for GETs that land on other instances.
  */
-async function invokeCronRunAll(request: NextRequest, cronSecret: string, state: PipelineState): Promise<void> {
-  const dispatchedAt = Date.now();
-  let fetchError: unknown = null;
-  let fetchSettled = false;
-  let payload: CronRunAllPayload = null;
-
-  const fetchPromise = (async () => {
-    try {
-      const response = await fetch(buildCronRunAllUrl(request), {
-        method: "POST",
-        headers: { "x-trae-cron-secret": cronSecret },
-        cache: "no-store"
-      });
-      if (!response.ok) throw new Error(`cron run-all responded ${response.status}`);
-      payload = (await response.json().catch(() => null)) as CronRunAllPayload;
-    } catch (error) {
-      fetchError = error;
-    } finally {
-      fetchSettled = true;
-    }
-  })();
-
-  while (Date.now() - dispatchedAt < HANDOFF_WAIT_MS) {
-    if (fetchSettled) break;
-
-    if (await hasDispatchHandoff(state, dispatchedAt)) {
-      // run-all is request-bound elsewhere (or on this instance as a concurrent request).
-      // Detach: do not await the full 900s response on this POST.
-      void fetchPromise.then(() => {
-        if (!fetchError) applyCronPayloadToState(state, payload);
-        else {
-          console.error("[trae] cron run-all self-invocation lost its response after handoff:", fetchError);
-          // Handoff already proved work started; let GET/statusFromRuns drive the rest.
-          state.status = { ...state.status, running: false, phase: "idle", message: "等待运行。" };
-        }
-      });
-      return;
-    }
-
-    await sleep(400);
-  }
-
-  // Fetch finished inside the handoff window (skip, fast path, or error).
-  if (fetchSettled) {
-    if (fetchError) {
-      // Only defer to the runs table when this dispatch actually started server-side.
-      // Connect timeouts / 401 / DNS never write a RUNNING row — those must fall back
-      // in-process. The old timer-based "late failure ⇒ idle" path made 开始评分 a silent
-      // no-op when undici's ~10s connect timeout landed just after a 10s early window.
-      if (await hasDispatchHandoff(state, dispatchedAt)) {
-        console.error("[trae] cron run-all self-invocation lost its response after handoff; deferring to runs table:", fetchError);
-        state.status = { ...state.status, running: false, phase: "idle", message: "等待运行。" };
-        return;
-      }
-      console.error("[trae] cron run-all self-invocation failed to start; falling back in-process:", fetchError);
-      await runPipeline(state);
-      return;
-    }
-    applyCronPayloadToState(state, payload);
-    return;
-  }
-
-  // Still no RUNNING row and fetch not settled — connection may be stuck (e.g. container
-  // concurrency=1 deadlock on self-fetch). Fall back in-process while this request still
-  // holds CPU so the click does real work.
-  console.error("[trae] cron run-all handoff timed out without RUNNING evidence; falling back in-process");
-  void fetchPromise; // abandon waiting; avoid double work only if run-all later starts
-  await runPipeline(state);
+function startPipeline(state: PipelineState): void {
+  const startedAt = state.status.startedAt;
+  void runFullPipeline()
+    .then((result) => {
+      state.status = {
+        running: false,
+        phase: "done",
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        message: `本轮抓取、匹配、评分已完成；评分 ${result.evaluatedCount} 个，失败 ${result.failedCount} 个。`,
+        error: null
+      };
+    })
+    .catch((error) => {
+      console.error("[trae] pipeline failed:", error);
+      state.status = {
+        running: false,
+        phase: "error",
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        message: "运行中断，请稍后重试。",
+        error: error instanceof Error ? error.message : "Pipeline failed."
+      };
+    });
 }
 
 export async function GET(): Promise<NextResponse> {
@@ -394,7 +198,7 @@ export async function GET(): Promise<NextResponse> {
   return NextResponse.json(state.status);
 }
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+export async function POST(): Promise<NextResponse> {
   const state = getState();
   if (isStaleRunningStatus(state.status)) {
     state.status = { ...state.status, running: false, phase: "idle", message: "等待运行。" };
@@ -428,14 +232,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     error: null
   };
 
-  const config = getTraeConfig();
-  if (config.cronSecret) {
-    // Await handoff (not the full 900s batch) so CPU stays allocated until run-all is live.
-    await invokeCronRunAll(request, config.cronSecret, state);
-  } else {
-    // Local dev: no cron secret, and the process keeps CPU — run in-process as before.
-    void runPipeline(state);
-  }
+  // Fire-and-forget: POST returns immediately, pipeline runs in background with full CPU
+  // (cpu-throttling=false on this Cloud Run service). Client polls GET for progress.
+  startPipeline(state);
 
   return NextResponse.json(state.status);
 }

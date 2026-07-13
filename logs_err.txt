@@ -1,0 +1,8 @@
+﻿__Safe-Rm-Move-To-RecycleBin : Cannot bind argument to parameter 'Path' because it is an empty string.
+At C:\Users\noahz\AppData\Local\Programs\Trae CN\resources\app\out\vs\workbench\contrib\terminal\common\scripts\safe_rm
+_aliases.ps1:370 char:54
++ ...        if (-not (__Safe-Rm-Move-To-RecycleBin -Path $absolutePath)) {
++                                                         ~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidData: (:) [__Safe-Rm-Move-To-RecycleBin], ParameterBindingValidationException
+    + FullyQualifiedErrorId : ParameterArgumentValidationErrorEmptyStringNotAllowed,__Safe-Rm-Move-To-RecycleBin
+ 

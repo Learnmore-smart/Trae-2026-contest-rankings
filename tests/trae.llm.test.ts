@@ -119,7 +119,8 @@ describe("LLM zero-budget fallback client", () => {
           ]
         );
         assert.equal(config.nvidiaImageModel, "google/gemma-4-31b-it");
-        assert.equal(config.nvidiaImageFallbackModel, "deepseek-ai/deepseek-v4-pro");
+        // deepseek-v4-pro is text-only, NOT a vision model — fallback is empty.
+        assert.equal(config.nvidiaImageFallbackModel, "");
         assert.ok(!plan.some((entry) => entry.model.includes("minimax")));
       }
     );

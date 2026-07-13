@@ -419,26 +419,24 @@ test("live board data uses Data Connect topics instead of bundled cache as base"
 
 test("public run status reports bounded judging batch counts", () => {
   const route = read(runRoutePath);
+  const pipeline = read(join(process.cwd(), "lib/trae/pipeline.ts"));
   const client = read(clientPath);
   const judgePolicy = read(judgePolicyPath);
 
   assert.match(judgePolicy, /export const DEFAULT_JUDGE_BATCH_MAX = 4000;/);
   assert.match(judgePolicy, /export const DEFAULT_JUDGE_CONCURRENCY = 8;/);
-  assert.match(route, /import \{ DEFAULT_JUDGE_BATCH_MAX, DEFAULT_JUDGE_CONCURRENCY \} from "@\/lib\/trae\/judge-policy";/);
-  assert.doesNotMatch(route, /const PUBLIC_JUDGE_MAX =/);
-  assert.doesNotMatch(route, /const PUBLIC_JUDGE_CONCURRENCY =/);
-  assert.match(route, /await scrapeAllTraeSources\(\);/);
-  assert.match(route, /await runTraeMatching\(FALLBACK_MATCH_DEADLINE_MS\);/);
+  // Pipeline module owns the scrape/match/judge flow now; POST /run fire-and-forgets it.
+  assert.match(route, /import \{ runFullPipeline \} from "@\/lib\/trae\/pipeline";/);
+  assert.match(route, /startPipeline\(state\)/);
+  assert.match(pipeline, /await scrapeAllTraeSources\(\);/);
+  assert.match(pipeline, /await runTraeMatching\(MATCH_DEADLINE_MS\);/);
   assert.match(
-    route,
-    /return judgeChangedTraeTopics\(\{[\s\S]*?mode: "changed",[\s\S]*?max: DEFAULT_JUDGE_BATCH_MAX,[\s\S]*?concurrency: DEFAULT_JUDGE_CONCURRENCY,[\s\S]*?deadlineMs: FALLBACK_JUDGE_DEADLINE_MS[\s\S]*?\}\);/
+    pipeline,
+    /judgeChangedTraeTopics\(\{[\s\S]*?mode: "changed",[\s\S]*?deadlineMs: JUDGE_DEADLINE_MS[\s\S]*?\}\)/
   );
-  assert.match(route, /const immediateJudge = judgeChangedBatch\(\);/);
-  // Second pass may call judgeChangedBatch or a budget-aware judgeChangedTraeTopics directly.
-  assert.match(route, /postMatchJudgeResult/);
-  assert.match(route, /await Promise\.all\(\[scrapeAndMatch, immediateJudge\]\);/);
-  assert.match(route, /judgeResult\.evaluatedCount/);
-  assert.match(route, /judgeResult\.failedCount/);
+  assert.match(pipeline, /await Promise\.all\(\[scrapeAndMatch, firstJudge\]\);/);
+  assert.match(pipeline, /evaluatedCount/);
+  assert.match(pipeline, /failedCount/);
   assert.match(client, /setStatus\(\{ running: true, phase: "judge", startedAt: null, finishedAt: null, message: t\.judging, error: null \}\);/);
   assert.match(client, /status\?\.message \?\? phaseMessage\(phase, language\)/);
   assert.match(client, /phase === "error" && status\?\.error/);
@@ -449,26 +447,17 @@ test("public run button works across Cloud Run instances", () => {
   const client = read(clientPath);
   const runsHelper = read(join(process.cwd(), "lib/trae/runs.ts"));
   const cronRoute = read(cronRoutePath);
+  const pipeline = read(join(process.cwd(), "lib/trae/pipeline.ts"));
 
-  // POST must not rely on fire-and-forget background work on Cloud Run: with the cron
-  // secret configured it self-invokes cron run-all so the pipeline runs inside a request
-  // that keeps CPU allocated; the in-process pipeline stays as the local-dev fallback.
-  assert.match(route, /buildCronRunAllUrl\(request\)/);
-  assert.match(route, /\/api\/trae-contest\/cron\/run-all/);
-  assert.match(route, /"x-trae-cron-secret": cronSecret/);
-  // Loopback self-invoke: avoid public ingress/egress (connect timeout → silent no-op).
-  assert.match(route, /127\.0\.0\.1/);
-  assert.match(route, /process\.env\.PORT/);
-  // Await handoff (not a blind void+250ms sleep) so Cloud Run keeps CPU until run-all is live.
-  assert.match(route, /if \(config\.cronSecret\) \{[\s\S]*?await invokeCronRunAll\(request, config\.cronSecret, state\);[\s\S]*?\} else \{[\s\S]*?void runPipeline\(state\);/);
-  assert.match(route, /const HANDOFF_WAIT_MS = 25_000;/);
-  assert.doesNotMatch(route, /void invokeCronRunAll/);
-  // Self-invoke failure without RUNNING handoff must fall back in-process — never silent idle.
-  assert.match(route, /hasDispatchHandoff/);
-  assert.match(route, /falling back in-process/);
-  assert.match(route, /await runPipeline\(state\)/);
-  // The secret must never ride in the query string where it would leak into request logs.
-  assert.doesNotMatch(route, /secret=\$\{/);
+  // POST fire-and-forgets runFullPipeline() directly — no HTTP self-invoke. Works on Cloud Run
+  // because cpu-throttling=false keeps background work at full CPU after the response is sent.
+  assert.match(route, /import \{ runFullPipeline \} from "@\/lib\/trae\/pipeline";/);
+  assert.match(route, /startPipeline\(state\)/);
+  assert.match(route, /void runFullPipeline\(\)/);
+  // No self-invoke mechanism anymore — it was unreliable on loopback (basePath 404).
+  assert.doesNotMatch(route, /buildCronRunAllUrl/);
+  assert.doesNotMatch(route, /invokeCronRunAll/);
+  assert.doesNotMatch(route, /127\.0\.0\.1/);
 
   // GET/POST must derive cross-instance status from fresh RUNNING rows only, and reclaim
   // zombie forever-RUNNING batches left by killed Cloud Run requests.
@@ -487,17 +476,14 @@ test("public run button works across Cloud Run instances", () => {
   assert.match(cronRoute, /reclaimStaleRunningRuns/);
   assert.match(cronRoute, /isFreshRunningRun\(run\)/);
 
-  // In-process fallback must bound each judge pass (not the full 690s default × 2),
-  // and reclaimed zombies surface as retryable timeout copy — not the raw reclaim string.
-  assert.match(route, /FALLBACK_JUDGE_DEADLINE_MS = 300_000/);
-  assert.match(route, /deadlineMs: FALLBACK_JUDGE_DEADLINE_MS/);
-  assert.match(route, /PIPELINE_BUDGET_MS = 840_000/);
-  assert.match(route, /skipping second judge pass/);
+  // Pipeline must bound each judge pass (not the full 690s default × 2), and reclaimed
+  // zombies surface as retryable timeout copy — not the raw reclaim string.
+  assert.match(pipeline, /JUDGE_DEADLINE_MS = 300_000/);
+  assert.match(pipeline, /deadlineMs: JUDGE_DEADLINE_MS/);
+  assert.match(pipeline, /BUDGET_MS = 840_000/);
+  assert.match(pipeline, /skipping second judge pass/);
   assert.match(route, /Reclaimed stale RUNNING run/);
   assert.match(route, /上一轮评分超时中断/);
-  // Cron run-all must also shrink/skip the second pass when the wall clock is almost gone.
-  assert.match(cronRoute, /RUN_ALL_BUDGET_MS = 840_000/);
-  assert.match(cronRoute, /skipping second judge pass/);
 
   // The client keeps polling through the start-up window instead of settling on the first
   // "not running" poll before the run's first RUNNING row is visible.
@@ -511,10 +497,14 @@ test("public run button works across Cloud Run instances", () => {
 
 test("cron judge tasks rejudge changed topics, not only unjudged topics", () => {
   const route = read(cronRoutePath);
+  const pipeline = read(join(process.cwd(), "lib/trae/pipeline.ts"));
 
   assert.match(route, /task === "judge"[\s\S]*?judgeChangedTraeTopics\(\{ mode: "changed"/);
-  assert.match(route, /task === "run-all"[\s\S]*?judgeChangedTraeTopics\(\{ mode: "changed"/);
+  // run-all delegates to runFullPipeline which internally uses mode: "changed".
+  assert.match(route, /task === "run-all"[\s\S]*?runFullPipeline\(/);
+  assert.match(pipeline, /judgeChangedTraeTopics\(\{[\s\S]*?mode: "changed"/);
   assert.doesNotMatch(route, /judgeChangedTraeTopics\(\{ mode: "unjudged" \}\)/);
+  assert.doesNotMatch(pipeline, /mode: "unjudged"/);
 });
 
 test("topic detail falls back to local cache when Data Connect returns no row", async () => {
