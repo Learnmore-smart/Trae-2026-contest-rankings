@@ -185,12 +185,9 @@ export async function callLLMWithFallback<TParsed = string>({
       : null;
 
   while (true) {
-    const saturatedProviders = new Set<TraeAIProvider>();
     let hitRateLimitThisPass = false;
 
   for (const entry of resolvedPlan) {
-    if (saturatedProviders.has(entry.provider)) continue;
-
     const apiKeys = entry.apiKeys.filter(Boolean);
     if (apiKeys.length === 0) {
       callLogs.push({
@@ -242,15 +239,17 @@ export async function callLLMWithFallback<TParsed = string>({
         };
       }
 
-      // Try every key/provider lane before waiting. This lets Friend throttles fall
-      // through to NVIDIA capacity, while still waiting instead of failing when all
-      // configured free lanes are saturated.
+      // On a rate limit, rotate through this model's keys, then fall through to the NEXT MODEL in
+      // the plan — including healthy sibling models on the SAME provider. Models on a shared
+      // gateway can have independent per-model limits (e.g. deepseek-v4-pro throttles hard while
+      // nemotron on the same friend gateway is fine), so we must NOT abandon the whole provider
+      // when one of its models is throttled. Only after the entire plan is exhausted with rate
+      // limits does the outer loop wait and retry the full plan.
       if (retryRateLimitsUntilCleared && isRateLimitError(attempt.log.errorReason)) {
         hitRateLimitThisPass = true;
         rateLimitRetries += 1;
         keyCursor += 1;
         if (rateLimitRetries < apiKeys.length) continue;
-        saturatedProviders.add(entry.provider);
         advanceToNextModel = true;
         continue;
       }

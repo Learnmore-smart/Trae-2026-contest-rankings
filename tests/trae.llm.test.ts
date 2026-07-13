@@ -163,11 +163,10 @@ describe("LLM zero-budget fallback client", () => {
     });
   });
 
-  it("uses NVIDIA capacity when Friend is rate-limited before waiting on Friend", async () => {
+  it("falls through to the next model (including a healthy sibling on the same provider) when one model is rate-limited", async () => {
     await withEnv(zeroBudgetEnv(), async () => {
       const requests: Array<{ provider: string; model: string; authorization: string | null }> = [];
       const sleeps: number[] = [];
-      let friendPrimaryCalls = 0;
 
       const result = await callLLMWithFallback({
         messages: [{ role: "user", content: "score this" }],
@@ -183,10 +182,11 @@ describe("LLM zero-budget fallback client", () => {
             authorization: headers.get("authorization")
           });
 
+          // The friend PRIMARY model has a hard per-model limit (always 429), but its sibling
+          // models on the same friend gateway are healthy. The client must try the sibling before
+          // abandoning the provider — this is the deepseek-v4-pro-throttled / nemotron-healthy case.
           if (provider === "friend" && body.model === "google/gemma-4-31b-it") {
-            friendPrimaryCalls += 1;
-            // Two 429s in a row, then the limit clears — the client must wait it out.
-            if (friendPrimaryCalls === 1) return new Response("rate limited", { status: 429 });
+            return new Response("rate limited", { status: 429 });
           }
 
           return Response.json({
@@ -198,28 +198,23 @@ describe("LLM zero-budget fallback client", () => {
         }
       });
 
-      // Friend has a balance/quota lane; when it throttles, direct NVIDIA keys should
-      // be used before the client waits on Friend to clear.
-      assert.equal(result.provider, "nvidia");
-      assert.equal(result.model, "google/gemma-4-31b-it");
+      // The rate-limited primary must NOT saturate the whole friend provider; the very next
+      // friend model succeeds, so NVIDIA is never touched and no wait cycle is needed.
+      assert.equal(result.provider, "friend");
+      assert.equal(result.model, "deepseek-ai/deepseek-v4-pro");
       assert.deepEqual(
         requests.map((request) => `${request.provider}:${request.model}`),
-        ["friend:google/gemma-4-31b-it", "nvidia:google/gemma-4-31b-it"]
+        ["friend:google/gemma-4-31b-it", "friend:deepseek-ai/deepseek-v4-pro"]
       );
       assert.deepEqual(
         requests.map((request) => request.authorization),
-        ["Bearer friend-key", "Bearer nvidia-key"]
+        ["Bearer friend-key", "Bearer friend-key"]
       );
       assert.equal(sleeps.length, 0);
       assert.deepEqual(
         result.callLogs.map((log) => log.errorReason),
         ["http_429", null]
       );
-      assert.deepEqual(
-        result.callLogs.map((log) => log.retryCount),
-        [0, 0]
-      );
-      assert.match(result.callLogs[1]?.rawResponse ?? "", /choices/);
       assert.deepEqual(result.parsed, { ok: true });
     });
   });
@@ -627,7 +622,7 @@ describe("LLM zero-budget fallback client", () => {
     });
   });
 
-  it("treats an HTTP 200 empty-choices reply as a rate limit and retries the same model until it clears", async () => {
+  it("treats an HTTP 200 empty-choices reply as a rate limit and falls through to the next healthy model", async () => {
     await withEnv(zeroBudgetEnv(), async () => {
       let primaryCalls = 0;
 
@@ -640,20 +635,22 @@ describe("LLM zero-budget fallback client", () => {
           if (body.model === "google/gemma-4-31b-it") {
             primaryCalls += 1;
             // NVIDIA soft-throttle shape: HTTP 200 with no choices and null usage.
-            if (primaryCalls <= 2) return Response.json({ id: "", choices: [], created: 0, model: "", usage: null });
+            return Response.json({ id: "", choices: [], created: 0, model: "", usage: null });
           }
           return Response.json({ choices: [{ message: { content: JSON.stringify({ ok: true }) } }] });
         },
         sleepFn: async () => undefined
       });
 
-      // Two soft-429s, then success on the SAME model — never falls through to DeepSeek.
-      assert.equal(primaryCalls, 3);
+      // The soft-429 is classified as a rate limit, but instead of blocking on the throttled
+      // primary, the client immediately falls through to the healthy sibling model on the same
+      // provider (deepseek-v4-pro). The throttled model is tried exactly once this pass.
+      assert.equal(primaryCalls, 1);
       assert.equal(result.provider, "friend");
-      assert.equal(result.model, "google/gemma-4-31b-it");
+      assert.equal(result.model, "deepseek-ai/deepseek-v4-pro");
       assert.deepEqual(
         result.callLogs.map((log) => log.errorReason),
-        ["rate_limited", "rate_limited", null]
+        ["rate_limited", null]
       );
       assert.deepEqual(result.parsed, { ok: true });
     });
