@@ -966,6 +966,12 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
             failedCount += 1;
             logProgress();
             const llmCallLogs = error instanceof LLMFallbackError ? error.callLogs : [];
+            // Surface WHY a topic failed so a mass-failure wall is diagnosable (which provider/
+            // model, and the errorReason: http_429 / timeout / empty_content_billed / etc.).
+            const failReason = llmCallLogs.length > 0
+              ? llmCallLogs.slice(-6).map((l) => `${l.provider}:${l.model}=${l.errorReason ?? "ok"}`).join(" | ")
+              : (error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+            console.warn(`[judge] FAIL ${topicObj.topic.id}: ${failReason}`);
 
             // A transient LLM failure (rate limit / quota / timeout / bad JSON) must NEVER
             // discard a topic's existing valid score. If this topic was already successfully
