@@ -590,6 +590,52 @@ function ViewToggle({ value, onChange, labels }: { value: ViewMode; onChange: (v
   );
 }
 
+function PageSwitch({
+  page,
+  totalPages,
+  loading,
+  language,
+  onPrev,
+  onNext
+}: {
+  page: number;
+  totalPages: number;
+  loading: boolean;
+  language: ContestLanguage;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const t = COPY[language];
+  return (
+    <div className="ranking-page-switch" aria-label={`${t.pageLabel} ${fmtInteger(page, language)} / ${fmtInteger(totalPages, language)}`}>
+      <button
+        type="button"
+        aria-label={t.previousPage}
+        disabled={page <= 1 || loading}
+        onClick={onPrev}
+        className="ranking-page-switch__button"
+      >
+        <ChevronLeft className="h-4 w-4" />
+        <span className="ranking-page-switch__text">{t.previousPage}</span>
+      </button>
+      <span className="ranking-page-switch__label" aria-live="polite">
+        <span>{t.pageLabel}</span>
+        <strong>{fmtInteger(page, language)} / {fmtInteger(totalPages, language)}</strong>
+      </span>
+      <button
+        type="button"
+        aria-label={t.nextPage}
+        disabled={page >= totalPages || loading}
+        onClick={onNext}
+        className="ranking-page-switch__button"
+      >
+        <span className="ranking-page-switch__text">{t.nextPage}</span>
+        <ChevronRight className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
 function riskLabel(item: RankingItem, language: ContestLanguage): string {
   const t = COPY[language];
   if (!item.evaluation) return t.waitingScore;
@@ -1510,35 +1556,14 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
                     <span>{fmtInteger(total, language)} {t.totalResults}</span>
                     <span>{t.scoredProgress} {fmtN(progressDone)}/{fmtN(progressTotal)}</span>
                   </div>
-                  <div
-                    className="ranking-page-switch"
-                    aria-label={`${t.pageLabel} ${fmtInteger(page, language)} / ${fmtInteger(totalPages, language)}`}
-                  >
-                    <button
-                      type="button"
-                      aria-label={t.previousPage}
-                      disabled={page <= 1 || loading}
-                      onClick={() => setPage((current) => Math.max(1, current - 1))}
-                      className="ranking-page-switch__button"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                      <span className="ranking-page-switch__text">{t.previousPage}</span>
-                    </button>
-                    <span className="ranking-page-switch__label" aria-live="polite">
-                      <span>{t.pageLabel}</span>
-                      <strong>{fmtInteger(page, language)} / {fmtInteger(totalPages, language)}</strong>
-                    </span>
-                    <button
-                      type="button"
-                      aria-label={t.nextPage}
-                      disabled={page >= totalPages || loading}
-                      onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-                      className="ranking-page-switch__button"
-                    >
-                      <span className="ranking-page-switch__text">{t.nextPage}</span>
-                      <ChevronRight className="h-4 w-4" />
-                    </button>
-                  </div>
+                  <PageSwitch
+                    page={page}
+                    totalPages={totalPages}
+                    loading={loading}
+                    language={language}
+                    onPrev={() => setPage((current) => Math.max(1, current - 1))}
+                    onNext={() => setPage((current) => Math.min(totalPages, current + 1))}
+                  />
                 </div>
 
                 {error ? (
@@ -1554,11 +1579,23 @@ export default function ContestClient({ activeTab }: { activeTab: MainTab }) {
                 ) : items.length === 0 ? (
                   <EmptyState language={language} onRun={runControl} />
                 ) : (
-                  <div className={viewMode === "grid" ? "ranking-grid" : "ranking-list"}>
-                    {items.map((item) => (
-                      <RankCard key={item.topic.id} item={item} language={language} viewMode={viewMode} />
-                    ))}
-                  </div>
+                  <>
+                    <div className={viewMode === "grid" ? "ranking-grid" : "ranking-list"}>
+                      {items.map((item) => (
+                        <RankCard key={item.topic.id} item={item} language={language} viewMode={viewMode} />
+                      ))}
+                    </div>
+                    <div className="ranking-inline-meta ranking-inline-meta--bottom">
+                      <PageSwitch
+                        page={page}
+                        totalPages={totalPages}
+                        loading={loading}
+                        language={language}
+                        onPrev={() => setPage((current) => Math.max(1, current - 1))}
+                        onNext={() => setPage((current) => Math.min(totalPages, current + 1))}
+                      />
+                    </div>
+                  </>
                 )}
               </>
             ) : (

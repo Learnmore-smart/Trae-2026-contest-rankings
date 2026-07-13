@@ -585,6 +585,15 @@
   display: inline-flex;
 }
 
+.ranking-inline-meta--bottom {
+  justify-content: center;
+  margin-top: 0.4rem;
+}
+
+.ranking-inline-meta--bottom .ranking-page-switch {
+  margin-left: 0;
+}
+
 .ranking-page-switch {
   display: inline-flex;
   align-items: center;
