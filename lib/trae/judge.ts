@@ -894,9 +894,14 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
       };
     });
 
-    const filtered = dedupeByTopicTitle(mapped)
-      // Never spend LLM calls on deleted/empty posts (no content, demo, images, or session IDs).
-      .filter(({ topic }) => !isDeletedOrEmptyTopic(topic))
+    // Break the funnel into counts so the "fetched N but only grading M" gap is explainable:
+    // duplicates and deleted/empty posts are intentionally never scored, so the board's judged
+    // count can never reach the raw fetched total.
+    const deduped = dedupeByTopicTitle(mapped);
+    const dedupeRemoved = mapped.length - deduped.length;
+    const nonEmpty = deduped.filter(({ topic }) => !isDeletedOrEmptyTopic(topic));
+    const deletedEmptyRemoved = deduped.length - nonEmpty.length;
+    const filtered = nonEmpty
       .filter(({ topic, latestEvaluation }) => shouldJudgeTopicForMode(topic, latestEvaluation, mode));
 
     // Interleave unjudged topics (never scored / failed) with old-version re-judgments so
@@ -917,7 +922,9 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
     // a heartbeat per graded topic so a local blast run is observable in real time.
     const progressStartedAt = Date.now();
     console.log(
-      `[judge] fetched ${rawTopics.length} topics; grading ${topics.length} (unjudged ${unjudgedTake} + rejudge ${rejudgeTake}); concurrency ${concurrency}; vision ${config.judgeVisionEnabled ? "ON" : "OFF"}.`
+      `[judge] fetched ${rawTopics.length}; -${dedupeRemoved} dup, -${deletedEmptyRemoved} deleted/empty, ` +
+        `${filtered.length} eligible for mode "${mode}"; grading ${topics.length} (unjudged ${unjudgedTake} + rejudge ${rejudgeTake}); ` +
+        `concurrency ${concurrency}; vision ${config.judgeVisionEnabled ? "ON" : "OFF"}.`
     );
     const logProgress = (): void => {
       const done = evaluatedCount + failedCount;
