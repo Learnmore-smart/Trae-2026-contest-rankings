@@ -630,7 +630,12 @@ async function judgeOneTopicConsensus(
 
 export async function judgeOneTopic(topic: TraeTopic, match: TraeMatch | null): Promise<TraeEvaluation> {
   const config = getTraeConfig();
-  const visualEvidence = await gatherVisualEvidence(topic, { config, demoAuditFn: (candidate) => auditDemoArtifact(candidate, { config }) });
+  // Vision is best-effort but still blocks the worker for up to aiRequestTimeoutMs per model in
+  // the vision chain. When no vision model is usable, TRAE_JUDGE_VISION_ENABLED=false skips it so
+  // grading runs at full text-only speed.
+  const visualEvidence = config.judgeVisionEnabled
+    ? await gatherVisualEvidence(topic, { config, demoAuditFn: (candidate) => auditDemoArtifact(candidate, { config }) })
+    : null;
   return judgeOneTopicConsensus(topic, match, config, visualEvidence);
 }
 
@@ -908,6 +913,21 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
       ...rejudge.slice(0, rejudgeTake)
     ];
 
+    // Live progress: the batch is otherwise silent for the whole run. Log the plan up front and
+    // a heartbeat per graded topic so a local blast run is observable in real time.
+    const progressStartedAt = Date.now();
+    console.log(
+      `[judge] fetched ${rawTopics.length} topics; grading ${topics.length} (unjudged ${unjudgedTake} + rejudge ${rejudgeTake}); concurrency ${concurrency}; vision ${config.judgeVisionEnabled ? "ON" : "OFF"}.`
+    );
+    const logProgress = (): void => {
+      const done = evaluatedCount + failedCount;
+      const elapsedS = Math.max(1, (Date.now() - progressStartedAt) / 1000);
+      const rate = (done / elapsedS) * 60;
+      console.log(
+        `[judge] ${done}/${topics.length} done (${evaluatedCount} ok, ${failedCount} fail) — ${rate.toFixed(1)}/min, ${elapsedS.toFixed(0)}s elapsed`
+      );
+    };
+
     // Shared across all concurrency workers. Two consecutive systemic LLM failures
     // (empty_content_billed across the whole fallback chain) means the model/gateway is
     // broken, not a transient blip — abort the batch instead of burning the cron budget.
@@ -934,6 +954,7 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
             const evaluation = await judgeOneTopic(topicObj.topic, topicObj.match);
             await persistJudgedTopic(dc, topicObj.topic.id, evaluation);
             evaluatedCount += 1;
+            logProgress();
             // Any successful grade proves the endpoint is alive, so reset the systemic-failure
             // counter. Without this, `consecutiveSystemicFailures` is not truly "consecutive" —
             // it accumulates across the whole batch and any two systemic failures (even hundreds
@@ -943,6 +964,7 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
             consecutiveSystemicFailures = 0;
           } catch (error) {
             failedCount += 1;
+            logProgress();
             const llmCallLogs = error instanceof LLMFallbackError ? error.callLogs : [];
 
             // A transient LLM failure (rate limit / quota / timeout / bad JSON) must NEVER

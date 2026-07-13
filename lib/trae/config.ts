@@ -54,6 +54,13 @@ export interface TraeConfig {
   aiRequestTimeoutMs: number;
   judgeConcurrency: number;
   /**
+   * When false, the judge skips gatherVisualEvidence (image + demo-screenshot vision calls) and
+   * grades on text only. Vision is best-effort, but a broken/slow vision model still blocks each
+   * worker for up to aiRequestTimeoutMs per model in the chain. Turn off to grade at full speed
+   * when no vision model is currently usable. Default true.
+   */
+  judgeVisionEnabled: boolean;
+  /**
    * Soft wall-clock budget (ms) for one judge batch. Once elapsed, workers stop picking up NEW
    * topics and let in-flight ones drain, so the run finalizes (finishRun + board snapshot)
    * within the Cloud Run request timeout instead of being killed mid-flight — which would
@@ -195,6 +202,7 @@ export function getTraeConfig(): TraeConfig {
     aiMaxRateLimitWaitMs,
     aiRequestTimeoutMs,
     judgeConcurrency: Math.max(1, Math.floor(numberFromEnv("TRAE_JUDGE_CONCURRENCY", DEFAULT_JUDGE_CONCURRENCY))),
+    judgeVisionEnabled: booleanFromEnv("TRAE_JUDGE_VISION_ENABLED", true),
     // Default 690s (11.5 min): leaves ~3.5 min under the 900s Cloud Run timeout for the last
     // in-flight wave to drain (each call bounded by aiMaxRateLimitWaitMs) plus finishRun +
     // snapshot. 0 disables the batch deadline (legacy: run until Cloud Run kills it).
