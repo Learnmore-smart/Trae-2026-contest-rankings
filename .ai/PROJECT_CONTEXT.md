@@ -1,10 +1,14 @@
 ﻿# Project Context
 
-> Last updated: 2026-07-03 | Protection: STANDARD
+> Last updated: 2026-07-13 | Protection: STANDARD
 
 ## Purpose
 
 This repository hosts a public third-party AI ranking site for the TRAE AI Creativity Contest 2026.
+
+## Current Work
+
+- **2026-07-13:** Fixed public 重新评分 `code: "busy"` (stale in-flight locks + soft client retry). Locally rejudged `preliminary_71088` (留声水墨 / Learnmore_smart) → totalScore **72**. Cloud Run lock-bust revision rolled; full image deploy of the code fix may still be finishing.
 
 ## Current State
 

@@ -1,6 +1,6 @@
 # app/project/project-detail-client.tsx
 
-> Last updated: 2026-07-01 | Protection: STANDARD
+> Last updated: 2026-07-13 | Protection: STANDARD
 
 ## Purpose
 
@@ -49,6 +49,11 @@ Renders full AI scoring details for one preliminary Demo topic.
 - Server no longer fire-and-forgets rejudge (Cloud Run CPU throttle). POST awaits the full re-score.
 - Client: keep `rejudgeStarted` toast at click; on `ok && done` refresh detail and show success; only poll GET when the server returns `started` without `done` (legacy/fallback). Do not treat empty `error: null` on another instance as success without a detail refresh that shows a new evaluation.
 
+## Bug Fix: Soft-retry busy (2026-07-13)
+
+- When POST returns `code: "busy"`, wait `retryAfterMs` (capped) and retry up to 3 times before giving up.
+- Button still disables only while `rejudging`; after busy exhaustion or other errors it re-enables.
+
 ## Change History
 
 | Date | Change | Author |
@@ -59,6 +64,7 @@ Renders full AI scoring details for one preliminary Demo topic.
 | 2026-07-04 | Planned non-blocking toast feedback for public re-score starts. | Codex |
 | 2026-07-04 | Implemented re-score start toast and removed browser confirmation. | Codex |
 | 2026-07-10 | Align client re-score completion with awaited POST (no false success from multi-instance GET). | Grok |
+| 2026-07-13 | Soft-retry busy responses so 重新评分 recovers when slots free up. | Grok |
 
 ## Change Plan: AI I/O Implementation Alignment
 

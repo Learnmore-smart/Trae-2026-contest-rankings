@@ -128,7 +128,7 @@ test("project detail re-score starts with a non-blocking toast", () => {
   assert.match(detailClient, /setRejudgeNotice\(\{ tone: "info", text: t\.rejudgeStarted \}\);/);
   assert.match(detailClient, /className=\{`fixed right-4 top-4 z-50/);
   // Success path must refresh detail after an awaited POST completes (done), not only via poll.
-  assert.match(detailClient, /payload\?\.ok && \(payload\.done \|\| !payload\.started\)/);
+  assert.match(detailClient, /lastPayload\?\.ok && \(lastPayload\.done \|\| !lastPayload\.started\)/);
   assert.match(detailClient, /await refreshTopicDetail\(\)/);
 });
 
@@ -141,6 +141,19 @@ test("topic rejudge awaits scoring instead of fire-and-forget background work", 
   assert.doesNotMatch(rejudgeRoute, /void runRejudgeInBackground/);
   assert.doesNotMatch(rejudgeRoute, /maxDuration = 60/);
   assert.match(rejudgeRoute, /done: true/);
+  // Abandoned in-flight locks must expire; bare Set cannot reclaim by age.
+  assert.match(rejudgeRoute, /reclaimStaleInFlight/);
+  assert.match(rejudgeRoute, /STALE_IN_FLIGHT_MS/);
+  assert.match(rejudgeRoute, /inFlight: Map/);
+  assert.match(rejudgeRoute, /finally \{\s*markFinished/);
+  assert.match(rejudgeRoute, /code: "busy", retryAfterMs/);
+});
+
+test("project detail re-score soft-retries busy responses", () => {
+  const detailClient = read(projectDetailClientPath);
+  assert.match(detailClient, /maxBusyRetries/);
+  assert.match(detailClient, /code === "busy"/);
+  assert.match(detailClient, /retryAfterMs/);
 });
 
 test("data connect nested topic reads stay below deadline-prone size", () => {
@@ -225,7 +238,7 @@ test("ranking and judge candidates filter duplicate topic titles server-side", (
   assert.match(traeApi, /import \{ dedupeByTopicTitle \} from "\.\/dedupe\.ts";/);
   assert.match(traeApi, /items = dedupeByTopicTitle\(items\);[\s\S]*?items = items\.map/);
   assert.match(judge, /import \{ dedupeByTopicTitle \} from "\.\/dedupe\.ts";/);
-  assert.match(judge, /const filtered = dedupeByTopicTitle\(mapped\)[\s\S]*?\.filter/);
+  assert.match(judge, /dedupeByTopicTitle\(mapped\)[\s\S]*?const filtered =[\s\S]*?\.filter/);
 });
 
 test("deleted or empty topics are hidden from ranking and skipped by judge", () => {

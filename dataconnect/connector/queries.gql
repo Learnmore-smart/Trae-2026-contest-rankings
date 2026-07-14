@@ -15,7 +15,7 @@
 query GetBoardData @auth(level: PUBLIC, insecureReason: "Leaderboard is public.") {
   topics(
     where: { sourceType: { eq: PRELIMINARY } }
-    orderBy: [{ totalScore: DESC }]
+    orderBy: [{ totalScore: DESC }, { id: ASC }]
     limit: 1000
   ) {
     id
@@ -107,7 +107,10 @@ query GetBoardData @auth(level: PUBLIC, insecureReason: "Leaderboard is public."
 query GetBoardPage($limit: Int!, $offset: Int!) @auth(level: PUBLIC, insecureReason: "Leaderboard is public.") {
   topics(
     where: { sourceType: { eq: PRELIMINARY } }
-    orderBy: [{ totalScore: DESC }]
+    # id (unique PK) is the final sort key so offset pagination is STABLE — without it, thousands
+    # of topics tie on totalScore (-1/null) and Postgres returns them in a shifting order across
+    # pages, so a full walk repeats and skips rows (inflated counts, judge missing topics).
+    orderBy: [{ totalScore: DESC }, { id: ASC }]
     limit: $limit
     offset: $offset
   ) {
@@ -369,6 +372,9 @@ query GetScrapeCursor($sourceType: TraeSourceType!) @auth(level: NO_ACCESS) {
 query GetTopicsBySourceType($sourceType: TraeSourceType!, $offset: Int = 0) @auth(level: NO_ACCESS) {
   topics(
     where: { sourceType: { eq: $sourceType } }
+    # Stable offset pagination requires a unique final sort key; without ORDER BY, paging repeats
+    # and skips rows (the matcher/judge then miss topics and double-count others).
+    orderBy: [{ id: ASC }]
     limit: 1000
     offset: $offset
   ) {

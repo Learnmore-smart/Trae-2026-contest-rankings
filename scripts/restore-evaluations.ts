@@ -31,7 +31,7 @@ function cleanEvalVars(evaluation: any, newTopicId: string) {
     id: evaluation.id,
     topicId: newTopicId,
     sourceType: "PRELIMINARY",
-    provider: evaluation.provider ? (providerMap[evaluation.provider as keyof typeof providerMap] ?? null) : null,
+    provider: evaluation.provider ? (providerMap[evaluation.provider as keyof typeof providerMap] ?? evaluation.provider) : null,
     model: evaluation.model,
     promptVersion: evaluation.promptVersion,
     totalScore: evaluation.totalScore,
@@ -42,7 +42,7 @@ function cleanEvalVars(evaluation: any, newTopicId: string) {
     complianceRiskScore: evaluation.complianceRiskScore,
     directionConsistencyScore: evaluation.directionConsistencyScore ?? null,
     confidenceScore: evaluation.confidenceScore,
-    competitionLevel: competitionLevelMap[evaluation.competitionLevel as keyof typeof competitionLevelMap] ?? "WEAK",
+    competitionLevel: (competitionLevelMap[evaluation.competitionLevel as keyof typeof competitionLevelMap] ?? evaluation.competitionLevel) || "WEAK",
     summary: evaluation.summary,
     strengths: evaluation.strengths ?? [],
     weaknesses: evaluation.weaknesses ?? [],
@@ -232,6 +232,8 @@ async function main() {
           }
         } catch (err) {
           console.error(`Error processing topic ${rawId}:`, err);
+          // Preserve the original cachedTopic to avoid writing nulls in cache
+          cleanCachedTopics[globalIndex] = cachedTopic;
         }
       }));
 

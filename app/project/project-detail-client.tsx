@@ -324,29 +324,48 @@ export default function ProjectDetailClient({ id }: { id: string }) {
     setRejudging(true);
     setRejudgeNotice({ tone: "info", text: t.rejudgeStarted });
     let polling = false;
+    const maxBusyRetries = 3;
     try {
-      const response = await fetch(`${API_BASE}/api/trae-contest/topics/${encodeURIComponent(id)}/rejudge`, {
-        method: "POST"
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | { ok?: boolean; done?: boolean; started?: boolean; error?: string; code?: string }
-        | null;
+      let lastPayload: { ok?: boolean; done?: boolean; started?: boolean; error?: string; code?: string; retryAfterMs?: number } | null =
+        null;
+      let response: Response | null = null;
 
-      // Current server: POST awaits the full rejudge and returns { ok, done }.
-      if (response.ok && payload?.ok && (payload.done || !payload.started)) {
-        await refreshTopicDetail();
-        setRejudgeNotice({ tone: "success", text: t.rejudgeSuccess });
+      for (let attempt = 0; attempt <= maxBusyRetries; attempt += 1) {
+        response = await fetch(`${API_BASE}/api/trae-contest/topics/${encodeURIComponent(id)}/rejudge`, {
+          method: "POST"
+        });
+        lastPayload = (await response.json().catch(() => null)) as
+          | { ok?: boolean; done?: boolean; started?: boolean; error?: string; code?: string; retryAfterMs?: number }
+          | null;
+
+        // Current server: POST awaits the full rejudge and returns { ok, done }.
+        if (response.ok && lastPayload?.ok && (lastPayload.done || !lastPayload.started)) {
+          await refreshTopicDetail();
+          setRejudgeNotice({ tone: "success", text: t.rejudgeSuccess });
+          return;
+        }
+
+        // Legacy/async server: { started: true } then poll until evaluation advances.
+        if (response.ok && lastPayload?.started) {
+          polling = true;
+          startRejudgePolling();
+          return;
+        }
+
+        // Soft-retry when global slots are full; server may free a slot within seconds.
+        if (lastPayload?.code === "busy" && attempt < maxBusyRetries) {
+          const waitMs = Math.min(60_000, Math.max(8_000, lastPayload.retryAfterMs ?? 12_000));
+          setRejudgeNotice({ tone: "info", text: t.rejudgeBusy });
+          await new Promise((resolve) => window.setTimeout(resolve, waitMs));
+          setRejudgeNotice({ tone: "info", text: t.rejudgeStarted });
+          continue;
+        }
+
+        setRejudgeNotice({ tone: rejudgeNoticeTone(lastPayload?.code), text: rejudgeNoticeText(lastPayload?.code, t) });
         return;
       }
 
-      // Legacy/async server: { started: true } then poll until evaluation advances.
-      if (response.ok && payload?.started) {
-        polling = true;
-        startRejudgePolling();
-        return;
-      }
-
-      setRejudgeNotice({ tone: rejudgeNoticeTone(payload?.code), text: rejudgeNoticeText(payload?.code, t) });
+      setRejudgeNotice({ tone: rejudgeNoticeTone(lastPayload?.code), text: rejudgeNoticeText(lastPayload?.code, t) });
     } catch {
       setRejudgeNotice({ tone: "error", text: t.rejudgeFailed });
     } finally {
