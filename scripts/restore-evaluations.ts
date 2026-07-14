@@ -126,7 +126,7 @@ async function main() {
           let prefixedEvals = prefixedTopic?.evaluations_on_topic ?? [];
 
           let rawTopic = null;
-          let rawEvals = [];
+          let rawEvals: any[] = [];
 
           // Only fetch raw ID if prefixed has no evaluation
           if (prefixedEvals.length === 0) {
@@ -138,17 +138,14 @@ async function main() {
           const hasPrefixedEval = prefixedEvals.length > 0;
           const hasRawEval = rawEvals.length > 0;
 
-          let sourceTopic = prefixedTopic || rawTopic;
-          if (!sourceTopic) {
-            sourceTopic = {
-              ...cachedTopic,
-              id: prefixedId,
-              externalTopicId: rawId,
-              sourceType: "PRELIMINARY",
-              status: "NEEDS_JUDGING",
-              totalScore: -1
-            };
-          }
+          const sourceTopic = prefixedTopic || rawTopic || {
+            ...cachedTopic,
+            id: prefixedId,
+            externalTopicId: rawId,
+            sourceType: "PRELIMINARY",
+            status: "NEEDS_JUDGING",
+            totalScore: -1
+          };
 
           const cleanPrefixedVars = topicToUpsertVariables(sourceTopic, prefixedId, "PRELIMINARY");
 
