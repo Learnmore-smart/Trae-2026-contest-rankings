@@ -508,6 +508,16 @@ test("public run button works across Cloud Run instances", () => {
   assert.match(client, /!next\.running && next\.phase === "idle"/);
 });
 
+test("public run stale cleanup is best-effort", () => {
+  const route = read(runRoutePath);
+  const rawCleanupCalls = route.match(/await reclaimStaleRunningRuns\(runs\);/g) ?? [];
+
+  assert.match(route, /async function reclaimStaleRunsBestEffort\(state: PipelineState, runs: TraeRun\[\]\): Promise<number> \{/);
+  assert.match(route, /console\.error\("\[trae\] reclaimStaleRunningRuns failed:", error\)/);
+  assert.match(route, /const reclaimed = await reclaimStaleRunsBestEffort\(state, runs\);/);
+  assert.equal(rawCleanupCalls.length, 1, "expected the raw cleanup call to appear only inside the helper");
+});
+
 test("cron judge tasks rejudge changed topics, not only unjudged topics", () => {
   const route = read(cronRoutePath);
   const pipeline = read(join(process.cwd(), "lib/trae/pipeline.ts"));

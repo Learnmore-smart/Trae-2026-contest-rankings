@@ -15,6 +15,7 @@ Guards public contest routing and workflow safety invariants.
 - Verifies ranking reloads preserve existing rows while loading.
 - Verifies Data Connect nested topic query limits stay bounded enough to avoid 300s deadline failures.
 - Verifies the public run route reports bounded judging batch counts and the client displays backend run messages.
+- Verifies the public run route treats stale-run cleanup as best-effort so cleanup failures cannot turn the button into a 502.
 - Verifies stats are loaded independently from the topic list.
 - Verifies the board read path keeps Data Connect initialization inside fallback-safe code.
 - Verifies client API requests default to the configured Next.js base path.
@@ -66,6 +67,7 @@ Guards public contest routing and workflow safety invariants.
 - 2026-07-02 Codex: Add source-level guard requiring normalized-title dedupe to be wired into both public ranking and judge candidate selection.
 - 2026-07-02 Codex: Add guards for query-change skeleton state and graded-first ordering, covering the specific regression where low-to-high sort can put pending rows first.
 - 2026-07-04 Codex: Add a source-level guard that public re-score starts immediately, displays the start toast copy, and does not use a blocking confirmation dialog.
+- 2026-07-14 Codex: Add a source-level guard that `/run` stale cleanup is best-effort so a cleanup failure cannot abort the button request.
 
 ## Important Notes / NEVER Change
 
@@ -117,6 +119,7 @@ Guards public contest routing and workflow safety invariants.
 | 2026-07-03 | Implemented RSC suffix helper and route/API source guards. | Codex |
 | 2026-07-04 | Planned non-blocking public re-score toast guard. | Codex |
 | 2026-07-04 | Implemented non-blocking public re-score toast guard. | Codex |
+| 2026-07-14 | Planned best-effort stale cleanup guard for public run requests. | Codex |
 
 ## Bug Fix Plan: Clicked Detail Cards Must Not Keep `.rsc` In Topic IDs
 

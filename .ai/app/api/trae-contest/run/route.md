@@ -90,6 +90,12 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 - Regression risk: keep cooldown, secret-not-in-query, handoff detach when RUNNING exists,
   and source shapes in `tests/contest-route-pages.test.ts`. Loopback must preserve basePath.
 
+## Bug Fix Plan: Zombie Reclaim Must Be Best-Effort
+
+- 2026-07-14 Codex: User report says all scoring buttons are returning 502. The shared `/run` GET/POST path now performs zombie reclamation before serving status or starting a run, but that recovery call can itself fail when Data Connect is transiently unavailable. Because the reclaim step is uncaught, a best-effort maintenance action can abort the whole button request.
+- Fix strategy: keep the existing reclamation behavior, but wrap it so GET/POST still return a usable status even if stale-run cleanup throws. Log the cleanup failure and continue with the in-memory / DB-derived status path.
+- Regression risk: do not change the current status semantics or the existing stale-run cleanup query; only demote cleanup failure from fatal to non-fatal.
+
 ## Bug Fixes
 
 | Date | Bug | Cause | Fix |
@@ -113,6 +119,7 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 | 2026-07-12 | Added `FALLBACK_MATCH_DEADLINE_MS = 300_000` and passed to `runTraeMatching()` so the match phase stops after 300s instead of running past Cloud Run's 900s timeout. | GLM |
 | 2026-07-12 | Removed `COOLDOWN_MS`, `latestFinishedAtMs`, and all cooldown logic from POST + client. The `running` guard already prevents double-starting; the user wants immediate retry after a run finishes. | GLM |
 | 2026-07-12 | Rewrote `buildCronRunAllUrl` to use `request.nextUrl.basePath + nextUrl.pathname` (was `new URL(request.url).pathname`). Old form lost basePath on Next.js 15/Cloud Run → self-invoke 404 → in-process fallback → OOM. | GLM |
+| 2026-07-14 | Planned best-effort zombie reclaim for `/run` so a cleanup failure cannot turn the scoring button into a 502. | Codex |
 
 ## Planned Change: Public Scrape Plus Immediate Judge
 

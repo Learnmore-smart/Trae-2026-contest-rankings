@@ -83,6 +83,17 @@ async function readRecentRuns(state: PipelineState, limit = 20): Promise<TraeRun
   return runs;
 }
 
+async function reclaimStaleRunsBestEffort(state: PipelineState, runs: TraeRun[]): Promise<number> {
+  try {
+    const reclaimed = await reclaimStaleRunningRuns(runs);
+    if (reclaimed > 0) invalidateRunsCache(state);
+    return reclaimed;
+  } catch (error) {
+    console.error("[trae] reclaimStaleRunningRuns failed:", error);
+    return 0;
+  }
+}
+
 const RUN_TYPE_PHASE: Record<TraeRun["type"], RunPhase> = {
   scrape: "scrape",
   match: "match",
@@ -188,10 +199,7 @@ export async function GET(): Promise<NextResponse> {
 
   const runs = await readRecentRuns(state);
   // Best-effort zombie cleanup on poll so the UI does not stick on "运行中" for dead batches.
-  const reclaimed = await reclaimStaleRunningRuns(runs);
-  if (reclaimed > 0) {
-    invalidateRunsCache(state);
-  }
+  const reclaimed = await reclaimStaleRunsBestEffort(state, runs);
   const freshRuns = reclaimed > 0 ? await readRecentRuns(state) : runs;
   const derived = statusFromRuns(freshRuns);
   if (derived) return NextResponse.json(derived);
@@ -210,11 +218,8 @@ export async function POST(): Promise<NextResponse> {
   // Reclaim zombies first so forever-RUNNING rows do not block this click.
   invalidateRunsCache(state);
   let runs = await readRecentRuns(state);
-  const reclaimed = await reclaimStaleRunningRuns(runs);
-  if (reclaimed > 0) {
-    invalidateRunsCache(state);
-    runs = await readRecentRuns(state);
-  }
+  const reclaimed = await reclaimStaleRunsBestEffort(state, runs);
+  if (reclaimed > 0) runs = await readRecentRuns(state);
 
   // Cross-instance guard: a *fresh* run already in flight anywhere reports as running
   // instead of double-starting. No cooldown — the user wants immediate retry after a run.
