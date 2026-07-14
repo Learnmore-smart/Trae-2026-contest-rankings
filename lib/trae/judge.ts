@@ -776,7 +776,7 @@ export type JudgeMode = "unjudged" | "changed" | "low-confidence";
 
 function normalizeJudgeConcurrency(value: number | undefined, max: number): number {
   const parsed = Math.floor(value ?? 1);
-  const safeMax = Math.max(1, Math.floor(max));
+  const safeMax = Math.max(1, Number.isFinite(max) ? Math.floor(max) : 999999);
   if (!Number.isFinite(parsed)) return 1;
   return Math.min(safeMax, Math.max(1, parsed));
 }
@@ -841,8 +841,8 @@ export function shouldJudgeTopicForMode(
 
 export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promise<{ evaluatedCount: number; failedCount: number }> {
   const config = getTraeConfig();
-  const max = options.max ?? config.maxJudgePerRun;
   const mode = options.mode ?? "unjudged";
+  const max = options.max ?? (mode === "unjudged" ? Infinity : config.maxJudgePerRun);
   const concurrency = normalizeJudgeConcurrency(options.concurrency ?? config.judgeConcurrency, max);
   const deadlineMs = options.deadlineMs ?? config.judgeBatchDeadlineMs;
   const hardDrainMs = options.hardDrainMs ?? config.judgeBatchHardDrainMs;
@@ -910,9 +910,26 @@ export async function judgeChangedTraeTopics(options: JudgeOptions = {}): Promis
       topic.status === "needs_judging" || topic.status === "judge_error" || !latestEvaluation;
     const unjudged = filtered.filter(isUnjudged);
     const rejudge = filtered.filter((item) => !isUnjudged(item));
-    const halfMax = Math.floor(max / 2);
-    const unjudgedTake = Math.min(halfMax, unjudged.length);
-    const rejudgeTake = Math.min(max - unjudgedTake, rejudge.length);
+    let unjudgedTake: number;
+    let rejudgeTake: number;
+
+    if (max === Infinity) {
+      unjudgedTake = unjudged.length;
+      rejudgeTake = rejudge.length;
+    } else {
+      const targetUnjudged = Math.floor(max / 2);
+      const targetRejudge = max - targetUnjudged;
+
+      unjudgedTake = Math.min(targetUnjudged, unjudged.length);
+      rejudgeTake = Math.min(targetRejudge, rejudge.length);
+
+      if (unjudgedTake < targetUnjudged) {
+        rejudgeTake = Math.min(max - unjudgedTake, rejudge.length);
+      } else if (rejudgeTake < targetRejudge) {
+        unjudgedTake = Math.min(max - rejudgeTake, unjudged.length);
+      }
+    }
+
     const topics = [
       ...unjudged.slice(0, unjudgedTake),
       ...rejudge.slice(0, rejudgeTake)
