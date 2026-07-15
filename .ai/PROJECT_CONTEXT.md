@@ -11,6 +11,7 @@ This repository hosts a public third-party AI ranking site for the TRAE AI Creat
 - **2026-07-14:** HIGH-SPEED unjudged blast COMPLETE. Wave1: **845** eligible → 835 ok / 10 fail in ~17.5 min (~48–56/min). Wave2 mop-up: **10/10 ok**. All unique-title unjudged posts scored. Remaining board `NEEDS_JUDGING` (~300) are title-duplicates intentionally skipped by judge dedupe. Logs: `judge-blast.log`, `judge-mopup.log`.
 - **2026-07-13:** Full rejudge of kimi-k2.6 evals (partial; log `rejudge-kimi-progress.log` last at ~498/758, process no longer running). Can resume later if needed.
 - **2026-07-13:** Fixed public 重新评分 `code: "busy"` (stale in-flight locks + soft client retry).
+- **2026-07-14:** Investigating a public regrade that landed at 82 instead of the expected ~90 for a hardware-interaction post with a broken live demo but polished uploaded screenshots. Likely fix is to make the judge prompt separate deployment/browser evidence from uploaded product screenshots so a CSS-broken live demo does not drag down completion/design by itself.
 
 ## Current State
 

@@ -285,6 +285,28 @@ describe("multi-evaluator judging", () => {
     assert.match(prompt, /finished Demo\/product interface screenshot/i);
   });
 
+  it("distinguishes broken live demo deployment from polished uploaded product screenshots", () => {
+    const prompt = buildJudgePrompt(topic, null, {
+      imageEvidence: {
+        summary: "Uploaded screenshots show a polished finished product interface with the core interaction flow visible.",
+        provider: "nvidia",
+        model: "google/gemma-4-31b-it"
+      },
+      demoEvidence: {
+        summary: "The live demo first screen is unstyled plain HTML, so deployment verification is limited.",
+        provider: "nvidia",
+        model: "google/gemma-4-31b-it",
+        source: "screenshot_proxy",
+        auditStatus: "first_screen_only",
+        artifactType: "web"
+      }
+    });
+
+    assert.match(prompt, /Deployment-vs-product standard/i);
+    assert.match(prompt, /demo deployment\/availability problem/i);
+    assert.match(prompt, /keep completion and design anchored to the finished screenshot evidence/i);
+  });
+
   it("keeps default judging focused on unscored rows before stale rejudges", () => {
     const judgedTopic = { ...topic, status: "judged" as const };
     const unscoredTopic = { ...topic, status: "judged" as const, id: "topic-unscored" };
@@ -386,7 +408,7 @@ describe("multi-evaluator judging", () => {
 
   it("bumps the prompt version for the corrected demo and session audit standard", () => {
     assert.notEqual(PROMPT_VERSION, "trae-contest-2026-v4-official-screenshot-evidence");
-    assert.match(PROMPT_VERSION, /demo-audit-standards/);
+     assert.match(PROMPT_VERSION, /deployment-vs-product-evidence/);
   });
 });
 

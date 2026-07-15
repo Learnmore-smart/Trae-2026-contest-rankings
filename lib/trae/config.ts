@@ -174,7 +174,7 @@ export function getTraeConfig(): TraeConfig {
     //
     // Vision is best-effort (falls through to null, never blocks text). No model reads images
     // reliably on the gateway right now; chain is grok-4.5 → gemma-4-31b-it → minimax-m3.
-    friendPrimaryModel: process.env.FRIEND_PRIMARY_MODEL ?? "deepseek-ai/deepseek-v4-pro",
+    friendPrimaryModel: process.env.FRIEND_PRIMARY_MODEL ?? "nvidia/nemotron-3-ultra-550b-a55b",
     friendFallbackModels: listFromEnv("FRIEND_FALLBACK_MODELS", [
       "nvidia/nemotron-3-ultra-550b-a55b"
     ]),

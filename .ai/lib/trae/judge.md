@@ -47,6 +47,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - 2026-07-01 Codex: Judge should infer non-web Demo evidence from legacy topic fields (`attachmentUrls`, QR/miniprogram text cues, `imageUrls`) so rejudging older scraped rows does not require a full re-scrape before avoiding false "missing Demo" risks.
 - 2026-07-01 Codex: Final scoring prompt should explicitly treat uploaded ordinary screenshots as official material evidence. The model must evaluate whether image vision shows Trae usage/development process screenshots and finished Demo/product interface screenshots, not only whether a web Demo URL was opened.
 - 2026-07-01 Codex: Verified existing final scoring prompt already contains the uploaded screenshot evidence rule; added regression coverage without changing judge runtime code.
+- 2026-07-14 Codex: A public score of 82 appears to be driven by the live demo screenshot-proxy seeing an unstyled/broken first screen even when the submission's uploaded screenshots show a polished finished interface. The prompt likely needs an explicit deployment-vs-product distinction so a broken demo deployment is treated as a demo-availability issue, not proof that the product itself lacks completion/design.
 - 2026-07-01 Codex: The automatic judge queue must include stale evaluations whose `promptVersion` differs from the current `PROMPT_VERSION`, otherwise fixes to extraction/vision/prompt wording will not repair old public scores. Keep already-current judged topics out of the queue to avoid infinite rejudging.
 - 2026-07-01 Codex: Bump `PROMPT_VERSION` after the screenshot-evidence fixes so already-judged v3 rows become stale and are automatically re-scored.
 - 2026-07-01 Codex: Owner reported the public count is stuck at `149/3,702`. Root cause: default `unjudged` mode was spending capacity on stale prompt-version rejudges, and the judge source still read only `GetBoardData`'s first 1000 topics. Change default `unjudged` to true unscored rows, reserve stale prompt rejudge for `changed`, and page judge candidates through `GetBoardPage`.
@@ -112,19 +113,20 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 | 2026-07-09 | Fixed stuck "已评分" count: `consecutiveSystemicFailures` was never reset on a successful grade (only on non-systemic failures), so it accumulated across the whole batch and any 2 systemic failures aborted the run — freezing progress on a flaky gateway. Now reset to 0 after each successful grade, restoring true consecutive semantics per the fix-empty-llm-response-handling spec. | Claude |
 | 2026-07-09 | Added a batch wall-clock deadline (`JudgeOptions.deadlineMs`, default `config.judgeBatchDeadlineMs` = 690s): once elapsed, workers stop taking new topics (`skippedForDeadline`) and let in-flight ones drain, so `finishRun` + snapshot refresh happen inside the Cloud Run 900s timeout instead of the batch being killed mid-flight (zombie RUNNING run + frozen snapshot). run-all passes 300s per pass. Status becomes `partial` when topics are skipped. | Claude |
 | 2026-07-11 | Soft deadline alone was insufficient: in-flight topics (vision + 4 evaluators + consensus, concurrency 16) can drain past Cloud Run 900s → process killed before `finishRun` → zombie RUNNING → UI "运行中断 / Reclaimed stale RUNNING run after 1600s". Added hard drain race (`hardDrainMs` / `judgeBatchHardDrainMs`, default 90s after soft deadline): stop awaiting concurrency after hard deadline and always `finishRun` partial so reclaim is not the only finalizer. | Grok |
+| 2026-07-14 | Investigating a regrade discrepancy where a polished hardware-interaction submission scored 82 because the live demo audit looked like an unstyled HTML page. Planned fix is to sharpen prompt wording so deployment/broken-demo evidence does not override uploaded screenshot evidence of the finished product surface. | Codex |
 
 ## Bug Fix: Soft Deadline Still Leaves Zombie RUNNING (2026-07-11)
 
-**Discovered**: 2026-07-11  
-**Description**: Public 重试评分 shows `运行中断，请稍后重试` with `Reclaimed stale RUNNING run after 1600s (process likely killed before finishRun)`.  
-**Root Cause**: Soft `batchDeadlineAt` only skips *new* topics. In-flight `judgeOneTopic` work has no wall-clock cap; under rate limits a single topic (or 16 concurrent) can outlive Cloud Run's 900s request timeout. The process is SIGKILL'd mid-await → no `finishRun` → forever RUNNING until reclaim (~15 min) surfaces ERROR. In-process `runPipeline` also used default 690s × two passes, far over 900s.  
+**Discovered**: 2026-07-11
+**Description**: Public 重试评分 shows `运行中断，请稍后重试` with `Reclaimed stale RUNNING run after 1600s (process likely killed before finishRun)`.
+**Root Cause**: Soft `batchDeadlineAt` only skips *new* topics. In-flight `judgeOneTopic` work has no wall-clock cap; under rate limits a single topic (or 16 concurrent) can outlive Cloud Run's 900s request timeout. The process is SIGKILL'd mid-await → no `finishRun` → forever RUNNING until reclaim (~15 min) surfaces ERROR. In-process `runPipeline` also used default 690s × two passes, far over 900s.
 **Fix Strategy**:
 1. Soft deadline: stop new topics (existing).
 2. Hard deadline = soft + `hardDrainMs` (default 90s): `Promise.race` concurrency vs sleep; after hard hit, `finishRun(partial)` immediately even if workers still run (late writes OK).
 3. `runPipeline` / public fallback pass `deadlineMs: 300_000` like cron run-all.
 4. UI treats reclaimed-stale errors as retryable timeout copy (not opaque pipeline crash).
 
-**Impact**: `lib/trae/judge.ts`, `lib/trae/config.ts`, `app/api/trae-contest/run/route.ts`, tests  
+**Impact**: `lib/trae/judge.ts`, `lib/trae/config.ts`, `app/api/trae-contest/run/route.ts`, tests
 **Test Plan**: Source guards for hard race + runPipeline deadline; config default 90s hard drain.
 
 ## Bug Fix: Edited Posts Not Rejudged
