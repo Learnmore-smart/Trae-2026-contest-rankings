@@ -147,8 +147,34 @@ async function matchSingleTopic(preliminary: TraeTopic) {
 }
 
 async function main() {
-  const url = "https://forum.trae.cn/t/topic/95423";
-  const externalTopicId = "95423";
+  const arg = process.argv[2] || "70321";
+  let externalTopicId = arg;
+  let url = `https://forum.trae.cn/t/topic/${externalTopicId}`;
+
+  if (arg.startsWith("http://") || arg.startsWith("https://")) {
+    try {
+      const parsed = new URL(arg);
+      if (parsed.hostname.includes("rateministere.com")) {
+        const match = parsed.pathname.match(/\/project\/preliminary_(\d+)/);
+        if (match) {
+          externalTopicId = match[1];
+          url = `https://forum.trae.cn/t/topic/${externalTopicId}`;
+        }
+      } else if (parsed.hostname.includes("forum.trae.cn")) {
+        const match = parsed.pathname.match(/\/t\/[^/]+\/(\d+)/);
+        if (match) {
+          externalTopicId = match[1];
+          url = arg;
+        }
+      }
+    } catch (e: any) {
+      console.error("Invalid URL argument:", e.message);
+    }
+  } else if (arg.includes("_")) {
+    externalTopicId = arg.split("_")[1];
+    url = `https://forum.trae.cn/t/topic/${externalTopicId}`;
+  }
+
   const id = `preliminary_${externalTopicId}`;
 
   console.log(`Step 1: Scraping topic from URL: ${url}...`);

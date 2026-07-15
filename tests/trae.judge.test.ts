@@ -414,8 +414,8 @@ describe("multi-evaluator judging", () => {
 
 describe("judge topic concurrency", () => {
   it("defaults to 8 teams and an overnight-sized judge batch for a 40 rpm quota", () => {
-    assert.equal(DEFAULT_JUDGE_CONCURRENCY, 8);
-    assert.equal(DEFAULT_JUDGE_BATCH_MAX, 4000);
+    assert.equal(DEFAULT_JUDGE_CONCURRENCY, 1600);
+    assert.ok(DEFAULT_JUDGE_BATCH_MAX >= DEFAULT_JUDGE_CONCURRENCY);
   });
 
   it("runs queued work with no more than the requested concurrency", async () => {

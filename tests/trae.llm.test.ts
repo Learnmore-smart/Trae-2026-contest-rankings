@@ -82,6 +82,30 @@ function zeroBudgetEnv(overrides: EnvPatch = {}): EnvPatch {
 }
 
 describe("LLM zero-budget fallback client", () => {
+  it("defaults every text lane to DeepSeek V4 Pro then Nemotron Ultra 3", () => {
+    withEnv(
+      zeroBudgetEnv({
+        FRIEND_PRIMARY_MODEL: undefined,
+        FRIEND_FALLBACK_MODELS: undefined,
+        NVIDIA_PRIMARY_MODEL: undefined,
+        NVIDIA_FALLBACK_MODELS: undefined
+      }),
+      () => {
+        const plan = buildLLMFallbackPlan(getTraeConfig());
+        assert.deepEqual(
+          plan.map((entry) => `${entry.provider}:${entry.model}`),
+          [
+            "friend:deepseek-ai/deepseek-v4-pro",
+            "friend:nvidia/nemotron-3-ultra-550b-a55b",
+            "nvidia:deepseek-ai/deepseek-v4-pro",
+            "nvidia:nvidia/nemotron-3-ultra-550b-a55b"
+          ]
+        );
+        assert.ok(!plan.some((entry) => entry.model.includes("gpt-oss-120")));
+      }
+    );
+  });
+
   it("defaults the shared AI rate limit to 40 rpm", () => {
     withEnv(zeroBudgetEnv({ AI_RPM_LIMIT: undefined }), () => {
       assert.equal(getTraeConfig().aiRpmLimit, 40);
