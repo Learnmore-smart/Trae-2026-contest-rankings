@@ -29,6 +29,11 @@ Guards public contest routing and workflow safety invariants.
 - Verifies the public project detail page does not expose raw AI scoring input/output records.
 - Verifies the public user-topic submit route exists, validates TRAE links through the scraper helper, crawls as preliminary, refreshes the board, and is wired from the client form.
 - Verifies the public project detail re-score action uses non-blocking toast feedback instead of `window.confirm`.
+- Verifies both scoring POST routes acknowledge promptly: long work uses Next.js `after`, run-status storage reads have a bounded fallback, and clients can poll completion.
+
+## Open Threads / Resume Context
+
+- Empty — the two new guards failed before the route changes and pass after them.
 
 ## Public API
 
@@ -120,6 +125,7 @@ Guards public contest routing and workflow safety invariants.
 | 2026-07-04 | Planned non-blocking public re-score toast guard. | Codex |
 | 2026-07-04 | Implemented non-blocking public re-score toast guard. | Codex |
 | 2026-07-14 | Planned best-effort stale cleanup guard for public run requests. | Codex |
+| 2026-07-15 | Added request-lifecycle and bounded-status-read guards for 开始评分 and 重新评分. | Codex |
 
 ## Bug Fix Plan: Clicked Detail Cards Must Not Keep `.rsc` In Topic IDs
 

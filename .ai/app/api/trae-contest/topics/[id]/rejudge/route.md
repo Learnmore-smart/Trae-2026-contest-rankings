@@ -9,7 +9,7 @@ Public, token-free single-topic re-score endpoint for the project detail page.
 ## What It Does
 
 - `POST` re-runs multi-evaluator judging for one preliminary topic and persists the result.
-- `GET` reports in-flight status for the same instance (best-effort; primary UX awaits POST).
+- `GET` reports in-flight status for the same instance; the client also confirms completion by checking for a newer evaluation.
 - Guards: per-topic in-flight lock, per-topic cooldown, global concurrency cap.
 - Stale in-flight reclaim so abandoned locks after kill/timeout do not permanently return `busy`.
 
@@ -17,7 +17,7 @@ Public, token-free single-topic re-score endpoint for the project detail page.
 
 | Name | Type | Description |
 |------|------|-------------|
-| `POST` | route handler | Awaits `rejudgeTopicById` (request-bound CPU) and returns done/error. |
+| `POST` | route handler | Schedules `rejudgeTopicById` with Next.js `after` and immediately returns `{ ok, started }`. |
 | `GET` | route handler | `{ running, error }` for same-instance progress. |
 
 ## Dependencies
@@ -26,12 +26,13 @@ Public, token-free single-topic re-score endpoint for the project detail page.
 
 ## Open Threads / Resume Context
 
-- Empty — busy-gate fix deployed (revision `trae-2026-contest-rankings-00042-dj9`). `preliminary_71088` rejudged to 72.
+- Empty — re-score acknowledgement/polling fix is implemented and verified locally.
 
 ## Agent Decisions / Thoughts
 
 - **2026-07-10 Grok:** Await rejudge on POST (no fire-and-forget) so Cloud Run keeps CPU.
 - **2026-07-13 Grok:** `MAX_CONCURRENT_REJUDGE` slots as bare `Set` never expire. Killed requests leave slots occupied until instance recycle → permanent `评分服务繁忙`. Fix: `Map<id, startedAt>`, reclaim >14m, `finally` release, cap 2→4, busy returns `retryAfterMs`. Client soft-retries busy up to 3 times.
+- **2026-07-15 Codex:** Keep the existing lock/cooldown/concurrency contract, but schedule the long scoring body with Next.js `after`; POST acknowledges immediately and the client fallback poll confirms evaluation advancement.
 
 ## Bug Fix: Re-score Button Did Nothing On Cloud Run (2026-07-10)
 
@@ -61,3 +62,4 @@ Public, token-free single-topic re-score endpoint for the project detail page.
 |------|--------|--------|
 | 2026-07-10 | Documented Cloud Run fire-and-forget rejudge failure and await fix. | Grok |
 | 2026-07-13 | Stale in-flight reclaim + concurrency fix for busy gate; rejudged 71088. | Grok |
+| 2026-07-15 | Re-score POST now acknowledges immediately and runs request-lifecycle work through Next.js `after`. | Codex |

@@ -1,12 +1,12 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { writeBoardSnapshot } from "@/lib/trae/api";
 import { rejudgeTopicById } from "@/lib/trae/judge";
 import { normalizeTopicRouteId } from "@/lib/trae/topic-route-id";
 
 export const runtime = "nodejs";
 // Single-topic rejudge runs vision + multi-evaluator consensus (often 60–400s).
-// Must stay request-bound on Cloud Run — fire-and-forget dies when CPU is throttled
-// after the response (see 2026-07-10 bug fix). Align with cron/run long timeout.
+// Next.js `after` keeps the work on the route lifecycle without holding the browser POST
+// open for the entire run. Align its budget with cron/run's long timeout.
 export const maxDuration = 900;
 
 // Public, token-free "re-score this work" button lives on the detail page, so anyone
@@ -15,9 +15,8 @@ export const maxDuration = 900;
 // guarded three ways: a per-topic in-flight lock (no double submit), a per-topic cooldown
 // (no spamming the same work), and a global concurrency cap (no stampede across works).
 //
-// POST awaits the full rejudge so Cloud Run keeps CPU allocated for the whole job.
-// The client shows "评分已经开始" immediately, then waits on this request and refreshes
-// the detail payload when it completes.
+// POST schedules the full rejudge with Next.js `after`, acknowledges immediately, and the
+// client polls until the detail payload contains a newer evaluation.
 //
 // inFlight is process-local. Killed/timeout requests can leave slots occupied forever unless
 // we reclaim by startedAt age (see 2026-07-13 busy fix).
@@ -84,6 +83,27 @@ function oldestInFlightAgeMs(state: RejudgeState, now: number): number {
   return Math.max(0, now - oldest);
 }
 
+async function runRejudgeAfterResponse(state: RejudgeState, id: string): Promise<void> {
+  let finishError: string | null = "aborted";
+  try {
+    const result = await rejudgeTopicById(id);
+
+    if (result.status === "not_found" || result.status === "empty") {
+      finishError = result.status;
+      return;
+    }
+
+    // Best-effort: topic detail reads the fresh evaluation directly even if the snapshot fails.
+    await writeBoardSnapshot().catch((error) => console.error("[trae] writeBoardSnapshot failed:", error));
+    finishError = null;
+  } catch (error) {
+    finishError = error instanceof Error ? error.message : "Pipeline failed.";
+    console.error("[trae] rejudge failed:", error);
+  } finally {
+    markFinished(state, id, finishError);
+  }
+}
+
 export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> }
@@ -135,44 +155,11 @@ export async function POST(
   state.inFlight.set(id, now);
   state.lastError.delete(id);
 
-  let finishError: string | null = "aborted";
-  try {
-    // Await the full pipeline so Cloud Run keeps CPU for vision + multi-evaluator consensus.
-    // Do not void/fire-and-forget — that is the failure mode that made 重新评分 a no-op.
-    const result = await rejudgeTopicById(id);
+  // A full re-score can take several minutes. Schedule it on the route lifecycle and let
+  // the existing client polling confirm that a newer evaluation has been persisted.
+  after(async () => {
+    await runRejudgeAfterResponse(state, id);
+  });
 
-    if (result.status === "not_found") {
-      finishError = "not_found";
-      return NextResponse.json({ error: "作品不存在或不是初赛作品。", code: "not_found" }, { status: 404 });
-    }
-
-    if (result.status === "empty") {
-      finishError = "empty";
-      return NextResponse.json(
-        { error: "该作品内容为空或已删除，无法评分。", code: "empty" },
-        { status: 422 }
-      );
-    }
-
-    // Refresh the board snapshot so the leaderboard reflects the new score. Best-effort:
-    // the detail page already reads fresh from the DB, so a snapshot failure is non-fatal.
-    await writeBoardSnapshot().catch((error) => console.error("[trae] writeBoardSnapshot failed:", error));
-
-    finishError = null;
-    return NextResponse.json({
-      ok: true,
-      done: true,
-      evaluation: {
-        totalScore: result.evaluation.totalScore,
-        confidenceScore: result.evaluation.confidenceScore,
-        createdAt: result.evaluation.createdAt
-      }
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Pipeline failed.";
-    finishError = message;
-    return NextResponse.json({ error: "重新评分失败，请稍后再试。", code: "error", detail: message }, { status: 500 });
-  } finally {
-    markFinished(state, id, finishError);
-  }
+  return NextResponse.json({ ok: true, started: true });
 }

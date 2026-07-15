@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { listRuns } from "@/lib/trae/api";
 import { runFullPipeline } from "@/lib/trae/pipeline";
 import { isFreshRunningRun, reclaimStaleRunningRuns, STALE_RUNNING_RUN_MS } from "@/lib/trae/runs";
@@ -9,16 +9,14 @@ export const runtime = "nodejs";
 export const maxDuration = 900;
 
 // One public "update now" button drives the whole pipeline (scrape -> match -> judge).
-// POST fire-and-forgets runFullPipeline() and returns immediately; the client polls GET
-// for cross-instance status derived from the persistent runs table. This works because
-// Cloud Run has cpu-throttling=false on this service, so background work keeps full CPU
-// even after the POST response is sent.
+// POST schedules runFullPipeline() with Next.js `after` and returns immediately; the client
+// polls GET for cross-instance status derived from the persistent runs table.
 //
 // Previous design self-invoked the cron run-all endpoint via loopback HTTP to keep CPU
 // allocated, but Next.js 15 route handlers don't pass nextConfig to NextURL, making
 // basePath reconstruction unreliable on loopback — every self-invoke 404'd, fell back
-// in-process, and the POST blocked for the full 900s. Direct in-process call is simpler
-// and equally reliable with cpu-throttling=false.
+// in-process, and the POST blocked for the full 900s. `after` provides the intended
+// request-lifecycle hook without another HTTP hop or a multi-minute browser request.
 
 export type RunPhase = "idle" | "scrape" | "match" | "judge" | "done" | "error";
 
@@ -40,6 +38,9 @@ const STALE_MEMORY_RUNNING_MS = 20 * 60 * 1000;
 // Polling clients hit GET every 2s; cache the runs read briefly so status polls cost
 // at most ~1 Data Connect query per interval regardless of how many tabs are open.
 const RUNS_CACHE_TTL_MS = 2_500;
+// Status storage is advisory for the button. A slow Data Connect read must not hold the
+// public GET/POST open until the browser or proxy gives up.
+const RUNS_READ_TIMEOUT_MS = 5_000;
 
 interface PipelineState {
   status: PipelineStatus;
@@ -81,6 +82,27 @@ async function readRecentRuns(state: PipelineState, limit = 20): Promise<TraeRun
   const runs = await listRuns(limit);
   state.runsCache = { at: now, runs };
   return runs;
+}
+
+async function readRecentRunsBestEffort(state: PipelineState, limit = 20): Promise<TraeRun[]> {
+  const fallback = state.runsCache?.runs ?? [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const read = readRecentRuns(state, limit).catch((error) => {
+    console.error("[trae] listRuns failed:", error);
+    return fallback;
+  });
+  const timeout = new Promise<TraeRun[]>((resolve) => {
+    timer = setTimeout(() => {
+      console.error(`[trae] listRuns exceeded ${RUNS_READ_TIMEOUT_MS}ms; using cached/in-memory status`);
+      resolve(fallback);
+    }, RUNS_READ_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([read, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function reclaimStaleRunsBestEffort(state: PipelineState, runs: TraeRun[]): Promise<number> {
@@ -161,34 +183,33 @@ function statusFromRuns(runs: TraeRun[], now = Date.now()): PipelineStatus | nul
 }
 
 /**
- * Fire-and-forget the full pipeline. Updates in-memory state on completion so same-instance
+ * Run the full pipeline after the response. Updates in-memory state on completion so same-instance
  * GETs see the result without a DB round-trip. The runs table (updated by judge/match
  * sub-tasks) drives cross-instance status for GETs that land on other instances.
  */
-function startPipeline(state: PipelineState): void {
+async function runPipelineAfterResponse(state: PipelineState): Promise<void> {
   const startedAt = state.status.startedAt;
-  void runFullPipeline()
-    .then((result) => {
-      state.status = {
-        running: false,
-        phase: "done",
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        message: `本轮抓取、匹配、评分已完成；评分 ${result.evaluatedCount} 个，失败 ${result.failedCount} 个。`,
-        error: null
-      };
-    })
-    .catch((error) => {
-      console.error("[trae] pipeline failed:", error);
-      state.status = {
-        running: false,
-        phase: "error",
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        message: "运行中断，请稍后重试。",
-        error: error instanceof Error ? error.message : "Pipeline failed."
-      };
-    });
+  try {
+    const result = await runFullPipeline();
+    state.status = {
+      running: false,
+      phase: "done",
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      message: `本轮抓取、匹配、评分已完成；评分 ${result.evaluatedCount} 个，失败 ${result.failedCount} 个。`,
+      error: null
+    };
+  } catch (error) {
+    console.error("[trae] pipeline failed:", error);
+    state.status = {
+      running: false,
+      phase: "error",
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      message: "运行中断，请稍后重试。",
+      error: error instanceof Error ? error.message : "Pipeline failed."
+    };
+  }
 }
 
 export async function GET(): Promise<NextResponse> {
@@ -197,10 +218,10 @@ export async function GET(): Promise<NextResponse> {
     return NextResponse.json(state.status);
   }
 
-  const runs = await readRecentRuns(state);
+  const runs = await readRecentRunsBestEffort(state);
   // Best-effort zombie cleanup on poll so the UI does not stick on "运行中" for dead batches.
   const reclaimed = await reclaimStaleRunsBestEffort(state, runs);
-  const freshRuns = reclaimed > 0 ? await readRecentRuns(state) : runs;
+  const freshRuns = reclaimed > 0 ? await readRecentRunsBestEffort(state) : runs;
   const derived = statusFromRuns(freshRuns);
   if (derived) return NextResponse.json(derived);
   return NextResponse.json(state.status);
@@ -217,9 +238,9 @@ export async function POST(): Promise<NextResponse> {
 
   // Reclaim zombies first so forever-RUNNING rows do not block this click.
   invalidateRunsCache(state);
-  let runs = await readRecentRuns(state);
+  let runs = await readRecentRunsBestEffort(state);
   const reclaimed = await reclaimStaleRunsBestEffort(state, runs);
-  if (reclaimed > 0) runs = await readRecentRuns(state);
+  if (reclaimed > 0) runs = await readRecentRunsBestEffort(state);
 
   // Cross-instance guard: a *fresh* run already in flight anywhere reports as running
   // instead of double-starting. No cooldown — the user wants immediate retry after a run.
@@ -237,9 +258,11 @@ export async function POST(): Promise<NextResponse> {
     error: null
   };
 
-  // Fire-and-forget: POST returns immediately, pipeline runs in background with full CPU
-  // (cpu-throttling=false on this Cloud Run service). Client polls GET for progress.
-  startPipeline(state);
+  // Keep long work on Next's request lifecycle without holding the button's POST open.
+  // The client gets an immediate acknowledgement and polls GET for progress.
+  after(async () => {
+    await runPipelineAfterResponse(state);
+  });
 
   return NextResponse.json(state.status);
 }

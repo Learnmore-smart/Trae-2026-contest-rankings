@@ -52,6 +52,17 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 - Do not put provider secrets or raw model output in this status payload.
 - Do not put the cron secret in a URL query parameter (it would leak into request logs); header only.
 
+## Open Threads / Resume Context
+
+- Empty — scoring-button request-lifecycle fix is implemented and verified locally.
+
+## Bug Fix: Start scoring status must stay responsive (2026-07-15)
+
+- **Evidence:** The deployed GET first reported a judge run started at `2026-07-15T05:13:45.226Z`, then the same endpoint exceeded a 20-second client timeout on a later request.
+- **Cause:** Cross-instance status awaited `listRuns` with no deadline, while the pipeline was launched with an untracked bare promise.
+- **Fix:** Bound status reads to 5 seconds with cached/in-memory fallback and schedule `runFullPipeline` through Next.js `after`.
+- **Verification:** Route regression tests, typecheck, and production build pass.
+
 ## Bug Fix Plan: Zombie RUNNING + Fragile Handoff (2026-07-10)
 
 - Symptom: 已评分 stuck (e.g. 4567/6495); 开始评分 shows 运行中 then never advances scores. DB has many `judge_*` / `match_*` rows stuck at `RUNNING` for hours.
@@ -120,6 +131,7 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 | 2026-07-12 | Removed `COOLDOWN_MS`, `latestFinishedAtMs`, and all cooldown logic from POST + client. The `running` guard already prevents double-starting; the user wants immediate retry after a run finishes. | GLM |
 | 2026-07-12 | Rewrote `buildCronRunAllUrl` to use `request.nextUrl.basePath + nextUrl.pathname` (was `new URL(request.url).pathname`). Old form lost basePath on Next.js 15/Cloud Run → self-invoke 404 → in-process fallback → OOM. | GLM |
 | 2026-07-14 | Planned best-effort zombie reclaim for `/run` so a cleanup failure cannot turn the scoring button into a 502. | Codex |
+| 2026-07-15 | Bounded run-status reads and moved long pipeline work to Next.js `after` so 开始评分 responds promptly. | Codex |
 
 ## Planned Change: Public Scrape Plus Immediate Judge
 

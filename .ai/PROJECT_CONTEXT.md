@@ -8,6 +8,7 @@ This repository hosts a public third-party AI ranking site for the TRAE AI Creat
 
 ## Current Work
 
+- **2026-07-15:** Fixed 开始评分 / 重新评分 request lifecycles: Next.js `after` owns long scoring work, re-score POST acknowledges immediately, and run-status Data Connect reads fall back after 5 seconds instead of hanging the buttons.
 - **2026-07-14:** HIGH-SPEED unjudged blast COMPLETE. Wave1: **845** eligible → 835 ok / 10 fail in ~17.5 min (~48–56/min). Wave2 mop-up: **10/10 ok**. All unique-title unjudged posts scored. Remaining board `NEEDS_JUDGING` (~300) are title-duplicates intentionally skipped by judge dedupe. Logs: `judge-blast.log`, `judge-mopup.log`.
 - **2026-07-13:** Full rejudge of kimi-k2.6 evals (partial; log `rejudge-kimi-progress.log` last at ~498/758, process no longer running). Can resume later if needed.
 - **2026-07-13:** Fixed public 重新评分 `code: "busy"` (stale in-flight locks + soft client retry).

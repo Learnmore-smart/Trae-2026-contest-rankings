@@ -132,15 +132,17 @@ test("project detail re-score starts with a non-blocking toast", () => {
   assert.match(detailClient, /await refreshTopicDetail\(\)/);
 });
 
-test("topic rejudge awaits scoring instead of fire-and-forget background work", () => {
+test("topic rejudge acknowledges immediately and schedules request-lifecycle background work", () => {
   const rejudgeRoute = read(join(process.cwd(), "app/api/trae-contest/topics/[id]/rejudge/route.ts"));
 
-  // Cloud Run throttles CPU after the response; void background rejudge is a no-op in production.
+  // A multi-minute POST is routinely cut off by the browser/proxy. Next `after` keeps the
+  // work attached to the route lifecycle while letting the button switch to polling.
   assert.match(rejudgeRoute, /export const maxDuration = 900;/);
+  assert.match(rejudgeRoute, /import \{ after, NextResponse \} from "next\/server";/);
+  assert.match(rejudgeRoute, /after\(async \(\) => \{/);
   assert.match(rejudgeRoute, /await rejudgeTopicById\(id\)/);
-  assert.doesNotMatch(rejudgeRoute, /void runRejudgeInBackground/);
+  assert.match(rejudgeRoute, /ok: true, started: true/);
   assert.doesNotMatch(rejudgeRoute, /maxDuration = 60/);
-  assert.match(rejudgeRoute, /done: true/);
   // Abandoned in-flight locks must expire; bare Set cannot reclaim by age.
   assert.match(rejudgeRoute, /reclaimStaleInFlight/);
   assert.match(rejudgeRoute, /STALE_IN_FLIGHT_MS/);
@@ -438,9 +440,9 @@ test("public run status reports bounded judging batch counts", () => {
 
   assert.match(judgePolicy, /export const DEFAULT_JUDGE_BATCH_MAX = 4000;/);
   assert.match(judgePolicy, /export const DEFAULT_JUDGE_CONCURRENCY = 8;/);
-  // Pipeline module owns the scrape/match/judge flow now; POST /run fire-and-forgets it.
+  // Pipeline module owns the scrape/match/judge flow; POST /run schedules it after response.
   assert.match(route, /import \{ runFullPipeline \} from "@\/lib\/trae\/pipeline";/);
-  assert.match(route, /startPipeline\(state\)/);
+  assert.match(route, /await runPipelineAfterResponse\(state\)/);
   assert.match(pipeline, /await scrapeAllTraeSources\(\);/);
   assert.match(pipeline, /await runTraeMatching\(MATCH_DEADLINE_MS\);/);
   assert.match(
@@ -462,11 +464,12 @@ test("public run button works across Cloud Run instances", () => {
   const cronRoute = read(cronRoutePath);
   const pipeline = read(join(process.cwd(), "lib/trae/pipeline.ts"));
 
-  // POST fire-and-forgets runFullPipeline() directly — no HTTP self-invoke. Works on Cloud Run
-  // because cpu-throttling=false keeps background work at full CPU after the response is sent.
+  // POST uses Next's request-lifecycle `after` hook — no unreliable HTTP self-invoke and no
+  // multi-minute browser request.
   assert.match(route, /import \{ runFullPipeline \} from "@\/lib\/trae\/pipeline";/);
-  assert.match(route, /startPipeline\(state\)/);
-  assert.match(route, /void runFullPipeline\(\)/);
+  assert.match(route, /after\(async \(\) => \{/);
+  assert.match(route, /await runPipelineAfterResponse\(state\)/);
+  assert.match(route, /const result = await runFullPipeline\(\)/);
   // No self-invoke mechanism anymore — it was unreliable on loopback (basePath 404).
   assert.doesNotMatch(route, /buildCronRunAllUrl/);
   assert.doesNotMatch(route, /invokeCronRunAll/);
@@ -516,6 +519,17 @@ test("public run stale cleanup is best-effort", () => {
   assert.match(route, /console\.error\("\[trae\] reclaimStaleRunningRuns failed:", error\)/);
   assert.match(route, /const reclaimed = await reclaimStaleRunsBestEffort\(state, runs\);/);
   assert.equal(rawCleanupCalls.length, 1, "expected the raw cleanup call to appear only inside the helper");
+});
+
+test("public run responds without waiting indefinitely for status storage", () => {
+  const route = read(runRoutePath);
+
+  assert.match(route, /import \{ after, NextResponse \} from "next\/server";/);
+  assert.match(route, /const RUNS_READ_TIMEOUT_MS = 5_000;/);
+  assert.match(route, /async function readRecentRunsBestEffort/);
+  assert.match(route, /Promise\.race/);
+  assert.match(route, /after\(async \(\) => \{/);
+  assert.doesNotMatch(route, /void runFullPipeline\(\)/);
 });
 
 test("cron judge tasks rejudge changed topics, not only unjudged topics", () => {
