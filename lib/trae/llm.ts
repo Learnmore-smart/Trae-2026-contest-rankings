@@ -48,6 +48,13 @@ export interface CallLLMWithFallbackOptions<TParsed = string> {
   retryRateLimitsUntilCleared?: boolean;
   /** Override the provider/model plan (used by callVisionLLMWithFallback for vision-capable models only). */
   plan?: LLMFallbackPlanEntry[];
+  /** Override per-attempt fetch timeout (ms). Defaults to config.aiRequestTimeoutMs. */
+  timeoutMs?: number;
+  /**
+   * Override non-rate-limit retry budget per model. Defaults to config.aiMaxRetriesPerModel.
+   * Vision forces 0 so a hung multimodal model fails through instead of retrying 180s×N.
+   */
+  maxRetriesPerModel?: number;
 }
 
 interface LLMRateLimiterState {
@@ -171,10 +178,14 @@ export async function callLLMWithFallback<TParsed = string>({
   },
   nowFn = () => Date.now(),
   retryRateLimitsUntilCleared = true,
-  plan
+  plan,
+  timeoutMs,
+  maxRetriesPerModel
 }: CallLLMWithFallbackOptions<TParsed>): Promise<LLMCallResult<TParsed>> {
   const callLogs: TraeLLMCallLog[] = [];
   const resolvedPlan = plan ?? buildLLMFallbackPlan(config);
+  const attemptTimeoutMs = timeoutMs ?? config.aiRequestTimeoutMs;
+  const retriesPerModel = maxRetriesPerModel ?? config.aiMaxRetriesPerModel;
   let fullPlanRateLimitRetries = 0;
   // Wall-clock ceiling for riding out rate limits. With aiMaxRateLimitRetries: 0 (unlimited
   // count), this is the ONLY thing that stops a fully-throttled endpoint from looping forever
@@ -221,7 +232,7 @@ export async function callLLMWithFallback<TParsed = string>({
         messages,
         temperature,
         responseFormat,
-        timeoutMs: config.aiRequestTimeoutMs,
+        timeoutMs: attemptTimeoutMs,
         retryCount: attemptIndex,
         validateContent,
         fetchFn
@@ -257,7 +268,7 @@ export async function callLLMWithFallback<TParsed = string>({
       // Other transient errors (5xx / timeout / network / bad JSON) — and rate limits
       // for best-effort callers — get a bounded per-model budget, then fall through to
       // the next model in the plan.
-      if (otherRetries < config.aiMaxRetriesPerModel && isRetryableError(attempt.log.errorReason)) {
+      if (otherRetries < retriesPerModel && isRetryableError(attempt.log.errorReason)) {
         otherRetries += 1;
         keyCursor += 1;
         await sleepFn(backoffDelayMs(otherRetries - 1, attempt.log.errorReason));
@@ -355,6 +366,10 @@ export async function callVisionLLMWithFallback<TParsed = string>(
     // Vision is best-effort: a throttled primary model should drop to the secondary
     // vision model (or return null), never block the judge pipeline waiting it out.
     retryRateLimitsUntilCleared: false,
+    // Short multimodal timeout + zero same-model retries: dead vision models must fail
+    // through in tens of seconds, not 3 attempts × 180s each.
+    timeoutMs: options.timeoutMs ?? config.aiVisionRequestTimeoutMs,
+    maxRetriesPerModel: options.maxRetriesPerModel ?? 0,
     plan: buildVisionLLMFallbackPlan(config)
   });
 }

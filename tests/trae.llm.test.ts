@@ -33,7 +33,11 @@ const aiEnvKeys = [
   "AI_MAX_RETRIES_PER_MODEL",
   "AI_MAX_RATE_LIMIT_RETRIES",
   "AI_MAX_RATE_LIMIT_WAIT_MS",
-  "AI_REQUEST_TIMEOUT_MS"
+  "AI_REQUEST_TIMEOUT_MS",
+  "AI_VISION_REQUEST_TIMEOUT_MS",
+  "TRAE_JUDGE_DEMO_AUDIT_ENABLED",
+  "TRAE_JUDGE_VISION_MAX_MS",
+  "TRAE_JUDGE_VISION_MAX_IMAGE_BATCHES"
 ];
 
 function withEnv<T>(patch: EnvPatch, fn: () => T): T {
@@ -77,12 +81,13 @@ function zeroBudgetEnv(overrides: EnvPatch = {}): EnvPatch {
     NVIDIA_RPM_LIMIT: "60000",
     AI_MAX_RETRIES_PER_MODEL: "1",
     AI_REQUEST_TIMEOUT_MS: "120000",
+    AI_VISION_REQUEST_TIMEOUT_MS: "25000",
     ...overrides
   };
 }
 
 describe("LLM zero-budget fallback client", () => {
-  it("defaults every text lane to DeepSeek V4 Pro then Nemotron Ultra 3", () => {
+  it("defaults friend text to Nemotron and NVIDIA text to GLM then Gemma", () => {
     withEnv(
       zeroBudgetEnv({
         FRIEND_PRIMARY_MODEL: undefined,
@@ -95,13 +100,12 @@ describe("LLM zero-budget fallback client", () => {
         assert.deepEqual(
           plan.map((entry) => `${entry.provider}:${entry.model}`),
           [
-            "friend:deepseek-ai/deepseek-v4-pro",
             "friend:nvidia/nemotron-3-ultra-550b-a55b",
-            "nvidia:deepseek-ai/deepseek-v4-pro",
-            "nvidia:nvidia/nemotron-3-ultra-550b-a55b"
+            "friend:nvidia/nemotron-3-ultra-550b-a55b",
+            "nvidia:z-ai/glm-5.2",
+            "nvidia:google/gemma-4-31b-it"
           ]
         );
-        assert.ok(!plan.some((entry) => entry.model.includes("gpt-oss-120")));
       }
     );
   });
@@ -775,5 +779,62 @@ describe("LLM zero-budget fallback client", () => {
       assert.equal(requests[0]?.responseFormat, undefined);
       assert.equal(result.content, "a description");
     });
+  });
+
+  it("uses the short vision timeout and does not same-model-retry after a vision timeout", async () => {
+    await withEnv(
+      zeroBudgetEnv({
+        AI_MAX_RETRIES_PER_MODEL: "2",
+        AI_VISION_REQUEST_TIMEOUT_MS: "40",
+        FRIEND_IMAGE_MODEL: "google/gemma-4-31b-it",
+        FRIEND_IMAGE_FALLBACK_MODEL: "deepseek-ai/deepseek-v4-pro",
+        NVIDIA_IMAGE_MODEL: "",
+        NVIDIA_IMAGE_FALLBACK_MODEL: ""
+      }),
+      async () => {
+        const models: string[] = [];
+        await assert.rejects(
+          () =>
+            callVisionLLMWithFallback({
+              messages: [{ role: "user", content: "describe" }],
+              config: getTraeConfig(),
+              fetchFn: async (_url, init) => {
+                const body = JSON.parse(String(init?.body)) as { model: string };
+                models.push(body.model);
+                await new Promise((_, reject) => {
+                  const err = new Error("The operation was aborted due to timeout");
+                  err.name = "AbortError";
+                  // Simulate hanging until the client abort timer fires, then fail.
+                  setTimeout(() => reject(err), 200);
+                });
+                return new Response("unreachable");
+              },
+              sleepFn: async () => undefined
+            }),
+          (error: unknown) => error instanceof LLMFallbackError
+        );
+
+        // One attempt per model (maxRetriesPerModel forced to 0 for vision), then fall through.
+        assert.deepEqual(models, ["google/gemma-4-31b-it", "deepseek-ai/deepseek-v4-pro"]);
+      }
+    );
+  });
+
+  it("reads AI_VISION_REQUEST_TIMEOUT_MS into config separately from the text timeout", () => {
+    withEnv(
+      zeroBudgetEnv({
+        AI_REQUEST_TIMEOUT_MS: "120000",
+        AI_VISION_REQUEST_TIMEOUT_MS: "25000",
+        TRAE_JUDGE_DEMO_AUDIT_ENABLED: undefined,
+        TRAE_JUDGE_VISION_MAX_MS: undefined
+      }),
+      () => {
+        const config = getTraeConfig();
+        assert.equal(config.aiRequestTimeoutMs, 120_000);
+        assert.equal(config.aiVisionRequestTimeoutMs, 25_000);
+        assert.equal(config.judgeDemoAuditEnabled, false);
+        assert.equal(config.judgeVisionMaxMs, 45_000);
+      }
+    );
   });
 });

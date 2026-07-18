@@ -52,14 +52,36 @@ export interface TraeConfig {
    */
   aiMaxRateLimitWaitMs: number;
   aiRequestTimeoutMs: number;
+  /**
+   * Per-attempt timeout for vision (image_url) calls only. Vision is best-effort and often hits
+   * dead/slow multimodal models; keeping this much shorter than aiRequestTimeoutMs lets the
+   * chain fall through (or degrade to null) without blocking text scoring for minutes per topic.
+   */
+  aiVisionRequestTimeoutMs: number;
   judgeConcurrency: number;
   /**
    * When false, the judge skips gatherVisualEvidence (image + demo-screenshot vision calls) and
    * grades on text only. Vision is best-effort, but a broken/slow vision model still blocks each
-   * worker for up to aiRequestTimeoutMs per model in the chain. Turn off to grade at full speed
-   * when no vision model is currently usable. Default true.
+   * worker for up to aiVisionRequestTimeoutMs per model in the chain. Turn off to grade at full
+   * speed when no vision model is currently usable. Default true.
    */
   judgeVisionEnabled: boolean;
+  /**
+   * When true, bulk judging runs Playwright/package demo audit before the thum.io screenshot
+   * proxy. Browser audits are high quality but extremely slow under concurrency (one Chromium
+   * per topic). Default false: vision stays on via uploaded images + thum.io first-screen shots.
+   */
+  judgeDemoAuditEnabled: boolean;
+  /**
+   * Hard wall-clock budget (ms) for gatherVisualEvidence per topic. Once exceeded, vision
+   * returns whatever finished (or null) so the four-evaluator text path can start. 0 = no budget.
+   */
+  judgeVisionMaxMs: number;
+  /**
+   * Max image batches (4 images each) sent to vision per topic. 0 = all images (quality default).
+   * Cap at 2–3 for bulk throughput while still covering prioritized QR/demo shots first.
+   */
+  judgeVisionMaxImageBatches: number;
   /**
    * Soft wall-clock budget (ms) for one judge batch. Once elapsed, workers stop picking up NEW
    * topics and let in-flight ones drain, so the run finalizes (finishRun + board snapshot)
@@ -155,6 +177,12 @@ export function getTraeConfig(): TraeConfig {
   // stuck call can't monopolize the ~900s cron budget. 0 disables the ceiling (unlimited wait).
   const aiMaxRateLimitWaitMs = Math.max(0, Math.floor(numberFromEnv("AI_MAX_RATE_LIMIT_WAIT_MS", 90_000)));
   const aiRequestTimeoutMs = Math.max(1, Math.floor(numberFromEnv("AI_REQUEST_TIMEOUT_MS", 120_000)));
+  // Default 25s: long enough for a healthy vision model, short enough that a hung multimodal
+  // endpoint fails through the chain instead of parking every judge worker for 3×180s.
+  const aiVisionRequestTimeoutMs = Math.max(
+    1,
+    Math.floor(numberFromEnv("AI_VISION_REQUEST_TIMEOUT_MS", 25_000))
+  );
   const aiRpmLimit = Math.max(1, Math.floor(numberFromEnv("AI_RPM_LIMIT", 40)));
   // NVIDIA integrate direct is ~40 rpm/key; keep its own ceiling so friend can run much higher
   // without tripping NVIDIA's 429 limit. Defaults to min(aiRpmLimit, 40) when unset.
@@ -201,8 +229,15 @@ export function getTraeConfig(): TraeConfig {
     aiMaxRateLimitRetries,
     aiMaxRateLimitWaitMs,
     aiRequestTimeoutMs,
+    aiVisionRequestTimeoutMs,
     judgeConcurrency: Math.max(1, Math.floor(numberFromEnv("TRAE_JUDGE_CONCURRENCY", DEFAULT_JUDGE_CONCURRENCY))),
     judgeVisionEnabled: booleanFromEnv("TRAE_JUDGE_VISION_ENABLED", true),
+    // Playwright/package audit is opt-in: vision ON still uses image + thum.io demo screenshots.
+    judgeDemoAuditEnabled: booleanFromEnv("TRAE_JUDGE_DEMO_AUDIT_ENABLED", false),
+    // Default 45s total vision budget per topic so bulk runs do not wait out full model chains.
+    judgeVisionMaxMs: Math.max(0, Math.floor(numberFromEnv("TRAE_JUDGE_VISION_MAX_MS", 45_000))),
+    // 0 = inspect every uploaded image across batches (quality). Set 2–3 for faster bulk grading.
+    judgeVisionMaxImageBatches: Math.max(0, Math.floor(numberFromEnv("TRAE_JUDGE_VISION_MAX_IMAGE_BATCHES", 0))),
     // Default 690s (11.5 min): leaves ~3.5 min under the 900s Cloud Run timeout for the last
     // in-flight wave to drain (each call bounded by aiMaxRateLimitWaitMs) plus finishRun +
     // snapshot. 0 disables the batch deadline (legacy: run until Cloud Run kills it).

@@ -631,11 +631,17 @@ async function judgeOneTopicConsensus(
 
 export async function judgeOneTopic(topic: TraeTopic, match: TraeMatch | null): Promise<TraeEvaluation> {
   const config = getTraeConfig();
-  // Vision is best-effort but still blocks the worker for up to aiRequestTimeoutMs per model in
-  // the vision chain. When no vision model is usable, TRAE_JUDGE_VISION_ENABLED=false skips it so
-  // grading runs at full text-only speed.
+  // Vision stays on by default (images + thum.io demo screenshots) with a short multimodal
+  // timeout and per-topic wall-clock budget. Playwright/package demo audit is opt-in via
+  // TRAE_JUDGE_DEMO_AUDIT_ENABLED — high quality but far too slow for bulk concurrency.
+  // Set TRAE_JUDGE_VISION_ENABLED=false only when you want pure text grading.
   const visualEvidence = config.judgeVisionEnabled
-    ? await gatherVisualEvidence(topic, { config, demoAuditFn: (candidate) => auditDemoArtifact(candidate, { config }) })
+    ? await gatherVisualEvidence(topic, {
+        config,
+        demoAuditFn: config.judgeDemoAuditEnabled
+          ? (candidate) => auditDemoArtifact(candidate, { config })
+          : undefined
+      })
     : null;
   return judgeOneTopicConsensus(topic, match, config, visualEvidence);
 }

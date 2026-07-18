@@ -29,7 +29,12 @@ const aiEnvKeys = [
   "AI_ZERO_BUDGET_ONLY",
   "AI_RPM_LIMIT",
   "AI_MAX_RETRIES_PER_MODEL",
-  "AI_REQUEST_TIMEOUT_MS"
+  "AI_REQUEST_TIMEOUT_MS",
+  "AI_VISION_REQUEST_TIMEOUT_MS",
+  "TRAE_JUDGE_VISION_ENABLED",
+  "TRAE_JUDGE_DEMO_AUDIT_ENABLED",
+  "TRAE_JUDGE_VISION_MAX_MS",
+  "TRAE_JUDGE_VISION_MAX_IMAGE_BATCHES"
 ];
 
 function withEnv<T>(patch: EnvPatch, fn: () => T): T {
@@ -72,6 +77,10 @@ function zeroBudgetEnv(overrides: EnvPatch = {}): EnvPatch {
     AI_RPM_LIMIT: "30",
     AI_MAX_RETRIES_PER_MODEL: "0",
     AI_REQUEST_TIMEOUT_MS: "120000",
+    AI_VISION_REQUEST_TIMEOUT_MS: "25000",
+    TRAE_JUDGE_VISION_MAX_MS: "0",
+    TRAE_JUDGE_VISION_MAX_IMAGE_BATCHES: "0",
+    TRAE_JUDGE_DEMO_AUDIT_ENABLED: "false",
     ...overrides
   };
 }
@@ -325,6 +334,64 @@ describe("describeTopicImages", () => {
       );
 
       assert.deepEqual(sentUrls, manyImages);
+    });
+  });
+
+  it("caps image batches when TRAE_JUDGE_VISION_MAX_IMAGE_BATCHES is set for bulk speed", async () => {
+    await withEnv(zeroBudgetEnv({ TRAE_JUDGE_VISION_MAX_IMAGE_BATCHES: "2" }), async () => {
+      const manyImages = Array.from({ length: 12 }, (_, i) => `https://a.test/${i}.png`);
+      const sentUrls: string[] = [];
+      await describeTopicImages(
+        { ...baseTopic, imageUrls: manyImages },
+        {
+          config: getTraeConfig(),
+          fetchFn: async (_url, init) => {
+            const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: Array<{ type: string; image_url?: { url: string } }> }> };
+            for (const part of body.messages[0]?.content ?? []) {
+              if (part.type === "image_url" && part.image_url?.url) sentUrls.push(part.image_url.url);
+            }
+            return visionResponse("ok");
+          },
+          sleepFn: async () => undefined
+        }
+      );
+
+      assert.deepEqual(sentUrls, manyImages.slice(0, 8));
+    });
+  });
+
+  it("returns partial vision evidence when the per-topic wall-clock budget expires", async () => {
+    await withEnv(zeroBudgetEnv(), async () => {
+      const evidence = await gatherVisualEvidence(
+        { ...baseTopic, imageUrls: ["https://a.test/1.png"], demoUrl: "https://demo.example.test/" },
+        {
+          config: getTraeConfig(),
+          maxMs: 30,
+          fetchFn: async (_url, init) => {
+            const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: unknown }> };
+            const content = body.messages[0]?.content;
+            const isDemo =
+              Array.isArray(content) &&
+              content.some(
+                (part) =>
+                  typeof part === "object" &&
+                  part !== null &&
+                  "image_url" in part &&
+                  String((part as { image_url?: { url?: string } }).image_url?.url ?? "").includes("thum.io")
+              );
+            if (isDemo) {
+              await new Promise((resolve) => setTimeout(resolve, 200));
+              return visionResponse("demo late");
+            }
+            return visionResponse("images ready");
+          },
+          sleepFn: async () => undefined
+        }
+      );
+
+      assert.equal(evidence.imageEvidence?.summary, "images ready");
+      // Demo call still in flight when budget fires — partial keep or null both acceptable; must not hang.
+      assert.ok(evidence.demoEvidence === null || evidence.demoEvidence.summary === "demo late");
     });
   });
 

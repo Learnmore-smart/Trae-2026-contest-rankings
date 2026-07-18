@@ -1,6 +1,6 @@
 # lib/trae/vision.ts
 
-> Last updated: 2026-07-03 | Protection: STANDARD
+> Last updated: 2026-07-15 | Protection: STANDARD
 
 ## Purpose
 
@@ -8,10 +8,10 @@ Gathers real visual evidence for judging: describes a topic's post images and ca
 
 ## What It Does
 
-- `describeTopicImages()`: sends all selected topic images across bounded batches of up to 4 `image_url` parts per request to `callVisionLLMWithFallback()`, asking for objective Chinese summaries of what's actually shown (real product UI vs. marketing/concept art, completion quality). Returns `null` (never throws) when there are no images or every vision model call fails.
+- `describeTopicImages()`: sends selected topic images across bounded batches of up to 4 `image_url` parts per request (parallel batch concurrency 3) to `callVisionLLMWithFallback()`. Optional `TRAE_JUDGE_VISION_MAX_IMAGE_BATCHES` caps batches for bulk speed (prioritized QR/demo images stay first). Returns `null` (never throws) when there are no images or every vision model call fails.
 - `describeDemoScreenshot()`: if the topic has a `demoUrl`, builds a screenshot URL via `buildDemoScreenshotUrl()` and sends it as a single `image_url` part, asking whether the rendered page is a real interactive product, a static/marketing landing page, or broken/blank/error. Returns `null` on no demo URL or total failure.
 - `buildDemoScreenshotUrl()`: wraps the demo URL with `https://image.thum.io/get/width/1200/noanimate/<url>` — a free, no-API-key screenshot proxy. thum.io fetches the target page server-side; we never connect to the (attacker-influenceable) demo URL ourselves. Rejects non-http(s) schemes.
-- `gatherVisualEvidence()`: runs both calls concurrently and returns `{imageEvidence, demoEvidence}`, each independently nullable.
+- `gatherVisualEvidence()`: runs both calls concurrently and returns `{imageEvidence, demoEvidence}`, each independently nullable. Enforces `judgeVisionMaxMs` wall-clock budget; on expiry keeps any already-finished partial evidence so text judging can start.
 - All three async functions accept optional `fetchFn`/`sleepFn` (mirroring `lib/trae/llm.ts`'s injection pattern) for deterministic, network-free tests.
 
 ## Public API
@@ -30,6 +30,7 @@ Gathers real visual evidence for judging: describes a topic's post images and ca
 
 ## Agent Decisions / Thoughts
 
+- 2026-07-15 Grok: Bulk grading with vision ON was ~0.3/min because each topic waited out hung multimodal models at 180s × retries × chain length, and Playwright demo audit launched Chromium per topic. Keep vision ON (images + thum.io); make Playwright opt-in (`TRAE_JUDGE_DEMO_AUDIT_ENABLED`); short vision timeout + zero same-model retries in the LLM client; parallel image batches; per-topic vision budget.
 - 2026-06-30 Claude: Chose a free third-party screenshot proxy (thum.io) over adding Playwright/Chromium. The app deploys both as a Vercel serverless function (30-min cron, tight `maxDuration`) and as a Cloud Run Job (`Dockerfile`, unbounded); a headless-browser dependency would only work in the latter and would need Docker/apt changes plus SSRF-safe URL handling on our own infra. A screenshot-URL proxy needs zero new dependencies, works identically in both deploy targets, and moves the "fetch an arbitrary user-submitted URL" risk to a third party that already exists for this purpose (same trust model as any link-preview widget).
 - 2026-06-30 Claude: Verified live (real API key, real forum CDN image, real thum.io screenshot of a real contest demo) that both `moonshotai/kimi-k2.6` and `minimaxai/minimax-m3` correctly describe remote `image_url` content before writing any of this module — see `.ai/lib/trae/judge.md`'s visual-evidence fix-plan section for the transcript summary.
 - 2026-06-30 Claude: Both public functions swallow every failure mode (missing images, missing demo URL, non-http scheme, all vision models throttled/erroring) and resolve to `null` rather than throwing, so a flaky vision model degrades the judge back to the pre-existing "not performed" disclaimer instead of failing the whole evaluation.
@@ -59,6 +60,7 @@ Gathers real visual evidence for judging: describes a topic's post images and ca
 | 2026-07-03 | Planned all-image vision coverage so later Trae process screenshots reach Kimi. | Codex |
 | 2026-07-03 | Implemented bounded image batching and combined per-batch summaries. | Codex |
 | 2026-07-08 | Removed `moonshotai/kimi-k2.6` from the vision chain (upstream-deprecated). Vision primary is now `minimaxai/minimax-m3`, fallback `google/gemma-4-31b-it` on both friend and nvidia. Note: Gemma 4 31B vision capability is unverified; if it returns empty/error, vision degrades gracefully to null per the existing no-throw contract. | Claude |
+| 2026-07-15 | Parallel image batches, optional batch cap, per-topic vision wall-clock budget with partial keep; bulk path no longer depends on Playwright for vision. | Grok |
 
 ## Implemented Change: All-Image Vision Batching
 

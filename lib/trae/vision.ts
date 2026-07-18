@@ -1,9 +1,12 @@
 import { getTraeConfig, type TraeConfig } from "./config.ts";
+import { mapWithConcurrency } from "./concurrency.ts";
 import { callVisionLLMWithFallback, type LLMContentPart } from "./llm.ts";
 import type { TraeTopic } from "./types.ts";
 
 /** Cap each vision request while still covering every uploaded image across batches. */
 const MAX_TOPIC_IMAGES_PER_BATCH = 4;
+/** How many image batches to describe in parallel within one topic. */
+const IMAGE_BATCH_CONCURRENCY = 3;
 
 export type DemoEvidenceSource = "browser_agent" | "package_agent" | "screenshot_proxy";
 export type DemoAuditStatus = "browser_verified" | "package_verified" | "first_screen_only" | "verification_failed";
@@ -28,6 +31,8 @@ export interface GatherVisualEvidenceOptions {
   fetchFn?: typeof fetch;
   sleepFn?: (delayMs: number) => Promise<void>;
   demoAuditFn?: (topic: TraeTopic) => Promise<VisualEvidence | null>;
+  /** Override config.judgeVisionMaxMs for tests. */
+  maxMs?: number;
 }
 
 function isHttpUrl(url: string): boolean {
@@ -106,10 +111,13 @@ export async function describeTopicImages(
   const imageUrls = selectTopicImageUrls(topic);
   if (imageUrls.length === 0) return null;
 
-  const imageBatches = chunk(imageUrls, MAX_TOPIC_IMAGES_PER_BATCH);
-  const evidence: VisualEvidence[] = [];
+  let imageBatches = chunk(imageUrls, MAX_TOPIC_IMAGES_PER_BATCH);
+  const maxBatches = config.judgeVisionMaxImageBatches;
+  if (maxBatches > 0 && imageBatches.length > maxBatches) {
+    imageBatches = imageBatches.slice(0, maxBatches);
+  }
 
-  for (const [index, batch] of imageBatches.entries()) {
+  const batchResults = await mapWithConcurrency(imageBatches, IMAGE_BATCH_CONCURRENCY, async (batch, index) => {
     try {
       const result = await callVisionLLMWithFallback({
         config,
@@ -117,17 +125,24 @@ export async function describeTopicImages(
         fetchFn: options.fetchFn,
         sleepFn: options.sleepFn
       });
-      evidence.push({ summary: result.content.trim(), provider: result.provider, model: result.model });
+      return {
+        summary: result.content.trim(),
+        provider: result.provider,
+        model: result.model
+      } satisfies VisualEvidence;
     } catch {
-      // Continue with remaining batches; one failed batch should not erase all visual evidence.
+      // One failed batch should not erase all visual evidence.
+      return null;
     }
-  }
+  });
 
+  const evidence = batchResults.filter((item): item is VisualEvidence => item !== null);
   if (evidence.length === 0) return null;
 
-  const summary = evidence.length === 1
-    ? evidence[0].summary
-    : evidence.map((item, index) => `图片批次 ${index + 1}/${imageBatches.length}: ${item.summary}`).join("\n");
+  const summary =
+    evidence.length === 1
+      ? evidence[0].summary
+      : evidence.map((item, index) => `图片批次 ${index + 1}/${imageBatches.length}: ${item.summary}`).join("\n");
   return {
     summary,
     provider: unique(evidence.map((item) => item.provider)).join(", "),
@@ -188,14 +203,45 @@ export async function describeDemoScreenshot(
  * Best-effort: both calls swallow their own failures and resolve to null so a
  * throttled/broken vision model never blocks text-based judging. Callers must fall
  * back to an honest "not performed" disclaimer when a field is null.
+ *
+ * Also enforces config.judgeVisionMaxMs so a fully hung vision chain cannot park a
+ * judge worker for the entire multimodal timeout × model-count product. If the budget
+ * fires mid-flight, any already-finished image/demo summary is kept.
  */
 export async function gatherVisualEvidence(
   topic: TraeTopic,
   options: GatherVisualEvidenceOptions = {}
 ): Promise<TopicVisualEvidence> {
-  const [imageEvidence, demoEvidence] = await Promise.all([
-    describeTopicImages(topic, options),
-    describeDemoScreenshot(topic, options)
-  ]);
-  return { imageEvidence, demoEvidence };
+  const config = options.config ?? getTraeConfig();
+  const maxMs = options.maxMs ?? config.judgeVisionMaxMs;
+
+  const partial: TopicVisualEvidence = { imageEvidence: null, demoEvidence: null };
+  const work = Promise.all([
+    describeTopicImages(topic, options).then((imageEvidence) => {
+      partial.imageEvidence = imageEvidence;
+      return imageEvidence;
+    }),
+    describeDemoScreenshot(topic, options).then((demoEvidence) => {
+      partial.demoEvidence = demoEvidence;
+      return demoEvidence;
+    })
+  ]).then(([imageEvidence, demoEvidence]) => ({ imageEvidence, demoEvidence }));
+
+  if (maxMs <= 0) {
+    return work;
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<TopicVisualEvidence>((resolve) => {
+        timer = setTimeout(() => {
+          resolve({ imageEvidence: partial.imageEvidence, demoEvidence: partial.demoEvidence });
+        }, maxMs);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

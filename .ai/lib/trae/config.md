@@ -1,6 +1,6 @@
 # lib/trae/config.ts
 
-> Last updated: 2026-07-12 | Protection: STANDARD
+> Last updated: 2026-07-15 | Protection: STANDARD
 
 ## Purpose
 
@@ -15,6 +15,10 @@ Reads and normalizes TRAE, zero-budget AI provider, and worker environment confi
 - Supplies `aiMaxRateLimitRetries` (`AI_MAX_RATE_LIMIT_RETRIES`, default 0) where 0 means unlimited rate-limit retries.
 - Supplies `aiMaxRateLimitWaitMs` (`AI_MAX_RATE_LIMIT_WAIT_MS`, default 90_000) as a per-call wall-clock ceiling that bounds the unlimited retry count so one throttled call can't hang the cron; 0 disables it.
 - Supplies `judgeConcurrency` (`TRAE_JUDGE_CONCURRENCY`, default from `DEFAULT_JUDGE_CONCURRENCY`, currently 8) for bounded topic-level judge parallelism.
+- Supplies `aiVisionRequestTimeoutMs` (`AI_VISION_REQUEST_TIMEOUT_MS`, default 25_000) for multimodal calls only.
+- Supplies `judgeDemoAuditEnabled` (`TRAE_JUDGE_DEMO_AUDIT_ENABLED`, default false) — Playwright demo audit opt-in; vision still uses images + thum.io when false.
+- Supplies `judgeVisionMaxMs` (`TRAE_JUDGE_VISION_MAX_MS`, default 45_000) per-topic vision wall-clock budget.
+- Supplies `judgeVisionMaxImageBatches` (`TRAE_JUDGE_VISION_MAX_IMAGE_BATCHES`, default 0 = all image batches).
 - Supplies `judgeBatchDeadlineMs` (`TRAE_JUDGE_BATCH_DEADLINE_MS`, default 690_000) as the soft per-batch wall-clock budget after which `judgeChangedTraeTopics` stops taking new topics so the run finalizes within the Cloud Run timeout; 0 disables it.
 - Supplies `judgeBatchHardDrainMs` (`TRAE_JUDGE_BATCH_HARD_DRAIN_MS`, default 90_000) as the max wait after the soft deadline before abandoning the concurrency await and calling `finishRun` (hard guarantee against zombie RUNNING rows).
 - Does not expose a judge strategy switch. Scoring quality requires the four-evaluator plus consensus referee path only.

@@ -1,6 +1,6 @@
 # lib/trae/llm.ts
 
-> Last updated: 2026-07-04 | Protection: STANDARD
+> Last updated: 2026-07-15 | Protection: STANDARD
 
 ## Purpose
 
@@ -21,7 +21,7 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 - Rejects paid provider fallbacks by construction.
 - `LLMMessage.content` accepts either a plain string or an array of `{type: "text"}` / `{type: "image_url"}` parts, so callers can send multimodal vision requests through the same request builder.
 - `responseFormat` option (default `"json_object"`) controls whether `response_format: {type: "json_object"}` is sent; vision calls use `"text"` since descriptions are prose, not schema-bound JSON.
-- `callVisionLLMWithFallback()` reuses the same retry/fallback loop but scopes the plan to `buildVisionLLMFallbackPlan()` (Friend vision models first, then NVIDIA; deduped by `provider:model`) and opts out of unlimited rate-limit waiting because vision is best-effort.
+- `callVisionLLMWithFallback()` reuses the same retry/fallback loop but scopes the plan to `buildVisionLLMFallbackPlan()` (Friend vision models first, then NVIDIA; deduped by `provider:model`), opts out of unlimited rate-limit waiting, uses `aiVisionRequestTimeoutMs` (default 25s) instead of the long text timeout, and forces `maxRetriesPerModel=0` so hung multimodal models fail through once each.
 - Enforces per-API-key request-start rate limiters from `AI_RPM_LIMIT` before each real model attempt; two NVIDIA keys at 40 rpm each produce 80 rpm total direct NVIDIA capacity.
 - Classifies empty-content HTTP 200 responses into three modes: `rate_limited` (empty choices array, NVIDIA soft-429), `empty_content_billed` (choices non-empty + content null + input tokens > 0, model/gateway-level failure), and `invalid_response` (other).
 - Does NOT retry `empty_content_billed` on the same model — advances to the next model immediately, since this failure mode is model/gateway-level and retrying only wastes billed input tokens.
@@ -90,6 +90,8 @@ Provides a provider-agnostic, zero-budget LLM client for OpenAI-compatible chat 
 | 2026-07-08 | Removed `moonshotai/kimi-k2.6` from all chains (upstream-deprecated). New text order is MiniMax M3 → Gemma 4 31B → DeepSeek V4 Pro → GLM 5.2 on both providers. Added `chat_template_kwargs: { enable_thinking: true }` for NVIDIA-side `google/gemma-*` models, mirroring the DeepSeek `reasoning_effort: "max"` provider gating. Vision chain is now MiniMax M3 → Gemma 4 31B on both providers. | Claude |
 | 2026-07-08 | Added `empty_content_billed` error classification (HTTP 200 + input tokens billed + empty content); skip same-model retry for this mode; emit console diagnostic; export `isSystemicLLMFallbackError` and `truncateDiagnostic` for judge pipeline early-abort and admin health-check. | Claude |
 | 2026-07-09 | Added `AI_MAX_RATE_LIMIT_WAIT_MS` (default 90s) wall-clock ceiling on rate-limit retries + injectable `nowFn`, so `AI_MAX_RATE_LIMIT_RETRIES=0` (unlimited count) can no longer hang a single call — and the cron — on a fully-throttled endpoint. | Claude |
+| 2026-07-15 | Vision path: separate short timeout + zero same-model retries; optional `timeoutMs` / `maxRetriesPerModel` overrides on `callLLMWithFallback`. | Grok |
+
 ## Change Plan: Friend And NVIDIA Only
 
 - 2026-07-03 Codex: Remove REMOVED_PROVIDER from the provider config map, fallback plan, request option plumbing, and header builder.

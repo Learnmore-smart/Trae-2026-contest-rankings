@@ -1,6 +1,6 @@
 # lib/trae/judge.ts
 
-> Last updated: 2026-07-11 | Protection: STANDARD
+> Last updated: 2026-07-15 | Protection: STANDARD
 
 ## Purpose
 
@@ -9,7 +9,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 ## What It Does
 
 - Builds strict JSON prompts from contest criteria.
-- Gathers real visual evidence once per topic via `gatherVisualEvidence()` (post-image vision + an automatic demo-URL screenshot vision pass) before building any prompt, and folds the resulting summaries into the shared base prompt.
+- Gathers real visual evidence once per topic via `gatherVisualEvidence()` (post-image vision + thum.io demo screenshot; optional Playwright audit when `judgeDemoAuditEnabled`) before building any prompt, and folds the resulting summaries into the shared base prompt.
 - Processes selected topic slices with bounded in-process concurrency via `runWithConcurrency()`.
 - Uses `callLLMWithFallback()` so all model calls share provider order, retries, timeout, and logging behavior.
 - Uses only the four-evaluator plus consensus referee path. No single-evaluator judge strategy is allowed.
@@ -47,6 +47,7 @@ Scores preliminary TRAE Demo topics through the zero-budget LLM fallback client.
 - 2026-07-01 Codex: Judge should infer non-web Demo evidence from legacy topic fields (`attachmentUrls`, QR/miniprogram text cues, `imageUrls`) so rejudging older scraped rows does not require a full re-scrape before avoiding false "missing Demo" risks.
 - 2026-07-01 Codex: Final scoring prompt should explicitly treat uploaded ordinary screenshots as official material evidence. The model must evaluate whether image vision shows Trae usage/development process screenshots and finished Demo/product interface screenshots, not only whether a web Demo URL was opened.
 - 2026-07-01 Codex: Verified existing final scoring prompt already contains the uploaded screenshot evidence rule; added regression coverage without changing judge runtime code.
+- 2026-07-15 Grok: Owner requires vision ON for bulk. Wired Playwright audit only when `TRAE_JUDGE_DEMO_AUDIT_ENABLED=true`; default bulk path keeps vision via images + thum.io under short vision timeout + per-topic budget.
 - 2026-07-14 Codex: A public score of 82 appears to be driven by the live demo screenshot-proxy seeing an unstyled/broken first screen even when the submission's uploaded screenshots show a polished finished interface. The prompt likely needs an explicit deployment-vs-product distinction so a broken demo deployment is treated as a demo-availability issue, not proof that the product itself lacks completion/design.
 - 2026-07-01 Codex: The automatic judge queue must include stale evaluations whose `promptVersion` differs from the current `PROMPT_VERSION`, otherwise fixes to extraction/vision/prompt wording will not repair old public scores. Keep already-current judged topics out of the queue to avoid infinite rejudging.
 - 2026-07-01 Codex: Bump `PROMPT_VERSION` after the screenshot-evidence fixes so already-judged v3 rows become stale and are automatically re-scored.
