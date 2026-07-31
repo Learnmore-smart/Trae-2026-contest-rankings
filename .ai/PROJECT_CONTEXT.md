@@ -8,6 +8,7 @@ This repository hosts a public third-party AI ranking site for the TRAE AI Creat
 
 ## Current Work
 
+- **2026-07-31:** Vercel Hobby deploy fix: long API routes `maxDuration` capped at **300** (was 900; hobby builder rejects >300). Cloud Run wall-clock still via service timeout.
 - **2026-07-15:** Vision-on bulk throughput: short multimodal timeout, no vision same-model retries, optional Playwright audit off by default, image batch parallel/cap, per-topic vision budget. Keep `TRAE_JUDGE_VISION_ENABLED=true` with concurrency ~32 (not 16000).
 - **2026-07-15:** Fixed 开始评分 / 重新评分 request lifecycles: Next.js `after` owns long scoring work, re-score POST acknowledges immediately, and run-status Data Connect reads fall back after 5 seconds instead of hanging the buttons.
 - **2026-07-14:** HIGH-SPEED unjudged blast COMPLETE. Wave1: **845** eligible → 835 ok / 10 fail in ~17.5 min (~48–56/min). Wave2 mop-up: **10/10 ok**. All unique-title unjudged posts scored. Remaining board `NEEDS_JUDGING` (~300) are title-duplicates intentionally skipped by judge dedupe. Logs: `judge-blast.log`, `judge-mopup.log`.

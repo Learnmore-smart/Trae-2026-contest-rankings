@@ -5,8 +5,8 @@ import { isFreshRunningRun, reclaimStaleRunningRuns, STALE_RUNNING_RUN_MS } from
 import type { TraeRun } from "@/lib/trae/types";
 
 export const runtime = "nodejs";
-// Allow the POST to stay alive under Cloud Run's long timeout if the client keeps waiting.
-export const maxDuration = 900;
+// Vercel Hobby max is 300s (builder rejects higher). Cloud Run still uses service timeout.
+export const maxDuration = 300;
 
 // One public "update now" button drives the whole pipeline (scrape -> match -> judge).
 // POST schedules runFullPipeline() with Next.js `after` and returns immediately; the client

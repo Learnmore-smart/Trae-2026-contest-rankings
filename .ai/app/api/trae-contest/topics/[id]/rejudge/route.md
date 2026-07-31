@@ -26,7 +26,7 @@ Public, token-free single-topic re-score endpoint for the project detail page.
 
 ## Open Threads / Resume Context
 
-- Empty — re-score acknowledgement/polling fix is implemented and verified locally.
+- Empty — re-score acknowledgement/polling fix is implemented and verified locally. `maxDuration` is 300 for Vercel Hobby (not 900).
 
 ## Agent Decisions / Thoughts
 
@@ -63,3 +63,4 @@ Public, token-free single-topic re-score endpoint for the project detail page.
 | 2026-07-10 | Documented Cloud Run fire-and-forget rejudge failure and await fix. | Grok |
 | 2026-07-13 | Stale in-flight reclaim + concurrency fix for busy gate; rejudged 71088. | Grok |
 | 2026-07-15 | Re-score POST now acknowledges immediately and runs request-lifecycle work through Next.js `after`. | Codex |
+| 2026-07-31 | `maxDuration` 900 → 300 for Vercel Hobby builder. | Grok |

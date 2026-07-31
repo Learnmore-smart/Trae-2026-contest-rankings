@@ -43,10 +43,15 @@ Runs authorized cron tasks for scraping, matching, judging, and the combined TRA
 - Symptom: 开始评分 produces no new evaluations; match phase (`runTraeMatching`) with unlimited forum lookups on ~6000 preliminaries takes >900s, killing the Cloud Run request before the second judge pass can run.
 - Fix: Added `RUN_ALL_MATCH_DEADLINE_MS = 300_000` (run-all) and 780s deadline (standalone `match` task). Pass to `runTraeMatching(deadlineMs)` so the match phase stops after the deadline and the pipeline proceeds to the second judge pass. Skipped topics are picked up by the next run.
 
+## Open Threads / Resume Context
+
+- Empty — Vercel Hobby `maxDuration` fix applied (300 on cron/run/rejudge).
+
 ## Important Notes / NEVER Change
 
 - Do not make cron tasks public without secret validation.
 - Snapshot refresh is best-effort; it must not turn a successful scrape/match/judge into a failed task.
+- On Vercel Hobby, `maxDuration` must be ≤ 300. Cloud Run still uses its own service timeout (e.g. 900s); do not reintroduce `maxDuration = 900` or Vercel Hobby builds fail.
 
 ## Change History
 
@@ -56,3 +61,4 @@ Runs authorized cron tasks for scraping, matching, judging, and the combined TRA
 | 2026-07-04 | Implemented changed-mode cron rejudge and verified source guard. | Codex |
 | 2026-07-10 | Planned zombie RUNNING reclaim before judge skip guard. | Grok |
 | 2026-07-12 | Added `RUN_ALL_MATCH_DEADLINE_MS = 300_000` and 780s standalone match deadline; pass to `runTraeMatching()` so match doesn't kill the Cloud Run request. | GLM |
+| 2026-07-31 | Cap `maxDuration` at 300 for Vercel Hobby (builder rejects 900). | Grok |

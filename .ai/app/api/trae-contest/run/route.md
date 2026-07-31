@@ -54,7 +54,7 @@ Provides the public manual pipeline trigger for scrape -> match -> judge.
 
 ## Open Threads / Resume Context
 
-- Empty — scoring-button request-lifecycle fix is implemented and verified locally.
+- Empty — scoring-button request-lifecycle fix is implemented and verified locally. `maxDuration` is 300 for Vercel Hobby.
 
 ## Bug Fix: Start scoring status must stay responsive (2026-07-15)
 

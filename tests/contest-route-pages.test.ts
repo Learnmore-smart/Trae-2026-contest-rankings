@@ -137,7 +137,7 @@ test("topic rejudge acknowledges immediately and schedules request-lifecycle bac
 
   // A multi-minute POST is routinely cut off by the browser/proxy. Next `after` keeps the
   // work attached to the route lifecycle while letting the button switch to polling.
-  assert.match(rejudgeRoute, /export const maxDuration = 900;/);
+  assert.match(rejudgeRoute, /export const maxDuration = 300;/);
   assert.match(rejudgeRoute, /import \{ after, NextResponse \} from "next\/server";/);
   assert.match(rejudgeRoute, /after\(async \(\) => \{/);
   assert.match(rejudgeRoute, /await rejudgeTopicById\(id\)/);

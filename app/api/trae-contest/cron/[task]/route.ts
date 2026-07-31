@@ -8,11 +8,11 @@ import { scrapeTraeSource } from "@/lib/trae/scraper";
 import { runFullPipeline } from "@/lib/trae/pipeline";
 
 export const runtime = "nodejs";
-// Cron is invoked by Cloud Scheduler directly on Cloud Run (not Vercel), so the Vercel
-// maxDuration is advisory only. Cloud Run service timeout must be set to >= 900s to match
-// (gcloud run services update trae-contest-2026 --timeout=900). Cloud Scheduler's
-// attemptDeadline is 900s. 500 topics × ~7 LLM calls at concurrency 16 fits comfortably.
-export const maxDuration = 900;
+// Vercel Hobby requires maxDuration in [1, 300]; values above 300 fail the builder.
+// On Cloud Run the real wall clock is the service timeout (set >= 900s via
+// gcloud run services update … --timeout=900); Cloud Scheduler attemptDeadline is 900s.
+// Pipeline/judge deadlines still budget for Cloud Run's longer timeout.
+export const maxDuration = 300;
 
 const CRON_JUDGE_MAX = 500;
 

@@ -6,8 +6,8 @@ import { normalizeTopicRouteId } from "@/lib/trae/topic-route-id";
 export const runtime = "nodejs";
 // Single-topic rejudge runs vision + multi-evaluator consensus (often 60–400s).
 // Next.js `after` keeps the work on the route lifecycle without holding the browser POST
-// open for the entire run. Align its budget with cron/run's long timeout.
-export const maxDuration = 900;
+// open for the entire run. Vercel Hobby caps maxDuration at 300; Cloud Run uses service timeout.
+export const maxDuration = 300;
 
 // Public, token-free "re-score this work" button lives on the detail page, so anyone
 // viewing a project can trigger it. Each re-judge fans out into a multi-evaluator LLM
@@ -22,7 +22,7 @@ export const maxDuration = 900;
 // we reclaim by startedAt age (see 2026-07-13 busy fix).
 const REJUDGE_COOLDOWN_MS = 60_000;
 const MAX_CONCURRENT_REJUDGE = 4;
-/** Reclaim abandoned locks slightly under maxDuration so stuck slots do not block the site. */
+/** Reclaim abandoned locks after long hang (Cloud Run can outlive Vercel maxDuration=300). */
 const STALE_IN_FLIGHT_MS = 14 * 60 * 1000;
 const LAST_FINISHED_MAX_ENTRIES = 500;
 
