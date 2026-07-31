@@ -117,7 +117,7 @@ export async function describeTopicImages(
     imageBatches = imageBatches.slice(0, maxBatches);
   }
 
-  const batchResults = await mapWithConcurrency(imageBatches, IMAGE_BATCH_CONCURRENCY, async (batch, index) => {
+  const batchResults = await mapWithConcurrency(imageBatches, IMAGE_BATCH_CONCURRENCY, async (batch, index): Promise<VisualEvidence | null> => {
     try {
       const result = await callVisionLLMWithFallback({
         config,
@@ -129,7 +129,7 @@ export async function describeTopicImages(
         summary: result.content.trim(),
         provider: result.provider,
         model: result.model
-      } satisfies VisualEvidence;
+      };
     } catch {
       // One failed batch should not erase all visual evidence.
       return null;
